@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".HostFinal">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar">
+
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar_host_final"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="?attr/colorPrimary"
+            app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
+        <!-- Title will be set from Java -->
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:layout_gravity="center"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior"
+        tools:ignore="UnusedAttribute">
+        <!-- tools:ignore is used because app:layout_behavior might not be needed if no scrolling -->
+
+        <ImageView
+            android:id="@+id/imageView_success_tick"
+            android:layout_width="100dp"
+            android:layout_height="100dp"
+            android:layout_gravity="center_horizontal"
+            app:srcCompat="@drawable/ticksymbol"
+            android:contentDescription="@string/success_icon_description" />
+        <!-- Ensure @drawable/ticksymbol exists -->
+        <!-- Ensure @string/success_icon_description exists -->
+
+        <TextView
+            android:id="@+id/textView_confirmation_message_main"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:gravity="center"
+            android:text="@string/successfully_hosted_main_title"
+            android:textAppearance="?attr/textAppearanceHeadline5"
+            android:textStyle="bold" />
+        <!-- Ensure @string/successfully_hosted_main_title exists -->
+
+        <TextView
+            android:id="@+id/textView_confirmation_message_detail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:text="@string/event_added_to_hosted_events_detail"
+            android:textAppearance="?attr/textAppearanceSubtitle1"/>
+        <!-- Ensure @string/event_added_to_hosted_events_detail exists -->
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_go_to_my_events"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="32dp"
+            android:minWidth="200dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp"
+            android:text="@string/my_events_button_text"
+            android:textAppearance="?attr/textAppearanceButton" />
+        <!-- Ensure @string/my_events_button_text exists -->
+        <!-- Consider removing background if using MaterialButton styles, they handle their own. -->
+        <!-- If using android:background="@drawable/round_button", ensure it's compatible or use app:backgroundTint -->
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_host_another_event_final"
+            style="?attr/materialButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="16dp"
+            android:minWidth="200dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp"
+            android:text="@string/host_another_event_button_text"
+            android:textAppearance="?attr/textAppearanceButton" />
+        <!-- Ensure @string/host_another_event_button_text exists -->
+        <!-- Consider removing background if using MaterialButton styles. -->
+
+    </LinearLayout>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

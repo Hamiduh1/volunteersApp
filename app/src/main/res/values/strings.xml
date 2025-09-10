@@ -1,0 +1,1885 @@
+<resources>
+    <string name="upload_photo">Upload photo</string>
+    <string name="send_me_a_copy">Send me a copy</string>
+    <string name="app_name">Volunteers</string>
+    <string name="Login">Username/Number</string>
+    <string name="Password">Password</string>
+    <string name="ForgotPassword"><u>Forgot Password?</u></string>
+    <string name="ResetPassword">Reset Password</string>
+    <string name="SignUp"><u>Don\'t have an account?</u></string>
+    <string name="Button">Sign in</string>
+    <string name="ShowPassword">ShowPassword</string>
+    <string name="LoginPage">Login</string>
+    <string name="NewPassword">NewPassword</string>
+    <string name="ConfirmNewPassword">ConfirmPassword</string>
+    <string name="Reset">Reset</string>
+    <string name="changePassword">Change Password</string>
+    <string name="navigation_drawer_open">Open navigation drawer</string>
+    <string name="navigation_drawer_close">Close navigation drawer</string>
+    <string name="approved">Approved</string>
+    <string name="waitlisted">Unapproved</string>
+    <string name="list_of_events">LIST OF EVENTS</string>
+    <string name="Report">Report</string>
+    <string name="ReportName">UserName/Email</string>
+    <string name="reportSubmit">Submit</string>
+    <string name="reportEmail">Email</string>
+    <string name="reportEvent">Event he/she in</string>
+    <string name="reportReason">Reason</string>
+    <string name="sign_out">Sign Out</string>
+    <string name="send_button_label">Send</string>
+    <string name="feedback">FeedBack</string>
+    <string name="feedbackName">Name</string>
+    <string name="feedbackEmail">Email</string>
+    <string name="feedbackSubject">Subject</string>
+    <string name="feedbackSuggestions">Suggestions</string>
+    <string name="feedbackSubmit">Send Feedback</string>
+    <string name="title_activity_maps">Map</string>
+    <string name="facebook_application_id" translatable="false">YOUR_APP_ID</string>
+    <string name="facebook_login_protocol_scheme" translatable="false">fbYOUR_APP_ID</string>
+    <!-- Twitter consumer key and secret -->
+    <string name="twitter_consumer_key" translatable="false">YOUR_CONSUMER_KEY</string>
+    <string name="twitter_consumer_secret" translatable="false">YOUR_CONSUMER_SECRET</string>
+    <string name="req_events">Req Events</string>
+    <string name="hosted_events">Hosted Events</string>
+    <string name="date_of_the_event">Date of the event:</string>
+    <string name="dd_mm_yyyy">DD/MM/YYYY</string>
+    <string name="select_date">Select date</string>
+    <string name="event_name">Event name:</string>
+    <string name="rupees">Dollars</string>
+    <string name="settings">Settings</string>
+    <string name="search">Search</string>
+    <string name="default_web_client_id">client_id</string>
+    <string name="enter_your_details">Enter your details</string>
+    <string name="name">Name</string>
+    <string name="e_mail_id">E-mail id</string>
+    <string name="example_abc_com">example@abc.com</string>
+    <string name="confirm_password">Confirm Password</string>
+    <string name="enter_your_phone_number">Enter your phone number</string>
+    <string name="phone_number_input_field">Phone number input field</string>
+    <string name="min_length_6">Min length : 6</string>
+    <string name="re_enter_password">Re-enter Password</string>
+    <string name="submit">SUBMIT</string>
+    <string name="enter_your_name">Enter your name</string>
+    <string name="mobile_number">Mobile number</string>
+    <string name="host">Host</string>
+    <string name="go_back">Go back</string>
+    <string name="registered_and_accepted">registered and accepted</string>
+    <string name="registered">Registered</string>
+    <string name="successfully_registered">Registered</string>
+    <string name="event_names">Event Name</string>
+    <string name="hey_this_is_chat">hey! this is chat</string>
+    <string name="change_phoneNumber">Change PhoneNumber</string>
+    <string name="newPhoneNumber">NewPhoneNumber</string>
+    <string name="confirmNewPhoneNumber">ConfirmNewPhoneNumber</string>
+    <string name="change_username">Change UserName</string>
+    <string name="newUsername">NewUserName</string>
+    <string name="confirm_username">Confirm Username</string>
+    <string name="n_n_nwelcome_to_volunteers_app">\n\n\nWelcome To Volunteers App!</string>
+    <string name="successfully_hosted">Successfully Hosted!</string>
+    <string name="event_added_to_hosted_events">Event added to hosted events</string>
+    <string name="my_events">My events</string>
+    <string name="please_enter_the_e_mail_address_used_for_registration_a_link_will_be_sent_to_reset_your_password">Please Enter the e-mail address used for registration. A link will be sent to reset your password.</string>
+    <string name="e_mail_address">E-mail address</string>
+    <string name="submit_forgot_password">SUBMIT</string>
+    <string name="example_abc_com_forgot_password">example@abc.com</string>
+    <string name="type_of_the_event">Type of the event:</string>
+    <string name="description">Description</string>
+    <string name="this_is_hosting_tab">this is hosting tab</string>
+    <string name="chatBox">CHatBox</string>
+    <string name="hey_this_is_profile">hey! this is profile</string>
+    <string name="hey_this_is_message">hey! this is message</string>
+    <string name="binaryWarriors">BinaryWarriors</string>
+    <string name="name_not_set">Name not set</string>
+    <string name="email_not_set">Email not set</string>
+    <string name="profile_image_not_set">Profile image not set</string>
+    <string name="event_name_not_set">Event name not set</string>
+    <string name="event_type_not_set">Event type not set</string>
+    <string name="event_date_not_set">Event date not set</string>
+    <string name="event_description_not_set">Event description not set</string>
+    <string name="event_host_not_set">Event host not set</string>
+    <string name="event_status_not_set">Event status not set</string>
+    <string name="event_id_not_set">Event id not set</string>
+    <string name="profile_not_set">Profile not set</string>
+    <string name="event_not_set">Event not set</string>
+    <string name="event_not_found">Event not found</string>
+    <string name="event_not_approved">Event not approved</string>
+    <string name="event_not_hosted">Event not hosted</string>
+    <string name="event_not_registered">Event not registered</string>
+    <string name="event_not_unregistered">Event not unregistered</string>
+    <string name="event_not_cancelled">Event not cancelled</string>
+    <string name="event_not_completed">Event not completed</string>
+    <string name="event_not_started">Event not started</string>
+    <string name="event_not_ended">Event not ended</string>
+    <string name="event_not_joined">Event not joined</string>
+    <string name="event_not_left">Event not left</string>
+    <string name="please_log_in"> Please log in to view profile data.</string>
+    <string name="error_loading_name">Error loading name</string>
+    <string name="error_loading_email">Error loading email</string>
+    <string name="error_loading_image">Error loading image</string>
+    <string name="error_loading_event_name">Error loading event name</string>
+    <string name="error_loading_event_type">Error loading event type</string>
+    <string name="error_loading_event_date">Error loading event date</string>
+    <string name="error_loading_event_description">Error loading event description</string>
+    <string name="error_loading_event_host">Error loading event host</string>
+    <string name="error_loading_event_status">Error loading event status</string>
+    <string name="error_loading_event_id">Error loading event id</string>
+    <string name="error_loading_profile">Error loading profile</string>
+    <string name="error_loading_event">Error loading event</string>
+    <string name="error_loading_event_not_found">Error loading event not found</string>
+    <string name="error_loading_event_not_approved">Error loading event not approved</string>
+    <string name="error_loading_event_not_hosted">Error loading event not hosted</string>
+    <string name="error_loading_event_not_registered">Error loading event not registered</string>
+    <string name="error_loading_event_not_unregistered">Error loading event not unregistered</string>
+    <string name="error_loading_event_not_cancelled">Error loading event not cancelled</string>
+    <string name="error_loading_event_not_completed">Error loading event not completed</string>
+    <string name="error_loading_event_not_started">Error loading event not started</string>
+    <string name="error_loading_event_not_ended">Error loading event not ended</string>
+    <string name="error_loading_event_not_joined">Error loading event not joined</string>
+    <string name="error_loading_event_not_left">Error loading event not left</string>
+    <string name="error_loading_profile_not_set">Error loading profile not set</string>
+    <string name="error_loading_event_not_set">Error loading event not set</string>
+    <string name="change_phonenumber">Change Phone Number</string>
+    <string name="password">Password</string>
+    <string name="login">Login</string>
+    <string name="forgot_password">Forgot Password</string>
+    <string name="not_a_member">NOt a Member</string>
+    <string name="sign_up">Sign Up</string>
+    <string name="email_id">Email ID</string>
+    <string name="no_internet_connection">No internet connection</string>
+    <string name="please_fill_all">Please fill all the fields</string>
+    <string name="verify_email">Verify your email </string>
+    <string name="authentication_failed">Authentication failed</string>
+    <string name="error_login">Error during login</string>
+    <string name="already_a_member">Already a member</string>
+    <string name="error_sign_up">Error during sign up</string>"
+    <string name="error_reset_password">Error during reset password</string>"
+    <string name="error_change_password">Error during change password</string>"
+    <string name="error_change_username">Error during change username</string>"
+    <string name="error_change_phonenumber">Error during change phonenumber</string>"
+    <string name="error_change_email">Error during change email</string>"
+    <string name="error_change_name">Error during change name</string>"
+    <string name="error_change_profile">Error during change profile</string>""
+    <string name="error_change_event">Error during change event</string>
+    <string name="volunteer_events">Volunteer Events</string>
+    <string name="wallet">Wallet</string>"
+    <string name="host_event">Host Event</string>
+    <string name="share">Share</string>
+    <string name="report">Report</string>
+    <string name="communicate">Communicate</string>
+    <string name="manage_organization_profile">Manage Organization Profile</string>
+    <string name="view_my_posted_jobs">View My Posted Jobs</string>
+    <string name="username">Username</string>
+    <string name="phone_number">Phone Number</string>
+    <string name="volunteer">Volunteer</string>
+    <string name="employer">Employer</string>
+    <string name="post_new_job">Post New Job</string>
+    <string name="welcome_employer">Welcome, Employer!</string>
+    <string name="select_user_type">Select User Type:</string>
+        <!-- ... other strings ... -->
+    <string name="nav_header_title">User Name</string>
+    <string name="nav_header_subtitle">user@email.com</string>
+    <string name="nav_header_desc">Navigation header</string>
+    <string name="default_profile_image">Default Profile Image</string>
+    <string name="nav_events">Events</string>
+    <string name="nav_volunteer">Volunteer</string>
+    <string name="nav_wallet">Wallet</string>
+    <string name="nav_host">Host</string>
+    <string name="nav_share">Share</string>
+    <string name="nav_feedback">Feedback</string>
+    <string name="nav_report">Report</string>
+    <string name="nav_sign_out">Sign Out</string>
+        <!-- ... other strings ... -->
+    <string name="menu_events">My Events</string>
+    <string name="menu_volunteer">Volunteer Events</string>
+    <string name="menu_wallet">Wallet</string>
+    <string name="menu_host">Host an Event</string>
+    <string name="menu_share">Share</string>
+    <string name="menu_feedback">Feedback</string>
+    <string name="menu_report">Report</string>
+    <!-- Add a content description for the default image -->
+    <string name="default_balance_not_signed_in">Please sign in</string>
+    <string name="default_balance_not_found">N/A</string>
+    <string name="default_balance_error">Error</string>
+    <string name="wallet_balance_title">Balance</string>
+    <string name="default_balance_value">--.--</string>
+    <string name="wallet_transact_button">Transact</string>
+    <string name="cd_currency_icon_usd">US Dollar currency symbol</string>
+    <string name="cd_transact_icon">Transaction icon</string>
+    <string name="host_another_event">Host Another Event</string>
+    <string name="success_icon_description">Success</string>
+    <string name="error_icon_description">Error</string>
+    <string name="info_icon_description">Info</string>
+    <string name="warning_icon_description">Warning</string>
+    <string name="event_options_desc">More Options</string>
+    <string name="location_icon_desc">Location</string>
+    <string name="error_loading_events">Error while loading events</string>
+    <string name="no_events_available">No events available</string>
+    <string name="failed_to_load_events">Failed to load events</string>
+    <string name="loading_events">Loading events…</string>
+    <string name="error_loading_event_details">Error loading event details: %s</string>
+     <string name="no_event_details_available">No event details available</string>
+    <string name="failed_to_load_event_details">Failed to load event details</string>
+    <string name="loading_event_details">Loading event details…</string>
+    <string name="error_loading_user_profile">Error while loading user profile</string>
+    <string name="no_user_profile_available">No user profile available</string>
+    <string name="failed_to_load_user_profile">Failed to load user profile</string>
+    <string name="loading_user_profile">Loading user profile…</string>
+    <string name="host_a_new_event">Host a new event</string>
+    <string name="loading_hosted_events">loading hosted events…</string>
+    <string name="no_hosted_events_yet">No hosted events yet</string>
+    <string name="failed_to_load_hosted_events">Failed to load hosted events</string>
+    <string name="please_log_in_to_see_events">Please log in to see events</string>
+    <string name="error_loading_hosted_events">Error loading hosted events</string>
+    <string name="please_log_in_to_see_hosted_events">Please log in to see hosted events</string>
+    <string name="error_loading_hosted_events_from_realtime_database">Error loading hosted events from Realtime Database</string>
+    <string name="error_loading_hosted_events_from_firestore">Error loading hosted events from Firestore</string>
+
+        <!-- ... other strings ... -->
+        <string name="post_new_volunteer_opportunity">Post New Volunteer Opportunity</string>
+        <string name="event_job_name">Event/Job Name</string>
+        <string name="date_yyyy_mm_dd">Date (YYYY-MM-DD)</string>
+        <string name="time_hh_mm_am_pm">Time (HH:MM AM/PM)</string>
+        <string name="location">Location</string>
+        <string name="category_e_g_environment_education">Category (e.g., Environment, Education)</string>
+        <string name="number_of_volunteers_needed">Number of Volunteers Needed</string>
+        <string name="post_opportunity">Post Opportunity</string>
+        <string name="post_new_opportunity_title">Post New Opportunity</string>
+    <string name="view_volunteer_applications">View Volunteer Applications</string>
+    <string name="status_pending">Status: Pending</string>
+    <string name="event_applied_for">Event Applied For</string>
+    <string name="volunteer_name">Volunteer Name</string>
+    <string name="no_applications_yet">No applications yet.</string>
+    <string name="volunteer_applications">Volunteer Applications</string>
+    <string name="applied_on_yyyy_mm_dd">Applied on: YYYY-MM-DD</string>
+    <string name="edit">Edit</string>
+    <string name="applicants">Applicants</string>
+    <string name="edit_job">Edit Job</string>
+    <string name="toggle_status_job">Toggle Status Job</string>
+    <string name="delete_job">Delete Job</string>
+    <string name="view_applicants">View Applicants</string>
+    <string name="no_applications_available">No applications available</string>
+    <string name="failed_to_load_applications">Failed to load applications</string>
+    <string name="loading_applications">Loading applications…</string>
+    <string name="error_loading_application_details">Error while loading application details</string>
+    <string name="no_application_details_available">No application details available</string>
+    <string name="failed_to_load_application_details">Failed to load application details</string>
+    <string name="loading_application_details">Loading application details…</string>
+
+    <string name="error_loading_volunteer_profile">Error while loading volunteer profile</string>
+    <string name="no_volunteer_profile_available">No volunteer profile available</string>
+    <string name="failed_to_load_volunteer_profile">Failed to load volunteer profile</string>
+    <string name="loading_volunteer_profile">Loading volunteer profile…</string>
+
+    <string name="tooltip_delete_job">Delete Forever</string>
+    <string name="cd_delete_job">Delete Job</string>
+    <string name="error_loading_applications_from_realtime_database">Error loading applications from Realtime Database</string>
+    <string name="error_loading_applications_from_firestore">Error loading applications from Firestore</string>
+    <string name="you_haven_t_posted_any_opportunities_yet">You haven\'t posted any opportunities yet.</string>
+    <string name="organization_description_optional">Organization Description (Optional)</string>
+    <string name="contact_email">Contact Email</string>
+    <string name="search_jobs_title_org_category">Search jobs (title, org, category…)</string>
+    <string name="job_title_event_name">Job Title / Event Name</string>
+    <string name="organization_name">Organization Name</string>
+    <string name="date">Date</string>
+    <string name="posted_jan_1_2023">Posted: Jan 1, 2023</string>
+    <string name="content_desc_date_icon">Date icon</string>
+    <string name="content_desc_location_icon">Location icon</string>
+    <string name="content_desc_delete_job">Delete job post</string>
+    <string name="delete_job_confirmation_title">Confirm Delete</string>
+    <string name="delete_job_confirmation_message">Are you sure you want to delete this job post? This action cannot be undone, and existing applications will be updated.</string>
+    <string name="delete_job_positive_button">Delete</string>
+    <string name="delete_job_negative_button">Cancel</string>
+    <string name="job_deleted_successfully">Job post deleted successfully.</string>
+    <string name="job_deletion_failed">Failed to delete job post.</string>
+    <string name="no_applicants_yet_for_this_job">No applicants yet for this job.</string>
+    <string name="error_loading_jobs">Error loading jobs</string>
+    <string name="no_jobs_available">No jobs available</string>
+    <string name="failed_to_load_jobs">Failed to load jobs</string>
+    <string name="loading_jobs">Loading jobs…</string>
+    <string name="error_loading_job_details">Error while loading job details</string>
+    <string name="no_job_details_available">No job details available</string>
+    <string name="failed_to_load_job_details">Failed to load job details</string>
+    <string name="loading_job_details">Loading job details…</string>
+
+    <string name="error_loading_job_applications">Error loading job applications</string>
+    <string name="no_job_applications_available">No job applications available</string>
+    <string name="failed_to_load_job_applications">Failed to load job applications</string>
+    <string name="loading_job_applications">Loading job applications…</string>
+    <string name="error_loading_job_application_details">Error while loading job application details</string>
+    <string name="no_job_application_details_available">No job application details available</string>
+    <string name="failed_to_load_job_application_details">Failed to load job application details</string>
+    <string name="loading_job_application_details">Loading job application details…</string>
+    <string name="error_loading_job_applications_from_realtime_database">Error loading job applications from Realtime Database</string>
+    <string name="error_loading_job_applications_from_firestore">Error loading job applications from Firestore</string>
+    <string name="error_loading_jobs_from_realtime_database">Error loading jobs from Realtime Database</string>
+    <string name="error_loading_jobs_from_firestore">Error loading jobs from Firestore</string>
+    <string name="error_loading_job_details_from_realtime_database">Error loading job details from Realtime Database</string>
+    <string name="error_loading_job_details_from_firestore">Error loading job details from Firestore</string>
+
+    <string name="error_loading_applicants_from_realtime_database">Error loading applicants from Realtime Database</string>
+    <string name="error_loading_applicants_from_firestore">Error loading applicants from Firestore</string>
+
+    <string name="error_loading_applicants">Error loading applicants</string>
+    <string name="no_applicants_available">No applicants available</string>
+        <string name="failed_to_load_applicants">Failed to load applicants.</string>
+    <string name="no_open_opportunities_available_at_the_moment">No open opportunities available at the moment.</string>
+
+    <string name="loading_opportunities">Loading opportunities…</string>
+    <string name="list_of_available_jobs">List of available job opportunities</string>
+    <string name="no_open_opportunities_found">No open opportunities found.</string>
+    <string name="view_organization_profile">View Organization Profile</string>
+    <string name="apply_now">Apply Now</string>
+    <string name="urgency">Urgency:</string>
+    <string name="skills_required">Skills Required:</string>
+        <string name="requirements">Requirements</string>
+        <string name="contact_information">Contact Information</string>
+        <string name="category">Category</string>
+        <string name="hours">Expected Hours</string>
+    <string name="you_haven_t_applied_to_any_jobs_yet">You haven\'t applied to any jobs yet.</string>
+    <string name="job_title_role">Job Title/Role</string>
+    <string name="update_opportunity">Update Opportunity</string>
+
+
+        <string name="failed_to_load_opportunities">Failed to load opportunities. Please try again.</string>
+        <string name="delete_opportunity_title">Delete Opportunity</string>
+        <string name="delete_opportunity_confirmation">Are you sure you want to permanently delete \'%1$s\'? This action cannot be undone.</string>
+        <string name="delete">Delete</string>
+        <string name="error_cannot_delete_item">Error: Cannot delete item.</string>
+        <string name="opportunity_deleted_successfully">Opportunity deleted successfully.</string>
+        <string name="failed_to_delete_opportunity">Failed to delete opportunity: %1$s</string>
+        <string name="error_updating_status">Error: Could not update status.</string>
+        <string name="status_updated_to">Status updated to %1$s</string>
+        <string name="failed_to_update_status">Failed to update status: %1$s</string>
+        <string name="view_applicants_for">View Applicants for: %1$s</string>
+        <string name="job_details_updated">Job details updated successfully.</string>
+
+        <!-- New ones specifically for this version -->
+        <string name="title_my_posted_opportunities">My Posted Opportunities</string>
+        <string name="login_to_view_postings">Please log in to view your postings.</string>
+        <string name="no_posted_opportunities">You have not posted any opportunities yet.</string>
+        <string name="failed_to_load_jobs_error">Failed to load jobs: %1$s</string>
+    <string name="button_close_job">Close</string>
+    <string name="button_reopen_job">Reopen\n</string>
+    <string name="button_set_status">Set</string>
+    <string name="manage_organization_profile_title">Manage Organization Profile</string>
+    <string name="user_not_logged_in_error">User not logged in. Please log in to continue.</string>
+    <string name="profile_parse_error">Could not read profile data. Please try again.</string>
+    <string name="profile_not_found_prompt">Profile not found. Please complete your profile details.</string>
+    <string name="profile_load_failed_error">Failed to load profile: %1$s</string>
+    <string name="org_name_required_error">Organization name cannot be empty.</string>
+    <string name="contact_email_required_error">Contact email cannot be empty</string>
+    <string name="invalid_email_format_error">Invalid email format.</string>
+    <string name="profile_updated_success">Profile updated successfully!</string>
+    <string name="profile_update_failed_error">Failed to update profile: %1$s</string>
+    <string name="location_e_g_city_state">Location (e.g., City, State)</string>
+    <string name="hint_location">Location</string>
+    <string name="save_changes">Save Changes</string>
+    <string name="cd_change_profile_image">Change profile Image</string>
+    <string name="time_label">Time:</string>
+
+
+    <string name="job_image_description">Image related to the job posting</string>
+    <string name="location_label">Location:</string>
+    <string name="date_label">Date:</string>
+    <string name="description_label">Description:</string>
+
+    <string name="confirm_application_title">Confirm Application</string>
+    <string name="confirm_application_message">Are you sure you want to apply for \'%1$s\'?</string>
+    <string name="apply">Apply</string>
+    <string name="cancel">Cancel</string>
+    <string name="please_log_in_to_apply">Please log in to apply.</string>
+    <string name="application_submitted">Application submitted!</string>
+    <string name="application_already_submitted">You have already applied for this job.</string>
+    <string name="failed_to_submit_application">Failed to submit application: %1$s</string>
+    <string name="failed_to_check_existing_application">Failed to check application status: %1$s</string>
+    <string name="applied">Applied</string>
+    <string name="job_details_title">Job Details</string>
+    <string name="date_not_available">Date not available</string>
+    <string name="time_not_available">Time not available</string>
+    <string name="no_description_available">No description available</string>
+    <string name="no_skills_required_available">No skills required available</string>
+    <string name="no_requirements_available">No requirements available</string>
+    <string name="no_contact_info_provided_by_employer_available">No contact info provided by employer available</string>
+    <string name="no_hours_available">No hours available</string>
+    <string name="no_volunteers_needed_available">No volunteers needed available</string>
+    <string name="no_image_available">No image available</string>
+
+
+        <!-- Strings for JobDetailsActivity -->
+        <string name="no_job_data_found">No job data found. Please try again.</string> <!-- Was no_job_data_provided -->
+       <string name="job_data_unavailable_cannot_apply">Job data is unavailable. Cannot apply.</string> <!-- Was job_data_missing_cannot_apply -->
+        <string name="applied_status">Applied</string>
+        <string name="apply_now_button">Apply Now</string>
+        <string name="failed_to_check_application_status_error">Could not check application status: %s</string>
+        <string name="error_missing_data_for_application">Cannot submit application. Required data is missing.</string>
+        <string name="default_volunteer_name">Volunteer</string>
+        <string name="application_submitted_successfully">Application submitted successfully!</string>
+        <string name="failed_to_submit_application_error">Failed to submit application: %s</string>
+
+        <!-- ... other strings ... -->
+        <string name="organization_profile_title">Organization Profile</string>
+        <string name="organization_header_image_description">Organization header image</string>
+        <string name="about_organization_label">About Organization</string>
+        <string name="contact_information_label">Contact Information</string>
+        <string name="active_job_postings_label">Active Job Postings</string>
+        <string name="no_active_job_postings">This organization has no active job postings at the moment.</string>
+        <string name="error_invalid_organization_id">Invalid organization ID.</string>
+        <string name="error_missing_organization_id">Organization ID not provided.</string>
+        <string name="error_parsing_organization_data">Could not read organization data.</string>
+        <string name="error_organization_not_found">Organization not found.</string>
+        <string name="error_loading_organization_data">Error loading organization details</string>
+        <string name="name_not_available">Name N/A</string>
+        <string name="error_loading_job_posts">Error loading job posts</string>
+        <string name="error_loading_job_posts_short">Could not load jobs</string>
+        <string name="no_app_to_handle_action">No application found to handle this action.</string>
+
+
+
+
+        <!-- Prefixes for setTextOrHide - you can make these empty if you don't want prefixes -->
+        <string name="prefix_skills_required">Skills Required: </string>
+        <string name="prefix_urgency">Urgency: </string>
+        <string name="prefix_requirements">Requirements: </string>
+        <string name="prefix_contact_email">Contact Email: </string>
+        <string name="prefix_category">Category: </string>
+        <string name="prefix_location">Location: </string>
+        <string name="prefix_date">Date: </string>
+        <string name="prefix_time">Time: </string>
+        <string name="prefix_description">Description: </string>
+        <string name="prefix_hours">Hours: </string>
+        <string name="address_label">Address: </string>
+        <string name="prefix_image">Image: </string>
+        <string name="prefix_name">Name: </string>
+    <string name="focus_areas_label">Focus Areas: </string>
+        <string name="prefix_contact">Contact: </string>
+        <string name="prefix_expected_hours">Expected Hours: </string>
+        <string name="prefix_volunteers_needed">Volunteers Needed: %d</string>
+    <!-- For String.format -->
+   <string name="failed_to_load_opportunities_fragment">Failed to load opportunities.</string>
+    <string name="error_displaying_job_details"> Error Displaying Job Details</string>
+    <string name="view_details">View Details</string>
+    <string name="error_job_id_missing">Error: Job ID missing.</string>
+    <string name="submitting_application_button_text">Submitting Application</string>
+    <string name="apply_button_text">"Apply "</string>
+    <string name="cancel_button_text">Cancel</string>
+    <string name="failed_to_submit_application_details_error">Application submitted but failed to record all details: %s</string> <!-- RTDB specific if app write fails post-transaction -->
+     <string name="failed_to_update_volunteer_count">Failed to update volunteer count: %s</string> <!-- RTDB Transaction error -->
+    <string name="job_fully_booked_error">This position no longer requires volunteers.</string>
+    <string name="job_fully_booked">Fully Booked</string>
+     <string name="application_in_progress">Application submission in progress…</string>
+     <string name="volunteers_needed_none">Volunteers Needed: None</string>
+    <string name="volunteers_needed_none_or_filled">Volunteers Needed: None or Filled</string>
+    <string name="permission_denied_firestore_details">Permission denied: Firestore details</string>
+    <string name="ic_default_image_placeholder_desc">Default job image</string>
+    <string name="job_fully_booked_or_data_issue_error">job fully booked or data issue</string>
+    <string name="event_image_description"> Event image Description</string>
+    <string name="account_item">Account item text</string>
+    <string name="default_balance_format_error">Data error</string>
+    <string name="no_events_on_your_waitlist">No events on your waitlist.</string>
+    <string name="filter_events_by_type">Filter events by type</string>
+    <string name="sort_events">Sort events</string>
+        <string name="event_label_location">Location:</string>
+        <string name="event_label_date">Date:</string>
+        <string name="event_label_payment">Payment:</string>
+        <string name="event_label_description">Event Description:</string>
+        <string name="button_register_text">Register</string>
+    <string name="hint_your_review">Your review</string>
+
+    <string name="button_submit_review">Submit Review</string>
+    <string name="label_your_rating">Your Rating</string>
+    <string name="label_event_reviews_ratings">Event Reviews Ratings</string>
+
+
+        <!-- EventDescription2 Specific Strings -->
+        <string name="title_event_details">Event Details</string>
+        <string name="default_na">N/A</string>
+    <string name="button_chat_with_organizer"> Chat with Organizer</string>
+
+        <!-- Error Messages -->
+         <string name="error_event_host_missing">Error: Event host information missing.</string>
+        <string name="error_event_data_unavailable">Error: Event data unavailable.</string>
+        <string name="error_event_details_not_found">Event details not found.</string>
+        <string name="error_could_not_load_event_details">Could not load event details.</string>
+        <string name="error_checking_event_status">Error checking event status.</string>
+        <string name="error_must_be_signed_in_to_register">You must be signed in to register.</string>
+        <string name="error_cannot_register_for_event">Error: Cannot register for event.</string>
+        <string name="error_generating_registration_key">Error generating registration key.</string>
+        <string name="registration_failed_with_error">Registration failed: %s</string> <!-- %s will be replaced by error message -->
+
+        <!-- Button and Status Texts -->
+        <string name="register_button_text">Register</string>
+        <string name="sign_in_to_register">Sign In to Register</string>
+        <string name="entries_closed_button">Entries Closed</string>
+
+        <string name="registered_pending_approval">Registered (Pending)</string>
+        <string name="successfully_registered_pending">Successfully registered! Awaiting approval.</string>
+        <string name="status_error">Status Error</string>
+        <string name="status_event_unavailable">Event Unavailable</string>
+        <string name="status_event_not_found">Event Not Found</string>
+        <string name="status_event_already_registered">Event Already Registered</string>
+        <string name="status_event_registration_failed">Event Registration Failed</string>
+        <string name="status_event_registration_successful">Event Registration Successful</string>
+        <string name="status_event_registration_pending">Event Registration Pending</string>
+        <string name="status_event_registration_error">Event Registration Error</string>
+        <string name="status_event_registration_unknown">Event Registration Unknown</string>
+        <string name="status_event_registration_not_found">Event Registration Not Found</string>
+        <string name="status_event_registration_already_exists">Event Registration Already Exists</string>
+        <string name="status_event_registration_success">Event Registration Success</string>
+        <string name="status_event_registration_failure">Event Registration Failure</string>
+        <string name="status_event_registration_in_progress">Event Registration In Progress</string>
+
+
+        <string name="title_event_details_and_review">Event &amp; Review</string>
+        <string name="error_must_be_signed_in_to_review">You must be signed in to submit a review.</string>
+        <string name="error_cannot_submit_review">Error: Cannot submit review at this time.</string>
+        <string name="error_please_provide_rating">Please provide a rating.</string>
+        <string name="error_please_provide_review_text">Please write a review.</string>
+        <string name="error_submitting_review">Error submitting review. Please try again.</string>
+        <string name="review_submitted_successfully">Review submitted successfully!</string>
+        <string name="review_submission_failed_with_error">Review submission failed: %s</string>
+        <string name="error_calculating_average_rating">Error calculating average rating.</string>
+        <string name="rating_not_available">Rating N/A</string>
+    <string name="search_events_hint">Search Events</string>
+
+    <string name="title_volunteer_opportunities">Volunteer Opportunities</string>
+    <string name="toast_sign_in_to_view_events">Please sign in to view events.</string>
+    <string name="toast_failed_to_load_events">Failed to load events: %s</string>
+    <string name="toast_no_events_available">No events available at the moment.</string>
+    <string name="toast_no_events_match_criteria">No events match your criteria.</string>
+    <string name="text_no_events_available">No events available right now.\nCheck back later!</string>
+    <string name="text_no_events_match_criteria">No events found matching your search and filter criteria.</string>
+    <string name="text_event_details_unavailable">Event details unavailable</string>
+
+
+        <!-- Strings for Sort Spinner -->
+        <string name="sort_by_prompt">Sort by…</string>
+        <string name="sort_name">Name (A-Z)</string>
+        <string name="sort_money_high_low">Payment (High to Low)</string>
+        <string name="sort_location">Location (A-Z)</string>
+        <string name="sort_date_newest">Date (Newest First)</string>
+        <string name="sort_date_oldest">Date (Oldest First)</string>
+
+        <!-- Strings for Filter Spinner -->
+        <string name="filter_by_prompt">Filter by Type…</string>
+        <string name="filter_charity">Charity</string>
+        <string name="filter_sports">Sports</string>
+        <string name="filter_cultural">Cultural</string>
+        <string name="filter_others">Others</string>
+        <string name="filter_all_types">All Types</string>
+
+
+        <!-- String formats for RecyclerView item -->
+
+        <string name="label_location_format">Location: %s</string>
+        <string name="label_payment_format">Payment: %s</string>
+        <string name="label_name_format">Name: %s</string>
+    <string name="event_data_not_available">Event Date Not Available</string>
+    <string name="event_data_missing">Event Date Missing</string>
+    <string name="item_text">Item Text</string>
+    <string name="support">Support</string>
+    <string name="account">Account</string>
+    <string name="notification">Notification</string>
+    <string name="privacy_security">Privacy Security</string>
+    <string name="how_to_use">How to use?</string>
+    <string name="how_to_use_page_content_here">How to Use Page Content Here</string>
+    <string name="privacy_amp_security_page_content_here"><![CDATA[Privacy & Security Page Content Here]]></string>
+    <string name="notification_settings_page_content_here">Notification Settings Page Content Here</string>
+
+    <!-- String arrays for Sort and Filter options -->
+        <string-array name="sort_options_array">
+            <item>@string/sort_by_prompt</item>
+            <item>@string/sort_name</item>
+            <item>@string/sort_money_high_low</item>
+            <item>@string/sort_location</item>
+            <item>@string/sort_date_newest</item>
+            <item>@string/sort_date_oldest</item>
+        </string-array>
+
+
+        <string-array name="filter_options_array">
+            <item>@string/filter_by_prompt</item>
+            <item>@string/filter_all_types</item>
+            <item>@string/filter_charity</item>
+            <item>@string/filter_sports</item>
+            <item>@string/filter_cultural</item>
+            <item>@string/filter_others</item>
+        </string-array>
+    <string name="login_toolbar_title">Login</string>
+    <string name="email_hint">Email ID</string>
+    <string name="password_hint">Password</string>
+    <string name="login_button_text">Login</string>
+    <string name="forgot_password_link">Forgot Password?</string>
+    <string name="not_a_member_prompt">Not a member?</string>
+    <string name="sign_up_link">Sign Up</string>
+     <string name="error_database_operation_failed">Error: Database operation failed</string>
+    <string name="error_network_issue">Error: Network issue</string>
+    <string name="error_user_not_found">Error: User not found</string>
+    <string name="error_incorrect_password">Error: Incorrect password</string>
+    <string name="error_user_type_missing">Error: User type missing</string>
+
+
+    <string name="error_unknown_user_type">Error: Unknown user type</string>
+    <string name="login_failed_generic">Login failed. Generic error</string>
+    <string name="error_user_data_not_found">Error: User data not found</string>
+    <string name="login_failed_user_data_unavailable">Login failed. User data unavailable</string>
+    <string name="login_successful">Login successful</string>
+    <string name="error_email_required">Error: Email is required</string>
+    <string name="error_invalid_email">Error: Invalid email format</string>
+    <string name="error_password_required">Error: Password is required</string>
+    <string name="error_invalid_password">Error: Invalid password format</string>
+    <string name="error_user_type_not_found">Error: User type not found</string>
+    <string name="label_date_format">Date: %s</string>
+    <string name="account_details">Account Details</string>
+
+     <string name="log_in_to_view_account">Please log in to view account details.</string>
+     <string name="log_in_to_view_profile">Please log in to view your profile.</string>
+     <string name="failed_to_load_profile_data">Failed to load profile data.</string>
+    <string name="title_available_opportunities">Available Opportunities</string>
+     <string name="share_app_subject">Download Our App!</string>
+     <string name="share_app_body_template">Hey!!!\nDownload this cool app for organizing events!!!\nLink: %1$s</string>
+     <string name="share_using">Share Using</string>
+    <string name="share_failed">Share Failed</string>
+    <string name="share_success">Share Successful</string>
+    <string name="share_failed_error">Share Failed: %1$s</string>
+    <string name="share_success_message">Share Successful</string>
+    <string name="share_failed_message">Share Failed: %1$s</string>
+    <string name="share_app_title">Share App</string>
+    <string name="no_support_items_available">No support items available.</string>
+    <string name="title_notification_settings">Notification Settings</string>
+    <string name="title_how_to_use">How to Use</string>
+    <string name="title_privacy_security">Privacy AND Security</string>
+    <string name="title_account">Account</string>
+    <string name="title_my_profile">My Profile</string>
+    <string name="title_manage_profile">Manage Profile</string>
+    <string name="title_change_password">Change Password</string>
+    <string name="title_sign_out">Sign Out</string>
+    <string name="title_support">Support</string>
+    <string name="title_about_us">About Us</string>
+    <string name="no_events_available_global">No Events Available</string>
+    <string name="failed_to_load_events_from_db">Failed to load events from db</string>
+    <string name="error_loading_events_ref_null">Error loading events</string>
+    <string name="event_data_missing_placeholder">Event Data Missing</string>
+    <string name="event_data_not_available_placeholder">Error: Event data is not available.</string>
+
+
+
+        <string name="failed_to_load_rating">Failed to load rating.</string>
+        <string name="cannot_open_event_details">Cannot open event details.</string>
+    <string name="payment">Payment:</string>
+    <string name="update_your_phone_number">Update Your Phone Number</string>
+    <string name="new_phone_number_10_digits">New Phone Number (10 digits)</string>
+    <string name="confirm_phone_number">Confirm Phone Number</string>
+    <string name="update_phone_number">Update Phone Number</string>
+    <string name="change_your_password">Change Your Password</string>
+    <string name="current_password">Current Password</string>
+    <string name="new_password">New Password</string>
+    <string name="confirm_new_password">Confirm New Password</string>
+    <string name="change_password">Change Password</string>
+    <string name="update_your_user_name">Update Your User Name</string>
+    <string name="new_user_name">New User Name</string>
+    <string name="confirm_user_name">Confirm User Name</string>
+    <string name="update_user_name">Update User Name</string>
+    <string name="type_a_message">Type a message</string>
+    <string name="send_button_description">Send a Message</string>
+    <string name="send">SEND</string>
+
+
+        <!-- Fallback/prefix strings for populateJobDetails and setTextOrHide -->
+        <string name="prefix_skills_required_fallback">Skills Required: </string>
+        <string name="prefix_urgency_fallback">Urgency: </string>
+        <string name="prefix_requirements_fallback">Requirements: </string>
+        <string name="prefix_contact_fallback">Contact: </string>
+        <string name="prefix_expected_hours_fallback">Expected Hours: </string>
+        <string name="prefix_volunteers_needed_fallback_plural">Volunteers Needed: %d</string>
+        <string name="volunteers_needed_none_or_filled_fallback">Volunteers Needed: Filled / Not specified</string>
+         <string name="failed_to_check_application_status_error_fallback">Failed to check application status: %s</string>
+    <string name="job_fully_booked_error_fallback">Sorry, this job is now fully booked.</string>
+        <string name="job_data_error_contact_admin_fallback">Job data error. Please contact admin.</string>
+        <string name="failed_to_submit_application_transaction_aborted_fallback">Could not submit application (aborted by server)</string>
+        <string name="failed_to_submit_application_error_fallback">Failed to submit application</string>
+         <string name="ic_dialog_info">Information Icon</string> <!-- For AlertDialog icon description if needed -->
+        <string name="ic_default_image_placeholder">Default job image</string>
+    <string name="support_items_not_available">Support options are currently unavailable.</string>
+    <string name="error_loading_support_items_message">Error Loading Support Options: %s</string>
+    <string name="no_support_information_available">No Support Information Available</string>
+    <string name="error_loading_data_message">Error Loading Data from Firestore: %s</string>
+    <string name="title_general_support">General Support: %s </string>
+    <string name="reject">Reject</string>
+    <string name="accept">Accept</string>
+    <string name="cover_letter_message">Cover Letter/Message:</string>
+    <string name="volunteer_phone">Volunteer Phone:</string>
+    <string name="volunteer_email">Volunteer Email:</string>
+    <string name="status">Status:</string> <!-- For Glide placeholder -->
+    <string name="text_name_unavailable">Name not available</string>
+    <string name="search_opportunities">Search opportunities…</string>
+    <string name="no_volunteering_opportunities_found">No volunteering opportunities found.</string>
+    <string name="opportunity_title">Opportunity Title</string>
+
+    <string name="placeholder_na">N/A</string>
+    <string name="applied_on_prefix">Applied on: %1$s</string>
+    <string name="status_prefix">Status: %1$s</string>
+    <string name="applied_on_placeholder_na">Applied on: N/A</string>
+    <string name="status_placeholder_na">Status: N/A</string>
+
+
+    <string name="status_unknown">Unknown</string>
+    <string name="status_prefix_label">Status: %1$s</string> <!-- %1$s is placeholder for actual status -->
+    <string name="applied_on_prefix_label">Applied on: %1$s</string>
+    <string name="invalid_date_placeholder">Invalid Date</string>
+    <string name="status_prefix_label_caps">Status:%S</string>
+    <string name="organization_name_required_error">Organization Name Required</string>
+    <string name="no_results_for_search_fragment">No Results for Search</string>
+    <string name="no_open_opportunities_found_fragment">No Open Opportunities Found</string> <!-- %1$s is placeholder for actual date -->
+    <!-- In res/values/strings.xml -->
+
+    <string name="unknown_user">Unknown User</string>
+    <string name="volunteer_approved_toast">Volunteer %s approved.</string>
+    <string name="failed_to_approve_toast">Failed to approve: %s</string>
+    <string name="volunteer_rejected_toast">Volunteer %s rejected.</string>
+    <string name="failed_to_reject_toast">Failed to reject: %s</string>
+    <string name="text_data_unavailable_short">Data Unavailable</string>
+    <string name="edit_event">Edit Event</string>
+    <string name="delete_event">Delete Event</string>
+    <string name="my_events_tabs_description">Event categories</string>
+    <string name="event_date">Event Date</string>
+    <string name="event_location">Event Location</string>
+    <string name="no_applied_events_found">No applied events found.</string>
+    <string name="apply_for_this_event">Apply for this Event</string>
+    <string name="create_new_event">Create New Event</string>
+    <string name="loading_your_events">Loading your hosted events…</string>
+
+
+    <string name="create_event_title">Create New Event</string>
+    <string name="select_event_image">Select Event Image</string>
+    <string name="event_name_hint">Event Name</string>
+    <string name="event_description_hint">Event Description</string>
+    <string name="event_date_hint">Date</string>
+    <string name="event_time_hint">Time</string>
+    <string name="event_location_hint">Location / Address</string>
+    <string name="event_type_category_hint">Event Type / Category</string>
+    <string name="number_of_volunteers_needed_hint">Number of Volunteers Needed (0 for unlimited)</string>
+    <string name="create_event_button">Create Event</string>
+
+    <string name="validation_name_required">Event name is required.</string>
+    <string name="validation_description_required">Description is required.</string>
+    <string name="validation_date_required">Event date is required.</string>
+    <string name="validation_time_required">Event time is required.</string>
+    <string name="validation_location_required">Location is required.</string>
+    <string name="validation_type_required">Event type is required.</string>
+    <string name="validation_volunteers_required">Number of volunteers is required.</string>
+    <string name="validation_volunteers_positive">Number of volunteers must be 0 or more.</string>
+
+    <string name="event_image_selection_title">Select Image Source</string>
+    <string name="event_created_successfully">Event created successfully!</string>
+    <string name="event_creation_failed">Failed to create event. Please try again.</string>
+    <string name="image_upload_failed">Image upload failed: %s</string>
+    <string name="image_uploaded_successfully">Image uploaded.</string>
+    <string name="saving_event">Saving Event…</string>
+    <string name="no_hosted_events">No hosted events</string>
+    <string name="no_items_match_criteria">No Item match criteria</string>
+
+    <!-- Example Event Types for the Dropdown -->
+    <string-array name="event_types">
+        <item>Community Service</item>
+        <item>Environmental</item>
+        <item>Education</item>
+        <item>Health &amp; Wellness</item>
+        <item>Animal Welfare</item>
+        <item>Arts &amp; Culture</item>
+        <item>Sports</item>
+        <item>Other</item>
+    </string-array>
+
+
+
+        <string name="hint_event_name">e.g., Beach Cleanup Drive</string>
+        <string name="host_name">Host Name</string>
+        <string name="hint_host_name">Enter host name (e.g., your organization)</string>
+        <string name="payment_amount">Payment/Stipend (if any)</string>
+        <string name="rupees_hint">Amount in ₹ (0 if none)</string>
+        <string name="describe_your_event">Tell us about your event…</string>
+
+        <string name="image_url_optional">Image URL (Optional)</string>
+        <string name="hint_image_url">https://example.com/image.png</string>
+
+        <string name="required_volunteers">Required Volunteers (Optional)</string>
+        <string name="hint_number_of_volunteers_0_if_any">Number (0 if no specific count)</string>
+
+        <string name="volunteer_limit">Volunteer Limit (Optional)</string>
+        <string name="hint_max_volunteers_0_for_no_limit">Max number (0 for no limit)</string>
+        <string name="next">Next</string>
+    <string name="no_hosted_events_found_after_processing">No events found after processing.</string>
+    <string name="error_loading_hosted_events_null_snapshot">Could not retrieve events. Please try again.</string>
+    <string name="unable_to_open_event_details">Unable to open event details.</string>
+    <string name="cannot_show_options_for_null_event">Cannot show options for this event.</string>
+    <string name="error_initializing_events_display">Error initializing events display.</string>
+    <string name="error_opening_event_details_null">Error opening event details</string>
+
+
+    <string name="preview_event_name">Event Name Goes Here</string>
+    <string name="preview_event_date_time">Oct 26, 2023 – 02:30 PM</string>
+    <string name="preview_event_location">123 Main Street, Any town</string>
+    <string name="preview_event_description">This is a detailed description of the event…</string>
+    <string name="preview_event_organizer">Organized by: Volunteer Group Name</string>
+    <string name="preview_event_category">Category: Community Service</string>
+    <string name="preview_event_slots">Volunteer Slots: 5/20 Filled</string>
+
+    <string name="cd_event_header_image">Header image for the event</string>
+    <string name="cd_calendar_icon">Calendar icon</string>
+    <string name="cd_location_icon">Location pin icon</string>
+    <string name="preview_no_events_available">No events available</string>
+    <string name="loading_my_events">Loading your events…</string>
+    <string name="no_events_created_yet">You haven\'t created any events yet.</string>
+    <string name="not_logged_in_my_events">Please log in to see your events.</string>
+
+
+
+
+        <!-- ... other strings ... -->
+        <string name="organized_by_prefix">Organized by: %1$s</string>
+        <string name="organizer_unknown">Unknown Organizer</string>
+
+        <string name="category_prefix">Category: %1$s</string>
+        <string name="category_unspecified">Unspecified</string>
+
+        <string name="default_event_name">Event Details</string>
+        <string name="event_details_unavailable">Event details are currently unavailable.</string>
+        <string name="date_time_not_specified">Date and time not specified</string>
+        <string name="location_not_specified">Location not specified</string>
+        <string name="description_not_available">Description not available</string>
+        <string name="data_unavailable">N/A</string>
+        <string name="event_not_found_placeholder">Event Not Found</string>
+
+
+        <string name="slots_filled_format">%1$d / %2$d slots filled</string>
+        <!-- <string name="slots_filled_required_format">%1$d / %2$d required</string> -->
+        <string name="volunteer_slots_na">Volunteer slots: Information unavailable</string>
+
+        <string name="action_button_unavailable">Action Unavailable</string>
+        <string name="already_applied">Already Applied</string>
+        <string name="event_full">Event Full</string>
+        <string name="apply_for_event">Apply for this Event</string>
+        <string name="login_to_apply">Login to Apply</string>
+        <string name="applying_progress">Applying…</string>
+
+        <string name="error_event_id_missing">Error: Event ID is missing. Cannot display details.</string>
+        <string name="error_parsing_event_details">Could not understand event data from server.</string>
+        <string name="error_event_not_found">Error: Event not found.</string>
+        <string name="error_loading_event_details_network">Failed to load event details: %1$s</string>
+
+
+        <string name="please_login_to_apply">Please log in to apply for this event.</string>
+        <string name="event_details_not_loaded_action">Event details not loaded. Please try again.</string>
+        <string name="already_applied_action">You have already applied for this event.</string>
+        <string name="event_full_action">This event is already full.</string>
+        <string name="successfully_applied">Successfully applied!</string>
+        <string name="application_failed_error">Application failed: %1$s</string>
+
+        <!-- Make sure these are also present if used -->
+        <string name="ic_image_placeholder">Image placeholder</string>
+        <string name="ic_image_broken_placeholder">Image loading error</string>
+        <string name="ic_event_default_placeholder">Default event image</string>
+    <string name="permission_denied_loading_jobs">You don\'t have permission to view jobs. Please check your account or contact support.</string>
+     <string name="please_login_to_view_jobs">Please log in to view opportunities.</string>
+    <string name="login_required_to_see_jobs">Login is required to see available jobs.</string>
+     <string name="error_displaying_jobs">Error displaying jobs.</string>
+    <string name="error_job_details_unavailable">Error: Job details are unavailable.</string>
+    <string name="available_opportunities_title">Available Opportunities</string>
+
+    <string name="no_upcoming_events_found">No upcoming events found.</string>
+
+    <string name="error_loading_events_try_again">Error loading events. Please try again.</string>
+    <string name="tab_title_jobs">Jobs</string>
+    <string name="tab_title_events">Events</string>
+    <string name="must_be_logged_in">You must be logged in to create an event.</string>
+    <string name="validation_invalid_number">Invalid number format.</string>
+    <string name="skills_required_hint">Skills Required (e.g., Cooking, First Aid, None)</string>
+    <string name="event_banner_image_description">Event Banner Image Description</string>
+    <string name="event_banner_image_title">Event Banner Image Title</string>
+    <string name="event_banner_image_placeholder">Event Banner Image Placeholder</string>
+    <string name="event_banner_image_error">Event Banner Image Error</string>
+    <string name="event_banner_image_required">Event Banner Image Required</string>
+    <string name="event_banner_image_upload_failed">Event Banner Image Upload Failed</string>
+    <string name="event_banner_image_upload_success">Event Banner Image Upload Success</string>
+    <string name="event_banner_image_saving_failed">Event Banner Image Saving Failed</string>
+    <string name="event_banner_image_saving_success">Event Banner Image Saving Success</string>
+    <string name="event_banner_image_saving">Event Banner Image Saving</string>
+    <string name="event_banner_image_upload">Event Banner Image Upload</string>
+    <string name="event_banner_image_upload_error">Event Banner Image Upload Error</string>
+    <string name="event_banner_image_upload_success_message">Event Banner Image Upload Success</string>
+    <string name="event_banner_image_upload_failed_message">Event Banner Image Upload Failed</string>
+    <string name="event_banner_image_saving_error">Event Banner Image Saving Error</string>
+    <string name="event_banner_image_saving_success_message">Event Banner Image Saving Success</string>
+    <string name="event_banner_image_saving_failed_message">Event Banner Image Saving Failed</string>
+    <string name="event_banner_image_upload_error_message">Event Banner Image Upload Error</string>
+    <string name="event_banner_image_saving_error_message">Event Banner Image Saving Error</string>
+    <string name="event_creation_failed_detailed">Event creation failed: %1$s</string>
+    <string name="validation_datetime_must_be_future">Validation date time must be future</string>
+    <string name="cannot_select_past_time">Cannot select past time</string>
+    <string name="must_be_logged_in_to_create">Must be logged in to create\n</string>
+    <string name="unknown_error_placeholder">Unknown Error</string>
+
+
+
+     <string name="title_activity_create_event">Create New Event</string>
+     <string name="select_event_image_button_text">Select Event Banner</string>
+     <string name="button_change_image_text">Change Banner</string>
+     <string name="hint_event_description">Event Description</string>
+     <string name="hint_event_date">Date</string>
+     <string name="hint_event_time">Time</string>
+     <string name="hint_event_location">Location / Address</string>
+     <string name="hint_event_type">Event Type / Category</string>
+     <string name="hint_skills_required">Skills Required (e.g., Driving, First Aid, None)</string>
+     <string name="hint_volunteer_limit">Number of Volunteers Needed</string>
+     <string name="button_create_event_text">Create Event</string>
+
+     <string name="auth_must_be_logged_in_to_create">You must be logged in to create an event.</string>
+     <string name="auth_not_logged_in_error">Not logged in. Please log in and try again.</string>
+     <string name="default_organizer_name">Organizer</string>
+
+      <string name="validation_error_description_required">Description is required.</string>
+     <string name="validation_error_date_required">Date is required.</string>
+      <string name="validation_error_datetime_past">Event date and time must be in the future.</string>
+     <string name="validation_error_past_time_today">Cannot select a past time for today.</string>
+     <string name="validation_error_location_required">Location is required.</string>
+     <string name="validation_error_type_required">Event type is required.</string>
+     <string name="validation_error_skills_required">Please list skills required (or type \'None\').</string>
+     <string name="validation_error_volunteer_limit">Number of volunteers is required.</string>
+     <string name="validation_error_volunteer_limit_positive">Number of volunteers must be 0 or more.</string>
+
+    <string name="cd_event_type_selector">Select Event Type. Type to filter options or use dropdown.</string>
+     <string name="validation_error_limit_invalid">Validation Limit Invalid</string>
+    <string name="validation_error_limit_positive">Validation Limit Positive</string>
+    <string name="validation_error_limit_required">Validation Error Limit Required</string>
+    <string name="validation_error_limit_zero">Validation Error Limit Zero</string>
+    <string name="validation_error_name_required">Validation Error Name Required</string>
+    <string name="validation_error_time_required">Validation Error Time Required</string>
+    <string name="error_image_upload_failed">Image upload failed: %s</string>
+    <string name="success_event_created">Success Event Created</string>
+    <string name="error_event_creation_failed">Event creation failed: %s</string>
+    <string name="select_event_image_button">Select Banner Image</string>
+    <string name="validation_error_datetime_past_detail">Error: Date time past</string>
+    <string name="error_image_upload_task_failed_unknown">Error: Image Upload Failed</string>
+    <string name="error_volunteer_limit_parse_failed">Volunteer Limit reached</string>
+    <string name="action_edit_event">Edit Event</string>
+    <string name="action_delete_event">Delete Event</string>
+    <string name="confirm_delete_event_title">Delete Event</string>
+    <string name="confirm_delete_event_message">Are you sure you want to delete this event? This action cannot be undone.</string>
+    <string name="delete_event_success">Event deleted successfully.</string>
+    <string name="delete_event_error">Error deleting event: %s</string>
+    <string name="event_not_found_error">Event not found or could not be loaded.</string>
+   <string name="edit_event_title">Edit Event</string> <!-- For EditEventActivity Toolbar -->
+ <string name="action_delete">Delete</string> (For dialog button)
+  <string name="confirm_delete_event_message_named">Are you sure you want to delete "%1$s"? This action cannot be undone.</string>
+    <string name="event_deleted_successfully_named">"%1$s" deleted successfully.</string>
+   <string name="delete_event_error_no_context">Could not perform delete action at this time.</string>
+
+     <string name="label_location_colon">Location: </string>
+     <string name="label_type_colon">Type: </string>
+     <string name="label_skills_colon">Skills Required: </string>
+     <string name="label_hosted_by_colon">Hosted by: </string>
+     <string name="label_limit_colon">Limit: </string>
+     <string name="label_date_colon">Date: </string>
+     <string name="label_time_colon">Time: </string>
+     <string name="label_applicants_colon">Applicants: </string>
+     <string name="label_status_colon">Status: </string>
+    <string name="button_select_image_text">Select Image</string>
+    <string name="button_save_changes_text">Save Changes\n</string>
+    <string name="placeholder_opportunity_title">Opportunity Title</string>
+    <string name="placeholder_organization_name">Organization Name</string>
+    <string name="placeholder_event_date">Event Date</string>
+    <string name="placeholder_event_type">Event Type</string>
+    <string name="text_date_unavailable">Date not available</string>
+    <string name="text_category_unavailable">Category not available</string>
+  <string name="text_organization_unavailable">Organization not available</string>
+    <string name="label_category_format">Category: %s</string>
+    <string name="signed_out_message">Signed out successfully</string>
+    <string name="complete_your_profile">Profile incomplete</string>
+    <string name="search_opportunities_hint">Search by name, host, location…</string>
+    <string name="search_button_text">Search</string>
+    <string name="category_all">All Categories</string>
+    <string name="no_opportunities_found">No Opportunity found</string>
+    <string name="date_time_not_available">Date and time not available</string>
+    <string name="menu_volunteering_events">Volunteering Events</string>
+        <string name="welcome_to_volunteers_app">Welcome to VolunteersApp!</string>
+        <string name="find_opportunities_and_make_a_difference">Find opportunities and make a difference in your community.</string>
+        <string name="upcoming_events">Upcoming Events</string>
+        <string name="no_upcoming_events_check_back_soon">No upcoming events right now. Check back soon!</string>
+        <string name="browse_all_events">Browse All Events</string>
+        <string name="host_an_event">Host an Event</string>
+        <string name="loading_upcoming_events">Loading upcoming events…</string>
+
+        <!-- For Tools Preview (Optional) -->
+        <string name="preview_event_name_short">Community Cleanup</string>
+        <string name="preview_event_date_short">Sat, Dec 25</string>
+    <string name="menu_home">Home</string>
+    <string name="menu_profile">Profile</string>
+    <string name="menu_host_event">Host Event</string>
+        <string name="change_profile_picture">Change profile picture</string>
+    <string name="event_hosted_successfully">Event Hosted Successfully!</string>
+    <string name="congratulations_your_event_has_been_successfully_created">Congratulations! Your event has been successfully created.</string>
+    <string name="go_to_my_events">Go to My Events</string>
+    <string name="menu_my_events">My Events\n</string>
+
+
+        <string name="content_desc_hosted_events_tab">Hosted Events Tab, shows events you are hosting</string>
+        <string name="content_desc_applied_events_tab">Applied Events Tab, shows events you have applied to</string>
+    <string name="menu_section_app">App Section\n</string>
+    <string name="menu_settings">Settings</string>
+    <string name="menu_logout">Logout</string>
+    <string name="menu_section_communicate">Communication Section</string>
+    <string name="view_applicants_button_text">View Applicants</string>
+    <string name="application_submitted_success">Submitted Successfully</string>
+
+    <string name="applicants_info_organizer">Registered: %1$d / Needed: %2$d</string>
+    <string name="no_results_for_search">No results found for \"%1$s\"</string>
+    <string name="already_applied_to_this_event">Already applied to this event</string>
+    <string name="login_required_to_refresh">Login required to refresh</string>
+    <string name="login_required_to_see_my_events">Login required to see my events</string>
+
+    <string name="please_log_in_to_see_applied_events">Please log in to see events you\'ve applied for.</string>
+    <string name="no_events_applied_for_yet">You haven\'t applied for any events yet.</string>
+    <string name="failed_to_load_applied_events">Failed to load applied events. Please try again.</string>
+    <string name="error_user_not_logged_in">Error: User not logged in.</string>
+    <string name="location_not_available">Location Not Found</string>
+
+
+
+    <string name="label_location_colon_xml">Location: %s</string>
+     <string name="label_type_colon_xml">Category: %s</string> <!-- Assuming Type maps to Category in UI -->
+     <string name="label_skills_colon_xml">Skills: %s</string>
+     <string name="label_hosted_by_colon_xml">Organizer: %s</string> <!-- Assuming Hosted By maps to Organizer -->
+     <string name="label_limit_colon_xml">Slots: %s</string> <!-- Assuming Limit maps to Slots -->
+     <string name="label_date_colon_xml">Date: %s</string>
+     <string name="label_time_colon_xml">Time: %s</string>
+     <string name="label_date_time_colon_xml">Date &amp; Time: %1$s at %2$s</string> <!-- For combined date/time -->
+     <string name="label_applicants_colon_xml">Applicants: %s</string>
+     <string name="label_status_colon_xml">Status: %s</string>
+     <string name="delete_confirm">Delete</string>
+    <string name="error_loading_event_details_generic">Error loading event details.</string>
+    <string name="unknown_error">Unknown error</string>
+     <string name="no_limit_text">No limit</string>
+     <string name="not_available_short">N/A</string>
+    <string name="not_authorized_to_edit">You are not authorized to edit this event.</string>
+    <string name="not_authorized_to_delete">You are not authorized to delete this event.</string>
+    <string name="cannot_edit_missing_details">Cannot edit event: details missing.</string>
+     <string name="cannot_delete_missing_id">Cannot delete: Event ID missing.</string>
+
+<string name="event_updated_successfully">Event updated successfully!</string>
+    <string name="event_deleted_successfully">Event deleted.</string>
+    <string name="event_details_not_loaded_yet">Event details not loaded yet. Please wait.</string>
+    <string name="organizer_action_placeholder">Organizer Action</string>
+     <string name="volunteer_action_placeholder">Volunteer Action</string>
+    <string name="view_applicants_button">View Applicants</string>cannot_edit_missing_details
+     <string name="apply_for_event_button">Apply for Event</string>
+    <string name="cd_status_icon">Status</string>
+    <string name="cd_applicants_icon">Applicants</string>
+    <string name="cd_slots_icon">Slots</string>
+    <string name="cd_skills_icon">Skills</string>
+    <string name="cd_category_icon">Category</string>
+    <string name="cd_organizer_icon">Organizer</string>
+    <string name="event_name_label">Event Name</string>
+    <string name="organizer_name_label">Organizer Name</string>
+    <string name="event_location_label">Event Location</string>
+    <string name="payment_amount_optional_hint">Payment Amount Optional</string>
+    <string name="image_url_optional_hint">image url optional</string>
+    <string name="required_volunteers_hint">Required Volunteers</string>
+    <string name="volunteer_limit_hint_0_for_no_limit">volunteer limit, 0 for no limit</string>
+
+        <string name="host_final_activity_title">Event Hosted</string>
+       <string name="successfully_hosted_main_title">Event Successfully Hosted!</string>
+        <string name="event_added_to_hosted_events_detail">Your event has been added to your list of hosted events.</string>
+        <string name="my_events_button_text">View My Events</string>
+        <string name="host_another_event_button_text">Host Another Event</string>
+        <string name="host_final_congrats_generic">Congratulations! Your event has been successfully created.</string>
+        <string name="host_final_congrats_with_event_name">Congratulations! Your event \'%1$s\' has been successfully created.</string>
+        <string name="host_final_congrats_with_event_id">Congratulations! Your event (ID: %1$s) has been successfully created.</string>
+    <string name="go_to_my_events_button">My Events</string>
+    <string name="host_another_event_button">Host another Event</string>
+    <string name="add_new_event">Add New Event\n</string>
+    <string name="no_events_hosted_yet">No Event Hosted Yet</string>
+    <string name="please_log_in_to_host_event">Please log in to host event</string>
+    <string name="error_opening_event_details">Error Opening event details</string>
+
+    <string name="no_applicants_for_this_event">No users have applied to this event yet.</string>
+     <string name="accept_applicant">Accept Applicant</string>
+    <string name="reject_applicant">Reject Applicant</string>
+    <string name="error_fetching_applicants_details">An error occurred while trying to fetch applicant details: %1$s</string>
+    <string name="error_accepting_applicant">An error occurred while trying to accept the applicant: %1$s</string>
+    <string name="error_rejecting_applicant">An error occurred while trying to reject the applicant: %1$s</string>
+        <!-- Titles for ViewApplicantsActivity -->
+        <string name="applicants_for_event_title">Applicants for %1$s</string>
+        <string name="view_applicants_default_title">View Applicants</string>
+    <string name="no_applicants_yet">No applicants have applied for this event yet.</string>
+
+        <!-- Strings for Applicant Adapter actions -->
+        <string name="status_accepted">Status: Accepted</string>
+        <string name="status_rejected">Status: Rejected</string>
+        <string name="accept_applicant_button">Accept</string>
+        <string name="reject_applicant_button">Reject</string>
+        <string name="contact_applicant_button">Contact</string>
+
+
+
+        <!-- ViewApplicantsFragment Strings -->
+        <string name="error_event_id_missing_toast">Error: Event ID is missing. Cannot load applicants.</string>
+        <string name="event_id_missing_error_display">Event ID is missing. Unable to display applicants.</string>
+        <string name="failed_to_load_applicants_generic">Failed to load applicants. Please try again.</string>
+        <string name="no_applicants_for_this_event_message">No applicants found for this event yet.</string>
+        <string name="failed_to_load_some_applicant_details_message">Could not load details for all applicants. Some information may be missing.</string>
+
+        <string name="unknown_user_no_id">Unknown User (No ID)</string>
+        <string name="unknown_user_parse_error">Unknown User (Data Error)</string>
+        <string name="unknown_user_not_found">Unknown User</string>
+        <string name="details_may_be_outdated">details may be outdated</string>
+        <string name="email_not_available">Email N/A</string>
+
+        <string name="error_processing_acceptance_toast">Error: Could not process acceptance. Invalid data.</string>
+        <string name="applicant_accepted_toast">%s accepted.</string> <!-- %s will be replaced by applicant's name -->
+        <string name="failed_to_accept_applicant_toast">Failed to accept applicant: %s</string> <!-- %s will be replaced by error message -->
+
+        <string name="error_processing_rejection_toast">Error: Could not process rejection. Invalid data.</string>
+        <string name="applicant_rejected_toast">%s rejected.</string>
+        <string name="failed_to_reject_applicant_toast">Failed to reject applicant: %s</string>
+
+        <string name="error_opening_profile_toast">Error: Could not open profile. User information is missing.</string>
+        <string name="view_profile_toast">View profile of %s</string>
+        <string name="error_navigating_to_profile_toast">Could not open profile. Navigation error.</string>
+    <string name="placeholder_na_short">NA</string>
+    <string name="status_for_event">Status: %s</string>
+    <string name="host_an_event_title">Event Title</string>
+    <string name="title_host_final">Host Final</string>
+
+    <string name="no_applicants_found">No applicants found for this job yet.</string>
+      <string name="not_logged_in_message">You need to be logged in to see this.</string>
+
+
+
+
+        <string name="no_data_available">No data available.</string> <!-- Default message for empty lists -->
+
+        <!-- Applicant Actions: Toasts & Errors -->
+        <string name="error_processing_action">Error: Could not process this action.</string>
+         <string name="error_opening_profile_no_uid">Error: Cannot open profile. User ID is not available.</string>
+         <string name="viewing_profile_of">Viewing profile of %1$s…</string> <!-- %1$s is applicant name -->
+
+        <!-- Contact Applicant -->
+        <string name="cannot_contact_no_email">Cannot contact %1$s. Email address is not available.</string> <!-- %1$s is applicant name -->
+        <string name="contacting_applicant_email">Contacting %1$s via email: %2$s</string> <!-- %1$s is name, %2$s is email -->
+        <string name="email_subject_application_for_event">Regarding your application for event: %1$s</string> <!-- %1$s is event ID or name -->
+        <string name="no_email_app_found_contact">No email app found to contact %1$s.</string>
+    <string name="drawer_section_account">Account</string>
+    <string name="drawer_section_communicate">Communicate</string>
+    <string name="drawer_section_app_actions">App</string>
+    <string name="sign_out_drawer">Sign Out</string> <!-- %1$s is applicant name -->
+    <string name="event_options_content_description">Event options</string>
+    <string name="status_for_event_prefix">Event Prefix</string>
+    <string name="already_applied_status">Already Applied</string>
+    <string name="title_applied_events">Applied Events</string>
+    <string name="must_be_logged_in_to_apply">Must be Logged in to apply: %s</string>
+    <string name="event_data_incomplete_cannot_apply">Event data incomplete, cannot apply: %s</string>
+    <string name="error_submitting_application_detailed">Error submitting application details: %s</string>
+    <string name="action_for_event_organizers">Action for event organizers</string>
+    <string name="action_for_volunteers">Action for volunteers</string>
+    <string name="action_for_both">Action for both</string>
+    <string name="my_events_title">My Events Title</string>
+    <string name="title_my_hosted_events">My Hosted Events</string>
+
+    <string name="menu_view_event_details">View Details</string>
+    <string name="menu_bookmark_event">Bookmark Event</string> <!-- Or "Save Event" -->
+    <string name="menu_unbookmark_event">Unbookmark Event</string> <!-- For toggling -->
+    <string name="menu_share_event">Share Event</string>
+    <string name="menu_report_event">Report Event</string>
+    <string name="menu_withdraw_application">Withdraw Application</string>
+    <string name="menu_profile_details">Profile Details</string>
+    <string name="text_invalid_date">Invalid Date</string>
+    <string name="text_data_na">Date N/A</string>
+    <string name="event_id_missing_error">Error: Event ID is missing.</string>
+    <string name="opening_event_toast">Opening: %s</string>
+    <string name="label_slots_colon_xml">Slots: %1$d / %2$s</string>
+     <string name="label_registered_volunteers_colon_xml">Registered: %1$s</string>
+     <string name="label_payment_colon_xml">Payment: $%1$s</string>
+     <string name="label_required_volunteers_colon_xml">Needs: %1$s volunteers</string>
+    <string name="manage_event_button">Manage Event</string>
+     <string name="withdraw_application_button">Withdraw Application</string>
+     <string name="applications_closed_button">Applications Closed</string>
+     <string name="status_accepted_button">Accepted</string>
+     <string name="event_applications_closed">Applications for this event are currently closed.</string>
+     <string name="please_log_in_action">Please log in to perform this action.</string>
+     <string name="organizer_action_placeholder_manage_event">Manage Event (Organizer Action)</string>
+     <string name="volunteer_action_placeholder_withdraw">Withdraw Application (Volunteer Action)</string>
+     <string name="volunteer_action_placeholder_already_accepted">You are already accepted for this event.</string>
+     <string name="volunteer_action_placeholder_apply">Apply for Event (Volunteer Action)</string>
+     <string name="delete_event_success_no_image_delete">Event deleted. Image was not present or not deleted.</string>
+     <string name="delete_event_and_image_success">Event and associated image deleted successfully.</string>
+     <string name="delete_event_success_image_fail">Event document deleted, but failed to remove image from storage.</string>
+
+    <string name="cd_payment_icon">Payment icon</string>
+    <string name="cd_required_volunteers_icon">Required volunteers icon</string>
+    <string name="cd_registered_volunteers_icon">Registered volunteers icon</string>
+    <!-- Ensure other cd_ strings and header_description are defined -->
+    <string name="header_description">Description</string>
+
+     <string name="welcome_message_user">Welcome, %1$s!</string>
+        <string name="error_navigating_all_events">Could not open all events.</string>
+        <string name="error_navigating_host_event">Could not open host event form.</string>
+       <string name="error_navigating_event_details">Could not open event details.</string>
+        <string name="no_upcoming_events">No upcoming events found.</string>
+
+
+        <!-- HowToUseActivity Specific Strings -->
+        <string name="how_to_use_title">How to Use</string>
+        <string name="loading_tips">Loading tips…</string>
+        <string name="no_how_to_use_tips">No \'How to Use\' tips available at the moment. Please check back later.</string>
+        <string name="error_loading_tips">Could not load tips. Please check your connection and try again.</string>
+
+        <!-- You might also have string resources for the content of the tips themselves if they are static
+             and not fetched from Firestore. However, since your setup fetches them, those would be part
+             of your HowToUseTip data model. -->
+
+        <!-- Example for item_how_to_use_tip.xml (placeholders, actual content comes from Firestore) Login page -->
+        <string name="placeholder_tip_title">Tip Title</string>
+        <string name="placeholder_tip_content">Tip content will appear here…</string>
+        <string name="login_as_label">Login as:</string>
+        <string name="role_volunteer">Volunteer</string>
+        <string name="role_organizer">Organizer</string>
+        <string name="role_employer">Employer</string> <!-- Added for clarity -->
+        <string name="error_role_not_selected">Please select your role.</string>
+        <string name="error_role_mismatch">Login failed. Your account role does not match the selected role.</string>
+
+    <!-- Organizer specific strings as needed -->
+
+        <string name="organizer_dashboard_title">Organizer Dashboard</string>
+        <string name="welcome_organizer_placeholder">Welcome, Organizer!</string>
+        <string name="manage_my_events">Manage My Events</string>
+        <string name="logout">Logout</string>
+
+        <string name="welcome_organizer_placeholder_dynamic">Welcome, %1$s!</string>
+        <string name="logout_confirmation_title">Confirm Logout</string>
+        <string name="logout_confirmation_message">Are you sure you want to log out?</string>
+        <string name="logout_confirm">Logout</string>
+
+    <string name="validation_error_banner_required">Event banner image is required.</string> <!-- If you make it mandatory -->
+         <string name="dialog_exit_confirmation_title">Discard Changes?</string>
+        <string name="dialog_exit_confirmation_message">Are you sure you want to discard the event details?</string>
+        <string name="dialog_exit_positive_button">Discard</string>
+        <string name="dialog_exit_negative_button">Keep Editing</string>
+    <string name="title_sign_up">Create Account</string>
+    <string name="hint_username">Username</string>
+    <string name="hint_phone_number">Phone Number</string>
+    <string name="hint_email">Email Address</string>
+    <string name="hint_password">Password</string>
+    <string name="hint_confirm_password">Confirm Password</string>
+    <string name="label_select_user_type">I am a:</string>
+    <string name="user_type_volunteer">Volunteer</string>
+    <string name="user_type_organizer">Organizer</string>
+    <string name="hint_organization_name">Organization Name (Optional)</string> <!-- If you add this field -->
+    <string name="button_register">Register</string>
+    <string name="prompt_already_a_member">Already have an account?</string>
+    <string name="action_login">Login</string>
+
+    <string name="error_username_required">Username is required.</string>
+    <string name="error_phone_required">Phone number is required.</string>
+    <string name="error_invalid_phone_number">Enter a valid phone number.</string>
+   <string name="error_invalid_email_format">Enter a valid email address.</string>
+   <string name="error_password_too_short">Password must be at least 6 characters.</string>
+    <string name="error_confirm_password_required">Please confirm your password.</string>
+    <string name="error_passwords_do_not_match">Passwords do not match.</string>
+    <string name="error_network_connection">Network error. Please check your internet connection.</string>
+    <string name="error_internal">An internal error occurred. Please try again.</string>
+    <string name="error_failed_to_save_user_details">Failed to save user details. Please try again later.</string>
+    <string name="error_password_too_weak">Password is too weak. Please choose a stronger one.</string>
+    <string name="error_invalid_email_format_auth">The email address is badly formatted.</string>
+    <string name="error_email_already_registered">This email is already registered. Please login or use a different email.</string>
+    <string name="error_registration_failed">Registration failed</string>
+    <string name="toast_registration_successful">Registration successful! Redirecting to login…</string>
+    <string name="button_send_reset_link">Send reset link</string>
+
+
+
+
+        <!-- Strings for Forgot Password Functionality -->
+        <string name="title_forgot_password">Forgot Password</string>
+        <string name="instruction_forgot_password">Enter your email address below and we\'ll send you a link to reset your password.</string>
+          <string name="info_reset_link_sent">A password reset link has been sent to your email address. Please check your inbox (and spam folder).</string>
+        <string name="toast_reset_link_sent">Password reset email sent!</string>
+        <string name="error_failed_to_send_reset_email">Failed to send password reset email. Please try again later.</string>
+        <string name="error_no_account_found_with_email">No account found with this email address. Please check the email or sign up.</string>
+    <string name="organizer_icon">Organizer Icon</string>
+    <string name="home">Home</string>
+    <string name="logout_action">Logout</string>
+    <string name="organizer_name_placeholder">Organizer Name</string>
+    <!-- In res/values/strings.xml -->
+    <string name="hint_event_payment">Event Payment (Optional, e.g., 10.00)</string>
+    <string name="hint_required_volunteers">Required Volunteers (Optional)</string>
+    <string name="label_payment_colon">Payment:</string>
+    <string name="label_required_volunteers_colon">Required Volunteers:</string>
+
+        <!-- Validation Error Messages -->
+        <string name="validation_error_payment_invalid">"Invalid payment amount. Please enter a valid number."</string>
+        <string name="validation_error_payment_non_negative">"Payment amount cannot be negative."</string>
+
+        <string name="validation_error_required_vol_invalid">"Invalid number for required volunteers. Please enter a whole number."</string>
+        <string name="validation_error_required_vol_non_negative">"Number of required volunteers cannot be negative."</string>
+
+        <string name="validation_error_limit_non_negative">"Volunteer limit cannot be negative."</string>
+
+    <string name="loaded_events_count_firestore">Loaded %d events (Firestore).</string>
+    <string name="title_organizer_dashboard">Organizer</string>
+    <string name="view_applications_fragment">View Applications Fragment</string>
+    <string name="organizer_name_hint">"Organizer Name "</string>
+    <string name="organization_name_hint">Organization Name</string>
+    <string name="bio_hint">Bio</string>
+    <string name="save_profile_button_text">Save Profile</string>
+    <string name="edit_profile_image">Edit Profile Image</string>
+     <string name="bottom_nav_organizer_home">Home</string>
+    <string name="bottom_nav_hosted_events">My Events</string>
+    <string name="bottom_nav_organizer_applications">Applicants</string>
+    <string name="bottom_nav_organizer_profile">Profile</string>
+    <string name="my_profile">My Profile</string>
+    <string name="notifications">Notifications</string>
+    <string name="messages">Messages</string>
+    <string name="event_image_desc">Image description</string>
+    <string name="title_profile">Profile</string>
+    <string name="title_hosted_events">Hosted Events</string>
+    <string name="title_view_applications">View Applications</string>
+    <string name="no_applications_found">No applications found.</string>
+    <string name="organizer_name">Organizer Name</string>
+    <string name="user_type_employer">Employer</string>
+    <string name="error_select_user_type">Please select a user type (Volunteer, Organizer, or Employer)</string>
+    <!-- In res/values/strings.xml -->
+    <string name="applied_on_date">Applied on: %1$s</string>
+    <string name="applied_on_unavailable">Applied date not available</string>
+    <string name="approve">Approve</string>
+    <string name="applicant_name">Applicant Name:</string>
+    <string name="event">Event:</string>
+    <string name="applicant_email">Applicant Email:</string>
+    <string name="applied_on">Applied On:</string>
+    <string name="applicant_notes">Applicant Notes:</string>
+    <string name="reason_for_rejection_if_any">Reason for Rejection (if any):</string>
+    <string name="enter_reason_optional">Enter reason (optional)</string>
+    <string name="title_application_details">Application Details</string>
+    <string name="my_activity_summary">My Activity Summary</string>
+    <string name="hosted_events_0">Hosted Events: 0</string>
+    <string name="events_with_confirmed_volunteers_0">Events with Confirmed Volunteers: 0</string>
+    <string name="suggestions">Suggestions</string>
+        <string name="slots_info">Slots: %1$d / %2$d</string>
+    <string name="registered_volunteers_info">Registered: %1$d</string>
+    <string name="hosted_events_count">Hosted Events: %d</string>
+    <string name="error_hosted_events">Error loading hosted events</string>
+    <string name="loading_events_with_volunteers">Loading events with volunteers…</string>
+    <string name="events_with_volunteers_count">Events with Confirmed Volunteers: %d</string>
+    <string name="error_events_with_volunteers">Error loading events with volunteers</string>
+    <string name="no_suggestions_available">No suggestions available at the moment.</string>
+    <string name="event_title_x_volunteers">Event Title (X volunteers)</string>
+    <string name="event_title_summary">Event Title Summary</string>
+    <string name="event_date_summary">Event Date Summary</string>
+    <string name="event_location_summary">Event Location Summary</string>
+    <string name="event_description_summary">Event Description Summary</string>
+    <string name="cd_events_with_volunteers_list">List of events with confirmed volunteers</string>
+    <string name="cd_hosted_events_list">List of hosted events</string>
+
+
+
+
+
+        <string name="no_hosted_events_found">No hosted events found yet. Create one!</string>
+        <string name="no_events_with_volunteers_found">No events currently have confirmed volunteers.</string>
+
+        <string name="error_user_not_logged_in_summary">User not logged in. Cannot load summary.</string>
+        <string name="error_cannot_refresh_no_user">Cannot refresh: User ID missing.</string>
+        <string name="error_loading_generic_prefix">Error loading %1$s: %2$s</string>
+        <string name="suggestions_title">Suggestions:</string>
+    <string name="error_setting_up_navigation">Error setting up navigation</string>
+    <string name="cd_my_events_tabs">Categories of your events</string>
+    <string name="error_submitting_application">Error submitting application: %1$s</string>
+
+
+
+
+
+
+
+      <string name="error_loading_application_status">Could not load your application statuses.</string>
+
+        <!-- Event Click / Navigation Errors -->
+        <string name="error_opening_event_details_short">Error opening details.</string>
+         <string name="error_navigating_to_details_general">An error occurred while trying to show event details.</string>
+
+        <!-- Application Process -->
+        <string name="cannot_process_application_event">Cannot process application for this event.</string>
+        <string name="event_data_incomplete_cannot_apply_short">Cannot apply: Event data incomplete.</string>
+       <string name="error_submitting_application_default_with_message">Error submitting application: %1$s</string> <!-- From previous version, good to have -->
+
+
+        <!-- Event Item Options Menu (for PopupMenu) -->
+        <!-- These are examples for event_item_options_menu_volunteer.xml if titles are from strings -->
+        <!-- Your menu item titles will likely be directly in the menu XML or like these: -->
+        <string name="action_view_event_details_menu_title">View Details</string>
+        <string name="action_share_event_menu_title">Share Event</string>
+        <string name="action_report_event_menu_title">Report Event</string>
+        <string name="action_withdraw_application_menu_title">Withdraw Application</string> <!-- Example if you add this -->
+ <string name="sharing_event_toast">Sharing: %1$s</string> <!-- %1$s is event title -->
+    <string name="reporting_event_toast">Reporting: %1$s</string> <!-- %1$s is event title -->
+
+  <string name="search_hint_opportunities">Search opportunities…</string> <!-- For SearchView hint -->
+
+    <string name="action_for_event_organizers_only">This action is for event organizers only.</string>
+
+
+
+
+
+    <!-- Navigation Errors (Already provided in previous snippets, good to have) -->
+        <string name="error_navigating_to_event_details">Could not open event details. Please try again.</string>
+        <string name="error_event_details_unavailable">Event details are currently unavailable.</string>
+        <string name="error_opening_applicants_list">Could not open applicants list. Please try again.</string>
+        <string name="error_event_id_missing_for_applicants">Cannot view applicants: Event ID is missing.</string>
+
+        <!-- Event Item Options Menu (organizer_event_item_options.xml would use these if titles are from strings) -->
+        <!-- These are used in Toast messages in the fragment -->
+        <string name="edit_event_toast">Editing: %1$s</string> <!-- %1$s will be event title -->
+        <string name="delete_event_toast">Deleting: %1$s</string> <!-- %1$s will be event title -->
+        <string name="analytics_for_event_toast">Analytics for: %1$s</string> <!-- %1$s will be event title -->
+
+        <!-- Placeholder for menu item titles if you define them directly in strings.xml for the menu file -->
+        <!--
+        <string name="action_edit_event">Edit Event</string>
+        <string name="action_delete_event">Delete Event</string>
+        <string name="action_view_event_analytics">View Analytics</string>
+        -->
+
+        <!-- Fallback/Generic Error Messages -->
+        <string name="unknown_error_occurred">An unknown error occurred. Please try again.</string>
+        <string name="error_please_try_again">An error occurred. Please try again.</string>
+
+
+        <string name="error_fetching_application_status">Could not check your application status.</string>
+        <string name="no_upcoming_events_found_matching_criteria">No events found matching your criteria.</string>
+         <string name="cannot_open_event_details_no_id">Cannot open event: Details are missing.</string>
+        <string name="error_navigating_to_details">Error opening event details.</string>
+         <string name="event_data_incomplete">Event data is incomplete. Cannot apply.</string>
+
+        <!-- From EventAdapter, ensure these are present if your adapter uses them -->
+          <string name="slots_info_volunteer">Slots Left: %1$d / %2$d</string> <!-- Example for volunteer view in adapter -->
+        <string name="event_not_available">Not Available</string>
+
+    <string name="error_user_not_logged_in_applied">User not logged in. Cannot display applied events.</string>
+    <string name="options_for_applied_event">Options for applied event: %1$s</string>
+
+        <!-- For a potential PopupMenu in onEventOptionsClicked if you implement it -->
+        <!-- <string name="action_withdraw_application_applied_menu">Withdraw Application</string> -->
+
+     <string name="error_user_not_logged_in_hosted">You need to be logged in to see your hosted events.</string> <!-- Similar to please_log_in..., but could be context specific -->
+
+        <string name="error_event_data_missing_for_edit">Event data is missing, cannot edit.</string>
+        <string name="error_navigating_to_edit_screen">Error opening edit screen.</string>
+        <string name="error_event_data_missing_for_applicants">Event data is missing, cannot view applicants.</string>
+        <string name="error_opening_applicants_screen">Error opening applicants screen.</string>
+        <string name="error_opening_edit_screen">Error opening edit screen.</string>
+        <string name="error_opening_event_creation_screen">Could not open event creation screen.</string>
+
+        <!-- For PopupMenu actions (Toast messages) -->
+        <string name="delete_for_event_implement">Delete: %1$s. (Implement actual deletion)</string> <!-- %1$s is event title -->
+        <string name="analytics_for_event_implement">Analytics for: %1$s. (Implement navigation)</string> <!-- %1$s is event title -->
+        <string name="edit_event_menu_title">Edit Event</string> <!-- For menu item if title from string -->
+        <string name="delete_event_menu_title">Delete Event</string> <!-- For menu item -->
+        <string name="view_analytics_menu_title">View Analytics</string>
+    <string name="no_events_in_this_category">No events in this category.</string>
+    <string name="title_my_event_fragment">My Events</string>
+    <string name="title_user_profile">User Profile</string>
+    <string name="title_view_applicants">View Applicants</string>
+    <string name="title_browse_all_events">Browse All Events</string>
+    <string name="title_event_creation_complete">Event Creation Complete</string>
+    <string name="title_map">Map</string>
+    <string name="organizers_cannot_apply_here">Organizers Cannot Apply Here</string>
+    <string name="cannot_view_applicants_no_id">Cannot View Applicants, No Id</string>
+    <string name="error_event_data_missing_for_deletion">Error, Event Data Missing</string>
+    <string name="event_doc_deleted_image_fail">Event Doc Deleted, Image Failed</string>
+    <string name="failed_to_delete_image_invalid_url">Failed to delete Image, Invalid URL</string>
+    <string name="title_host_or_edit_event">Host or Edit Event</string>
+    <string name="title_organizer_profile">Organizer Profile</string>
+    <string name="unable_to_open_event_details_no_id">Unable to Open Event Details: No ID</string>
+    <string name="cannot_show_options_for_null_event_id">Cannot Show Options: No Event ID</string> <!-- For menu item -->
+
+        <!-- Button Labels -->
+        <string name="next_step_button">Next Step</string>
+        <string name="update_event_button">Update Event</string>
+        <string name="cancel_button">Cancel</string> <!-- If you use "Cancel" for binding.CancelHost text -->
+        <string name="go_to_calendar_button">Select Date</string> <!-- For binding.GoToCalender text if set explicitly -->
+
+         <string name="select_event_type_prompt">Select Event Type</string> <!-- For the spinner prompt -->
+
+        <!-- Validation Error Messages & Toasts -->
+        <string name="no_date_selected">No date selected.</string>
+        <string name="error_select_event_date">Please select a valid event date.</string>
+        <string name="error_select_event_date_toast">Select a valid Event Date!</string>
+        <string name="error_event_name_required">Event name required.</string>
+        <string name="error_organizer_name_required">Organizer name required.</string>
+        <string name="error_event_location_required">Event location required.</string>
+        <string name="error_select_event_type">Please select an event type.</string>
+        <string name="error_description_required">Description required.</string>
+        <string name="error_payment_negative">Payment cannot be negative.</string>
+        <string name="error_invalid_payment_number">Invalid number for payment.</string>
+        <string name="error_volunteer_limit_required">Volunteer limit is required.</string>
+        <string name="error_volunteer_limit_positive">Volunteer limit must be a positive number or 0.</string>
+        <string name="error_invalid_volunteer_limit">Invalid number for volunteer limit.</string>
+        <string name="error_event_in_past">Event date and time cannot be in the past.</string>
+        <string name="error_event_in_past_toast">Event date and time cannot be in the past.</string>
+        <string name="error_critical_event_date_missing">Critical Error: Event date missing.</string>
+        <string name="invalid_date_format_toast">Invalid date format: %1$s</string> <!-- %1$s is the dateString -->
+        <string name="invalid_date_reselect">Invalid date. Tap to re-select.</string>
+
+        <!-- General Error/Status Messages -->
+        <string name="error_view_not_available">Error: View not available.</string>
+        <string name="error_user_not_authenticated_login">User not authenticated. Please log in.</string>
+        <string name="error_loading_event_data">Error loading event data.</string>
+        <string name="error_creating_event_toast">Error creating event: %1$s</string> <!-- %1$s is e.getMessage() -->
+        <string name="error_updating_event_toast">Error updating event: %1$s</string> <!-- %1$s is e.getMessage() -->
+
+
+        <!-- Content Descriptions (for accessibility, if you set them in XML or programmatically) -->
+        <string name="cd_event_name_input">Event Name Input Field</string>
+        <string name="cd_organizer_name_input">Organizer Name Input Field</string>
+        <string name="cd_date_picker_button">Open Calendar to Select Date</string>
+        <!-- ... and so on for other important UI elements -->
+
+
+
+        <string name="title_become_an_organizer">Become an Organizer</string>
+        <string name="become_organizer_form_title">Tell us about your organization</string>
+        <string name="hint_organization_contact_email">Organization Contact Email*</string>
+        <string name="hint_organization_description">Brief Description (Optional)</string>
+        <string name="button_submit_organization_details">Submit Application</string>
+
+        <string name="error_organization_name_required">Organization name is required.</string>
+        <string name="error_organization_email_required">Organization email is required.</string>
+        <string name="error_user_not_authenticated">User not authenticated. Please log in.</string>
+        <string name="error_user_id_missing_submission">User ID missing. Cannot submit.</string>
+        <string name="organizer_application_successful">Application submitted! You can now host events.</string> <!-- Adjust if there's an approval step -->
+        <string name="error_submission_failed">Submission failed</string>
+
+
+    <string name="cd_change_profile_picture">Change profile picture</string>
+
+        <string name="profile_option_achievements">Achievements / Gallery</string>
+        <string name="profile_option_wallet">Wallet</string>
+        <string name="profile_option_settings">Settings</string>
+        <string name="button_become_organizer">Become an Organizer</string>
+        <string name="button_logout">Logout</string>
+    <string name="organizer_application_pending">Application Pending</string> <!-- New -->
+
+        <!-- For ProfileFragment.java logic -->
+        <string name="user_not_logged_in">User not logged in.</string>
+        <string name="camera_permission_denied">Camera permission denied.</string>
+        <string name="failed_to_process_image">Failed to process image.</string>
+
+        <string name="take_photo">Take Photo</string>
+        <string name="choose_from_gallery">Choose from Gallery</string>
+        <string name="add_photo_title">Add Photo!</string>
+
+        <string name="could_not_create_image_file">Could not create image file.</string>
+        <string name="error_preparing_camera">Error preparing camera.</string>
+        <string name="failed_to_load_profile">Failed to load profile: %1$s</string> <!-- %1$s is error message -->
+        <string name="n_a">N/A</string> <!-- For Not Applicable/Available -->
+
+        <string name="error_not_logged_in_or_no_image">Error: Not logged in or no image selected.</string>
+        <string name="failed_to_get_download_url">Failed to get download URL.</string>
+       <string name="profile_image_updated">Profile image updated!</string>
+        <string name="failed_to_update_image_url_firestore">Failed to update image URL in Firestore.</string>
+        <string name="error_navigation_failed">Navigation error. Please try again.</string>
+
+        <!-- You might also have these if you had icons for other profile options
+             and used android:contentDescription in your XML for them -->
+        <string name="cd_achievements_gallery">Achievements or Gallery</string>
+        <string name="cd_wallet">Wallet</string>
+        <string name="cd_settings">Settings</string>
+
+
+
+        <string name="cd_user_profile_picture">User\'s profile picture</string>
+
+        <string name="cd_achievements_icon">Achievements icon</string>
+        <string name="cd_navigate_to_achievements">Navigate to achievements</string>
+
+        <string name="cd_wallet_icon">Wallet icon</string>
+        <string name="cd_navigate_to_wallet">Navigate to wallet</string>
+
+        <string name="cd_settings_icon">Settings icon</string>
+        <string name="cd_navigate_to_settings">Navigate to settings</string>
+
+        <!-- Optional for buttons with icons if text isn't sufficient, but typically not required by Lint for MaterialButtons with text -->
+        <!-- <string name="cd_become_organizer_button">Become an organizer</string> -->
+        <!-- <string name="cd_logout_button">Log out</string> -->
+
+
+        <!-- Content Descriptions for Home Fragment -->
+        <string name="cd_browse_all_events_button">Browse all available events</string>
+        <string name="cd_host_an_event_button">Host a new event (for organizers)</string>
+    <string name="title_host_event">Host Event</string>
+          <string name="sort_title">Title</string>
+        <string name="sort_payment_high_low">Payment (High to Low)</string>
+          <string name="filter_all_categories">All Categories</string>
+        <string name="filter_category_charity">Charity</string>
+        <string name="filter_category_sports">Sports</string>
+        <string name="filter_category_cultural">Cultural</string>
+        <string name="filter_category_others">Others</string>
+
+        <!-- For Messages & Toasts -->
+        <string name="error_event_data_missing">Event data is missing. Cannot proceed.</string>
+        <string name="text_no_events_available_at_all">No volunteer opportunities available at the moment. Check back later!</string>
+        <string name="text_no_events_match_filters">No events match your current filters. Try adjusting them.</string>
+
+
+     <string name="error_cannot_apply">Cannot apply at this time.</string>
+
+        <!-- For placeholders if you use Glide/Picasso -->
+        <!-- <string name="placeholder_event_banner_desc">Event banner placeholder</string> -->
+        <!-- <string name="error_event_banner_desc">Error loading event banner</string> -->
+
+
+        <!-- For WaitlistedActivity -->
+        <string name="title_waitlisted_events">Waitlisted Events</string>
+        <string name="toast_please_log_in_to_view">Please log in to view your waitlisted events.</string>
+        <string name="toast_refreshing_waitlisted_events">Refreshing waitlisted events…</string>
+        <string name="toast_failed_to_load_events_param">Failed to load events: %1$s</string>
+        <string name="toast_no_events_on_waitlist">No events currently on your waitlist.</string>
+
+        <!-- NEW/UPDATED: For the item click toast -->
+        <string name="toast_event_clicked">Event clicked: %1$s</string>
+
+    <string name="default_event_title_placeholder">(Event Title Not Available)</string>
+    <string name="empty_waitlist_message">Your waitlist is currently empty.</string>
+    <string name="event_name_not_available">Event Name Not Available</string>
+    <string name="date_invalid">Invalid Date</string>
+    <string name="volunteer_info_not_specified">Volunteer Info Not Specified</string>
+    <string name="error_cannot_open_event_details">Cannot Open Event Details</string>
+    <string name="firestore_collection_events">Firestore Collection Events</string> <!-- For the empty state TextView -->
+
+
+    <string name="title_approved_events">Approved Events</string>
+     <string name="toast_already_viewing_approved">Already viewing approved events.</string>
+     <string name="toast_sign_in_to_see_approved">Please sign in to see approved events.</string>
+     <string name="no_approved_events_found">No approved events found.</string>
+   <string name="firestore_field_approved_user_ids">approvedUserIds</string>
+
+
+
+        <!-- Toasts -->
+        <string name="toast_user_not_logged_in">User not logged in. Redirecting to login.</string>
+        <string name="toast_camera_permission_denied">Camera permission denied.</string>
+        <string name="toast_error_saving_camera_image">Error saving camera image.</string>
+        <string name="toast_failed_to_decode_image_from_source">Failed to decode image from %1$s.</string> <!-- %1$s will be 'camera' or 'gallery' -->
+        <string name="toast_failed_to_process_image_from_source">Failed to process image from %1$s.</string> <!-- %1$s will be 'camera' or 'gallery' -->
+        <string name="toast_could_not_create_image_uri">Could not prepare for camera.</string>
+        <string name="toast_error_preparing_camera">Error preparing camera.</string>
+        <string name="toast_failed_to_load_profile_param">Failed to load profile: %1$s</string> <!-- %1$s will be the error message -->
+        <string name="toast_user_profile_not_found">User profile data not found.</string>
+        <string name="toast_error_no_user_or_image_for_upload">Error: Not logged in or no image selected for upload.</string>
+        <string name="toast_failed_to_get_download_url">Failed to get image download URL.</string>
+        <string name="toast_image_upload_failed_param">Image upload failed: %1$s</string> <!-- %1$s will be the error message -->
+       <string name="toast_error_updating_firestore_no_ref">Error: Cannot update profile, user reference missing.</string>
+        <string name="toast_profile_image_updated">Profile image updated!</string>
+        <string name="toast_failed_to_update_firestore_url_param">Failed to update profile image: %1$s</string> <!-- %1$s will be the error message -->
+        <string name="toast_logged_out">Logged out successfully.</string>
+
+        <!-- Dialog for Image Source -->
+        <string name="dialog_title_add_photo">Add Photo!</string>
+        <string name="dialog_item_take_photo">Take Photo</string>
+        <string name="dialog_item_choose_from_gallery">Choose from Gallery</string>
+        <string name="dialog_item_cancel">Cancel</string>
+
+        <!-- Placeholder Text -->
+        <string name="text_na">N/A</string>
+
+        <!-- You might have these from other activities, ensure they are present if Profile.java links to them -->
+        <!-- <string name="title_activity_settings">Settings</string> -->
+        <!-- <string name="title_activity_gallery">Gallery</string> -->
+         <string name="title_activity_wallet">Wallet</string>
+        <!-- <string name="title_activity_my_events">My Events</string> -->
+    <string name="toast_please_log_in_to_see_events">Please log in to see your events.</string>
+     <string name="toast_you_havent_hosted_events">You haven\'t hosted any events yet.</string>
+     <string name="toast_failed_to_load_hosted_events">Failed to load hosted events.</string>
+     <string name="toast_some_event_details_not_loaded">Some event details could not be loaded.</string>
+     <string name="toast_no_events_to_display">No events to display.</string>
+     <string name="toast_failed_to_load_event_details">Failed to load details for some events.</string>
+     <string name="toast_view_details_for_param">View details for: %1$s</string>
+     <string name="toast_edit_param">Edit: %1$s</string>
+     <string name="dialog_title_delete_event">Delete Event</string>
+     <string name="dialog_message_confirm_delete_param">Are you sure you want to delete \'%1$s\'?</string>
+     <string name="button_delete">Delete</string>
+     <string name="button_cancel">Cancel</string>
+     <string name="toast_error_cannot_delete_event_user_or_id_missing">Error: Cannot delete event. User not logged in or event ID missing.</string>
+     <string name="toast_event_deleted_successfully_param">\'%1$s\' deleted successfully.</string>
+     <string name="toast_failed_to_delete_event_param">Failed to delete \'%1$s\'. Error: %2$s</string>
+    <string name="error_event_id_missing_for_edit">Error: Event Id missing</string>
+    <string name="error_saving_event_data_missing">Error Saving Event: Data Missing</string>
+    <string name="title_my_events">My Events</string>
+
+    <string name="error_failed_to_load_profile_data">Failed to load profile data.</string>
+    <string name="navigating_to_create_event">Navigating to Create Event…</string>
+    <string name="navigating_to_manage_events">Navigating to Manage Events…</string>
+    <string name="navigating_to_view_applications">Navigating to View Applications…</string>
+
+    <string name="select_event_to_see_applications">Select an event to see applications.</string>
+    <string name="cannot_load_applications_no_ids">Cannot load applications. Event or Organizer not specified.</string>
+    <string name="clicked_volunteer">Clicked: %s</string>
+    <string name="rejection_reason_placeholder">Not a good fit at this time.</string>
+    <string name="error_loading_applications">Error: %s</string>
+    <string name="application_status_updated">Application status updated!</string>
+    <string name="update_failed">Update failed: %s</string>
+
+
+        <!-- Strings for OrganizerProfileFragment -->
+        <string name="user_not_logged_in_profile">User not logged in. Please log in again.</string>
+        <string name="error_opening_gallery">Error opening gallery.</string>
+          <string name="user_not_logged_in_upload">User not logged in. Cannot upload image.</string>
+        <string name="image_upload_url_failed">Image uploaded, but failed to get URL.</string>
+        <string name="image_upload_failed_message">Image upload failed: %s</string> <!-- %s is for error message -->
+        <string name="user_not_logged_in_update_url">User not logged in. Cannot update profile URL.</string>
+        <string name="profile_image_updated_success">Profile image updated successfully.</string>
+        <string name="profile_image_url_update_failed">Failed to update profile image URL: %s</string> <!-- %s is for error message -->
+        <string name="error_name_cannot_be_empty">Name cannot be empty.</string>
+        <string name="profile_updated_successfully">Profile updated successfully.</string>
+        <string name="profile_update_failed_message">Failed to update profile: %s</string> <!-- %s is for error message -->
+        <string name="user_not_logged_in_save_profile">User not logged in. Cannot save profile.</string>
+
+        <!-- Placeholder for profile image if none is loaded -->
+        <string name="organizer_profile_image_description">Organizer profile image</string>
+
+
+
+
+
+      <string name="hint_organizer_name">Organizer Name</string>
+        <string name="label_event_date">Event Date:</string>
+        <string name="hint_event_date_placeholder">DD/MM/YYYY</string> <!-- Used for both hint and default text of date field -->
+        <string name="button_select_date">Select Date</string>
+        <string name="label_event_time">Event Time:</string>
+        <string name="label_event_type">Event Type:</string>
+        <string name="hint_payment_stipend">Payment/Stipend (Optional, e.g., 0 or 500)</string>
+          <string name="button_create_event">Create Event</string>
+        <string name="button_update_event">Update Event</string>
+    <string name="error_organizer_id_not_found">Error: Organizer ID not found</string>
+    <string name="title_activity_summary">Activity Summary</string> <!-- For when in edit mode -->
+    <string name="bottom_nav_organizer_activity_summary">Summary</string>
+    <string name="event_placeholder">Event</string>
+    <string name="this_event_placeholder">This Event</string>
+    <string name="error_generic_message">Generic Error Message</string>
+    <string name="you_havent_applied_to_any_opportunities_yet">You haven\'t applied to any opportunities yet</string>
+    <string name="menu_my_applications">My applications</string>
+
+
+
+
+
+
+
+     <string name="edit_opportunity_title">Edit Opportunity</string>
+        <string name="organization_name_optional">Organization Name (Optional)</string>
+        <string name="event_opportunity_title_required">Event / Opportunity Title*</string>
+        <string name="specific_role_title_optional">Specific Role / Job Title (Optional)</string>
+        <string name="description_required">Description*</string>
+        <string name="date_required">Date*</string>
+        <string name="time_required">Time*</string>
+        <string name="location_required">Location*</string>
+        <string name="category_required">Category*</string>
+        <string name="volunteers_needed_required">Volunteers Needed*</string>
+           <string name="error_posting_id_missing">Error: Posting ID missing for edit.</string>
+        <string name="error_could_not_load_job_details">Error: Could not load job details.</string>
+        <string name="error_job_posting_not_found">Error: Job posting not found.</string>
+        <string name="failed_to_load_details">Failed to load details: %s</string> <!-- %s will be placeholder for error message -->
+        <string name="org_name_required_if_no_profile_name">Organization name is required if not set in profile.</string>
+        <string name="event_title_required">Event/Opportunity title is required.</string>
+        <string name="vol_needed_greater_than_zero">Must be greater than 0.</string>
+        <string name="invalid_number_for_volunteers">Invalid number for volunteers.</string>
+        <string name="auth_error_login_again">Authentication error. Please log in again.</string>
+        <string name="opportunity_updated_successfully">Opportunity updated successfully!</string>
+        <string name="failed_to_update_opportunity">Failed to update. %s</string>
+        <string name="opportunity_posted_successfully">Opportunity posted successfully!</string>
+        <string name="failed_to_post_opportunity">Failed to post. %s</string>
+        <string name="select_a_date">Please select a date.</string>
+        <string name="select_a_time">Please select a time.</string>
+
+
+        <!-- Strings for employer_navigation.xml labels -->
+        <string name="title_employer_home">Employer Home</string>
+        <string name="title_post_new_job">Post New Job</string>
+        <string name="title_employer_posted_jobs">My Posted Jobs</string>
+        <string name="title_employer_applications">View Applications</string>
+        <string name="title_employer_profile">Manage Profile</string>
+
+        <!-- Strings for EmployerMainActivity (BottomNav and Drawer Menus - you might have these already) -->
+        <!-- Reusing some from above for consistency -->
+        <string name="category_account">Account</string>
+        <string name="action_sign_out">Sign Out</string>
+        <string name="employer_name_placeholder">Organization Name</string> <!-- For nav header -->
+        <string name="nav_header_desc_employer">Employer Profile Header</string> <!-- For nav header -->
+        <string name="nav_header_employer_name">Organization Name</string> <!-- For nav header -->
+        <string name="nav_header_employer_email">employer@example.com</string> <!-- For nav header -->
+
+        <!-- Common strings that might be used across employer section -->
+        <string name="authentication_required">Authentication required.</string>
+
+
+    <string name="welcome_employer_placeholder">Welcome, Employer!</string>
+    <string name="action_post_new_job">Post New Opportunity</string>
+    <string name="action_view_my_posted_jobs">View My Posted Opportunities</string>
+    <string name="action_view_applications">View Volunteer Applications</string>
+    <string name="action_manage_employer_profile">Manage Organization Profile</string>
+    <string name="welcome_user">Welcome User: %s</string>
+
+    <string name="title_role_change_interest">Interested in Other Roles?</string>
+    <string name="action_become_organizer">Become an Event Organizer</string>
+    <string name="action_become_volunteer">Become a Volunteer</string>
+     <string name="request_sent_organizer">Request to become an Organizer sent.</string>
+    <string name="request_sent_volunteer">Request to become a Volunteer sent.</string>
+    <string name="request_already_pending">Your request is already pending.</string>
+    <string name="role_change_status_pending">Status: Your request to become a %s is pending.</string>
+
+    <string name="title_applications_for_event">Applications</string>
+    <string name="no_applications_found_for_this_event">No applications found for this opportunity yet.</string>
+     <string name="applications_for_dynamic_title">Applications for: %s</string>
+    <string name="applications_for_event_with_id">Applications for Event ID: %s</string>
+    <string name="error_loading_applications_message">Error loading applications: %s</string>
+
+     <string name="application_updated_successfully">Application %s!</string>
+     <string name="application_details_not_found">Application details not found.</string>
+    <string name="could_not_load_full_volunteer_details">Could not load full volunteer details.</string>
+    <string name="title_application_detail">Application Detail</string> <!-- For Toolbar -->
+    <string name="volunteer_details_not_available">Volunteer (Details N/A)</string>
+    <string name="application_status_not_available">Application Status N/A</string>
+    <string name="rejection_reason_not_available">Rejection Reason N/A</string>
+    <string name="invalid_email_error">Error: Invalid Email</string>
+    <string name="image_upload_failed_error">Error: Image Upload Failed: %s</string>
+    <string name="confirm_role_change_title">Change Title</string>
+    <string name="confirm_role_change_message">Change Message: %s</string>
+    <string name="yes_request">Request</string>
+    <string name="role_request_sent_toast">Request Sent: %s</string>
+    <string name="role_request_failed_toast">Request Failed: %s</string>
+    <string name="nav_header_profile_image_desc">Profile image</string>
+
+    <string name="switch_roles_title">Switch Roles</string>
+    <string name="switch_to_employer_role">Become an Employer</string>
+    <string name="switch_to_volunteer_role">Become a Volunteer</string>
+    <string name="profile_role_updated_title">Role Updated</string>
+    <string name="profile_role_updated_message">Your role has been updated to %1$s. Restarting app to apply changes.</string>
+    <string name="profile_role_update_failed">Failed to update role. Please try again.</string>
+
+    <string-array name="event_types_array">
+        <item>Community Service</item>
+            <item>Environmental Cleanup</item>
+            <item>Workshops</item>
+            <item>Meetup</item>
+            <item>Conference</item>
+            <item>Educational Workshop</item>
+            <item>Fundraising</item>
+            <item>Animal Welfare</item>
+            <item>Health &amp; Wellness</item>
+            <item>Arts &amp; Culture</item>
+            <item>Other</item>
+        </string-array>
+        <!-- You can have other string arrays or individual strings -->
+
+
+</resources>

@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "6677623239",
+    "firebase_url": "https://volunteersapp-968b2-default-rtdb.firebaseio.com",
+    "project_id": "volunteersapp-968b2",
+    "storage_bucket": "volunteersapp-968b2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:6677623239:android:6cd7798d751d891bd829e2",
+        "android_client_info": {
+          "package_name": "com.LVCA.volunteersApp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHOi58DQhQ-AIIPW-3EFHIbfLA7Zc7_tA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:6677623239:android:3dbf0710603b553bd829e2",
+        "android_client_info": {
+          "package_name": "com.example.volunteersApp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHOi58DQhQ-AIIPW-3EFHIbfLA7Zc7_tA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

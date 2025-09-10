@@ -1,0 +1,43 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        Old AppCompat themes.
+        If your entire app now uses Theme.VolunteersApp (Material 3 based),
+        these might be unused and can potentially be removed.
+        Verify they aren't applied to any activities in your Manifest.
+    -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">@color/blue700</item>
+        <item name="colorPrimaryDark">@color/blueHigh</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:windowTranslucentStatus" tools:targetApi="kitkat">true</item>
+        <item name="android:windowTranslucentNavigation" tools:ignore="NewApi">true</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar">
+        <!-- This style is problematic if AppTheme is already NoActionBar -->
+        <!-- If you need a version of AppTheme WITH an action bar, it should have a different parent -->
+        <item name="windowActionBar">true</item>
+        <item name="windowNoTitle">false</item>
+    </style>
+
+    <!-- Your Widget Styles -->
+    <style name="spinner_style">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:background">@drawable/gradient_spinner</item>
+        <item name="android:layout_margin">10dp</item>
+        <item name="android:paddingLeft">8dp</item>
+        <item name="android:paddingRight">20dp</item>
+        <item name="android:paddingTop">5dp</item>
+        <item name="android:paddingBottom">5dp</item>
+        <item name="android:popupBackground">#DFFFFFFF</item>
+    </style>
+
+    <style name="MyCategoryChip" parent="Widget.MaterialComponents.Chip.Action">
+        <item name="chipBackgroundColor">@color/my_chip_background_color</item>
+        <item name="android:textColor">@color/my_chip_text_color</item>
+        <item name="chipCornerRadius">16dp</item>
+    </style>
+
+</resources>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_employer_home"
+        android:icon="@drawable/ic_home_selector"
+
+    android:title="@string/title_employer_home" />
+    <item
+        android:id="@+id/nav_employer_posted_jobs"
+        android:icon="@drawable/ic_view_list_selector"
+
+    android:title="@string/title_employer_posted_jobs" />
+    <item
+        android:id="@+id/nav_employer_applications"
+        android:icon="@drawable/ic_applications_selector"
+
+    android:title="@string/title_employer_applications" />
+</menu>
+

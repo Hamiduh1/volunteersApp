@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:showIn="navigation_view">
+
+    <group android:checkableBehavior="single">
+        <!-- Items that are in BottomNav might be removed from here
+             or kept if you want them accessible from both.
+        <item
+            android:id="@+id/nav_home"
+            android:icon="@drawable/ic_home_black_24dp"
+            android:title="@string/menu_home" />
+        <item
+            android:id="@+id/nav_profile"
+            android:icon="@drawable/ic_person_black_24dp"
+            android:title="@string/menu_profile" />
+        <item
+            android:id="@+id/nav_my_events_activity"
+            android:icon="@drawable/ic_event_note_black_24dp"
+            android:title="@string/menu_my_events" />
+        -->
+        <!-- Host an Event might also be in BottomNav
+        <item
+            android:id="@+id/nav_host" // Ensure this ID is correct, you might be using nav_host_event for the fragment
+            android:icon="@drawable/ic_menu_edit"
+            android:title="@string/menu_host_event_activity" />
+        -->
+    </group>
+
+    <item android:title="@string/drawer_section_account">
+        <menu>
+            <item
+                android:id="@+id/nav_wallet"
+                android:icon="@drawable/ic_account_balance_wallet_black_24dp"
+                android:title="@string/menu_wallet" />
+            <!-- You can add an "Account Details" item here that navigates to nav_profile
+                 if you remove Profile from the top group -->
+            <item
+                android:id="@+id/nav_drawer_profile_shortcut"
+                android:icon="@drawable/ic_person_black_24dp"
+            android:title="@string/menu_profile_details" /> <!-- New string: "Profile Details" -->
+
+        </menu>
+    </item>
+
+    <item android:title="@string/drawer_section_communicate">
+        <menu>
+            <item
+                android:id="@+id/nav_share"
+                android:icon="@drawable/ic_menu_share"
+                android:title="@string/menu_share" />
+            <item
+                android:id="@+id/nav_feedback"
+                android:icon="@drawable/ic_menu_send"
+                android:title="@string/menu_feedback" />
+            <item
+                android:id="@+id/nav_report"
+                android:icon="@drawable/ic_report_problem_black_24dp"
+                android:title="@string/menu_report" />
+        </menu>
+    </item>
+
+    <item android:title="@string/drawer_section_app_actions">
+        <menu>
+            <item
+                android:id="@+id/nav_sign_out"
+                android:icon="@drawable/ic_exit_to_app_black_24dp"
+                android:title="@string/sign_out_drawer" /> <!-- New string: "Sign Out" -->
+        </menu>
+    </item>
+
+</menu>

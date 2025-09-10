@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".OrganizationProfileActivity">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appBarLayoutOrganization"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar">
+
+        <com.google.android.material.appbar.CollapsingToolbarLayout
+            android:id="@+id/collapsingToolbarOrganization"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:contentScrim="?attr/colorPrimary"
+            app:layout_scrollFlags="scroll|exitUntilCollapsed|snap"
+            app:titleEnabled="true"
+            app:toolbarId="@id/toolbarOrganizationProfile">
+
+            <ImageView
+                android:id="@+id/imageViewOrganizationHeader"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:scaleType="centerCrop"
+                android:src="@drawable/default_image_placeholder"
+                app:layout_collapseMode="parallax"
+                android:contentDescription="@string/organization_header_image_description" />
+            <!-- Ensure @string/organization_header_image_description is created -->
+            <!-- Ensure @drawable/default_image_placeholder exists -->
+
+            <androidx.appcompat.widget.Toolbar
+                android:id="@+id/toolbarOrganizationProfile"
+                android:layout_width="match_parent"
+                android:layout_height="?attr/actionBarSize"
+                app:layout_collapseMode="pin"
+                app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
+
+        </com.google.android.material.appbar.CollapsingToolbarLayout>
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:clipToPadding="false">
+
+            <!-- Organization Name and Type Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:id="@+id/textViewOrgName"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+                        tools:text="Green Earth Society" />
+
+                    <TextView
+                        android:id="@+id/textViewOrgType"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?android:attr/textColorSecondary"
+                        tools:text="Non-profit Organization" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- About Organization Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/about_organization_label"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:layout_marginBottom="8dp"/>
+                    <!-- Ensure @string/about_organization_label is created -->
+
+                    <TextView
+                        android:id="@+id/textViewOrgDescription"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:lineSpacingExtra="4dp"
+                        tools:text="Dedicated to promoting environmental awareness and sustainability through community action and education. We organize cleanups, workshops, and advocacy campaigns." />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Contact Information Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="4dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/contact_information_label"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:layout_marginBottom="8dp"/>
+                    <!-- Ensure @string/contact_information_label is created -->
+
+                    <TextView
+                        android:id="@+id/textViewOrgContactEmail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:drawableStartCompat="@drawable/ic_email"
+                        android:drawablePadding="12dp"
+                        android:gravity="center_vertical"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:autoLink="email"
+                        android:textColorLink="?attr/colorPrimary"
+                        tools:text="contact@greenearth.org" />
+                    <!-- Ensure @drawable/ic_email exists -->
+
+                    <TextView
+                        android:id="@+id/textViewOrgContactPhone"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        app:drawableStartCompat="@drawable/ic_phone"
+                        android:drawablePadding="12dp"
+                        android:gravity="center_vertical"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:autoLink="phone"
+                        android:textColorLink="?attr/colorPrimary"
+                        tools:text="+1 234 567 8900" />
+                    <!-- Ensure @drawable/ic_phone exists -->
+
+                    <TextView
+                        android:id="@+id/textViewOrgWebsite"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        app:drawableStartCompat="@drawable/ic_website"
+                        android:drawablePadding="12dp"
+                        android:gravity="center_vertical"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:autoLink="web"
+                        android:textColorLink="?attr/colorPrimary"
+                        tools:text="www.greenearth.org" />
+                    <!-- Ensure @drawable/ic_website exists -->
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Address Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardViewOrgAddress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="4dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/address_label"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:layout_marginBottom="8dp"/>
+                    <!-- Ensure @string/address_label is created -->
+
+                    <TextView
+                        android:id="@+id/textViewOrgAddress"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:drawableStartCompat="@drawable/ic_location"
+                        android:drawablePadding="12dp"
+                        android:gravity="center_vertical"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        tools:text="123 Green Way, Nature City, ST 12345, Country" />
+                    <!-- Ensure @drawable/ic_location exists -->
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Focus Areas Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardViewOrgFocusAreas"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="4dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/focus_areas_label"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:layout_marginBottom="8dp"/>
+                    <!-- Ensure @string/focus_areas_label is created -->
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupOrgFocusAreas"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:chipSpacingVertical="4dp">
+                        <!-- Chips will be added programmatically -->
+                        <!-- Example Chip for tools preview:
+                        <com.google.android.material.chip.Chip
+                             style="@style/Widget.MaterialComponents.Chip.Entry"
+                             tools:text="Environment" />
+                        -->
+                    </com.google.android.material.chip.ChipGroup>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Active Job Postings -->
+            <TextView
+                android:id="@+id/textViewOrgJobPostsLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/active_job_postings_label"
+                android:textAppearance="@style/TextAppearance.Material3.TitleLarge" />
+            <!-- Ensure @string/active_job_postings_label is created -->
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyclerViewOrgJobPosts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false"
+                tools:listitem="@layout/item_job_post_simple"
+                tools:itemCount="2"/>
+            <!-- Ensure item_job_post_simple.xml layout exists -->
+
+            <ProgressBar
+                android:id="@+id/progressBarOrganizationProfile"
+                style="?android:attr/progressBarStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginTop="16dp"
+                android:visibility="gone"
+                tools:visibility="visible"/>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

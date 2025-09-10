@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "nodenext", // Keep this if you intend to use native ESM
+    "esModuleInterop": true,
+    "allowJs": true,                // <--- ADD THIS LINE
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "outDir": "lib",
+    "sourceMap": true,
+    "strict": true,
+    "target": "es2017",
+    "skipLibCheck": true,
+    // You might also need "skipLibCheck": true if you encounter type errors from node_modules
+    // "skipLibCheck": true
+  },
+  "compileOnSave": true,
+  "include": [
+    "src/**/*.ts" // Be more explicit with the glob pattern
+  ],
+  "exclude": [    // It's good practice to explicitly exclude node_modules and your output dir
+    "node_modules",
+    "lib"
+  ]
+}

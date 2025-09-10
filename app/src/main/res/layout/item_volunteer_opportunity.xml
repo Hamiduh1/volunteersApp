@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginEnd="8dp"
+    android:layout_marginBottom="4dp"
+    app:cardElevation="2dp"
+    app:cardCornerRadius="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/textViewOpportunityTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/placeholder_opportunity_title"
+            android:textAppearance="?attr/textAppearanceHeadline6"
+            android:ellipsize="end"
+            android:maxLines="2"/>
+
+        <TextView
+            android:id="@+id/textViewOpportunityOrganization"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/placeholder_organization_name"
+            android:textAppearance="?attr/textAppearanceBody2"
+            android:textColor="?android:attr/textColorSecondary"/>
+
+        <TextView
+            android:id="@+id/textViewOpportunityDate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/placeholder_event_date"
+            android:textAppearance="?attr/textAppearanceCaption"
+            android:drawablePadding="4dp"
+            app:drawableStartCompat="@drawable/ic_event_date" />
+        <!-- You'll need to add an icon ic_event_date (e.g., a calendar icon) to your drawable folder -->
+
+        <TextView
+            android:id="@+id/textViewOpportunityType"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/placeholder_event_type"
+            android:textAppearance="?attr/textAppearanceCaption"
+            android:drawablePadding="4dp"
+            app:drawableStartCompat="@drawable/ic_event_category" />
+        <!-- You'll need to add an icon ic_event_category (e.g., a label or tag icon) to your drawable folder -->
+
+        <!-- Optional: Add more fields if needed, like location or a short description snippet -->
+
+        <TextView
+            android:id="@+id/textViewOpportunityLocation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Placeholder Location"
+            android:textAppearance="?attr/textAppearanceCaption"
+            android:drawablePadding="4dp"
+            app:drawableStartCompat="@drawable/ic_location_on" />
+
+
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

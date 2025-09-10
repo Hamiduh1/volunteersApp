@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="colorPrimaryDark">#303F9F</color> <!-- Consider removing if not used by M1/M2 styles -->
+    <color name="colorPrimary">#6200EE</color> <!-- Consider removing if not used by M1/M2 styles -->
+    <color name="colorAccent">#03DAC5</color> <!-- Consider removing if not used by M1/M2 styles -->
+    <color name="colorButton">#000000</color>
+    <color name="colorAccentDark">#FF4081</color> <!-- Consider removing if not used by M1/M2 styles -->
+    <color name="colorBlue500">#2196f3</color>
+    <color name="buttonColor">#000000</color>
+    <color name="my_chip_background_color">#2196f3</color>
+    <color name="my_chip_text_color">#FFFFFF</color>
+    <color name="my_chip_border_color">#2196f3</color>
+
+    <color name="common_google_signin_btn_text_dark">#FFFFFF</color>
+    <color name="common_google_signin_btn_text_dark_default">#000000</color>
+    <color name="common_google_signin_btn_text_dark_disabled">#616161</color>
+    <color name="common_google_signin_btn_text_dark_focused">#000000</color>
+    <color name="common_google_signin_btn_text_light">#000000</color>
+
+    <color name="common_google_signin_btn_text_light_default">#FFFFFF</color>
+    <color name="common_google_signin_btn_text_light_disabled">#616161</color>
+    <color name="common_google_signin_btn_text_light_focused">#FFFFFF</color>
+    <color name="common_google_signin_btn_tint">#4285F4</color>
+    <color name="purple_500">#9C27B0</color>
+    <color name="purple_700">#7b1fa2</color>
+    <color name="purple_800">#4b1c7d</color>
+    <color name="teal_200">#A6FEFF</color>
+    <color name="teal_700">#008080</color>
+
+    <color name="common_google_btn_text_dark">#FFFFFF</color>
+    <color name="common_google_btn_text_dark_focused">#64B5F6</color>
+    <color name="blue300">#64B5F6</color>
+    <color name="blue500">#2196f3</color> <!-- Duplicate of colorBlue500, consider consolidating -->
+    <color name="blue700">#1976D2</color>
+    <color name="blue800">#0E4BAF</color>
+    <color name="blueHigh">#104496</color>
+    <color name="black85">#65000000</color>
+    <color name="blue100">#BBDEFB</color>
+    <color name="blue200">#90CAF9</color>
+    <color name="blue400">#42A5F5</color>
+    <color name="red">#FF0000</color>
+    <color name="red100">#FF8A80</color>
+    <color name="red200">#FF5252</color>
+    <color name="red300">#FF1744</color>
+    <color name="red400">#D50000</color>
+    <color name="red500">#F44336</color>
+    <color name="red600">#E53935</color>
+    <color name="red700">#D32F2F</color>
+    <color name="red800">#C62828</color>
+    <color name="red900">#B71C1C</color>
+    <color name="green">#00FF00</color>
+    <color name="green100">#A5D6A7</color>
+    <color name="green200">#81C784</color>
+    <color name="green300">#66BB6A</color>
+    <color name="green400">#4CAF50</color>
+    <color name="green500">#43A047</color>
+    <color name="green600">#388E3C</color>
+    <color name="green700">#2E7D32</color>
+    <color name="green800">#1B5E20</color>
+    <color name="green900">#003D02</color>
+    <color name="yellow">#FFFF00</color>
+    <color name="yellow100">#FFF176</color>
+    <color name="yellow200">#FFEE58</color>
+    <color name="yellow300">#FFEB3B</color>
+    <color name="yellow400">#FDD835</color>
+    <color name="yellow500">#FBC02D</color>
+    <color name="yellow600">#F9A825</color>
+    <color name="yellow700">#F57F17</color>
+    <color name="yellow800">#FF6F00</color>
+    <color name="yellow900">#E65100</color>
+    <color name="orange">#FFA500</color>
+    <color name="orange100">#FFD740</color>
+    <color name="orange200">#FFAB00</color>
+    <color name="color_surface_variant_light">#E7E0EC</color>
+
+
+    <!-- Material 3 Light Theme Colors -->
+    <color name="md_theme_light_primary">#6750A4</color>
+    <color name="md_theme_light_onPrimary">#FFFFFF</color>
+    <color name="md_theme_light_primaryContainer">#EADDFF</color>
+    <color name="md_theme_light_onPrimaryContainer">#21005D</color>
+    <color name="md_theme_light_secondary">#625B71</color>
+    <color name="md_theme_light_onSecondary">#FFFFFF</color>
+    <color name="md_theme_light_secondaryContainer">#E8DEF8</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_onSecondaryContainer">#1D192B</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_tertiary">#7D5260</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_onTertiary">#FFFFFF</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_tertiaryContainer">#FFD8E4</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_onTertiaryContainer">#31111D</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_error">#B3261E</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_onError">#FFFFFF</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_errorContainer">#F9DEDC</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_onErrorContainer">#410E0B</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_background">#FFFBFE</color>
+    <color name="md_theme_light_onBackground">#1C1B1F</color>
+    <color name="md_theme_light_surface">#FFFBFE</color>
+    <color name="md_theme_light_onSurface">#1C1B1F</color>
+    <color name="md_theme_light_surfaceVariant">#E7E0EC</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_onSurfaceVariant">#49454F</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_outline">#79747E</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_inverseOnSurface">#F4EFF4</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_inverseSurface">#313033</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_inversePrimary">#D0BCFF</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_surfaceTint">#6750A4</color> <!-- Typically same as primary -->
+    <color name="md_theme_light_outlineVariant">#CAC4D0</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_light_scrim">#000000</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+
+    <!-- Material 3 Dark Theme Colors -->
+    <color name="md_theme_dark_primary">#D0BCFF</color>
+    <color name="md_theme_dark_onPrimary">#381E72</color>
+    <color name="md_theme_dark_primaryContainer">#4F378B</color>
+    <color name="md_theme_dark_onPrimaryContainer">#EADDFF</color>
+    <color name="md_theme_dark_secondary">#CCC2DC</color>
+    <color name="md_theme_dark_onSecondary">#332D41</color>
+    <color name="md_theme_dark_secondaryContainer">#4A4458</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_onSecondaryContainer">#E8DEF8</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_tertiary">#EFB8C8</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_onTertiary">#492532</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_tertiaryContainer">#633B48</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_onTertiaryContainer">#FFD8E4</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_error">#F2B8B5</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_onError">#601410</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_errorContainer">#8C1D18</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_onErrorContainer">#F9DEDC</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_background">#1C1B1F</color>
+    <color name="md_theme_dark_onBackground">#E6E1E5</color>
+    <color name="md_theme_dark_surface">#1C1B1F</color>
+    <color name="md_theme_dark_onSurface">#E6E1E5</color>
+    <color name="md_theme_dark_surfaceVariant">#49454F</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_onSurfaceVariant">#CAC4D0</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_outline">#938F99</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_inverseOnSurface">#1C1B1F</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_inverseSurface">#E6E1E5</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_inversePrimary">#6750A4</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_surfaceTint">#D0BCFF</color> <!-- Typically same as dark primary -->
+    <color name="md_theme_dark_outlineVariant">#49454F</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+    <color name="md_theme_dark_scrim">#000000</color> <!-- REPLACE WITH YOUR ACTUAL COLOR -->
+
+    <!-- Custom UI State Colors (Examples) -->
+    <color name="grey_disabled_button">#D3D3D3</color>
+    <color name="dark_grey_text">#A9A9A9</color>
+    <color name="green_approved">#4CAF50</color>
+    <color name="orange_pending">#FF9800</color>
+    <color name="red_rejected">#F44336</color>
+    <color name="blue_cancelled">#2196F3</color>
+    <color name="purple_applied">#9C27B0</color>
+    <color name="yellow_applied">#FFEB3B</color>
+    <color name="yellow_cancelled">#FFEB3B</color>
+    <color name="yellow_rejected">#FFEB3B</color>
+    <color name="yellow_pending">#FFEB3B</color>
+    <color name="yellow_approved">#FFEB3B</color>
+    <color name="default_text_color">#000000</color>
+
+    <color name="my_message_bubble_color">#007AFF</color>
+    <color name="other_message_bubble_color">#E5E5EA</color>
+    <color name="my_message_bubble_text_color">#FFFFFF</color>
+    <color name="other_message_bubble_text_color">#000000</color>
+    <color name="placeholder_background_color">#A9A9A9</color>
+    <color name="red_reject">#8C1D18</color>
+    <color name="green_accept">#4CAF50</color>
+    <color name="grey_light">#A9A9A9</color>
+    <color name="green_400">#A9A9A9</color>
+    <color name="placeholder_color">#E0E0E0</color> <!-- Example: Grey 300 -->
+
+    <color name="default_status_background">#607D8B</color> <!-- Example: Blue Grey 500 -->
+        <!-- <color name="default_status_border_color">#455A64</color> --> <!-- Example: Blue Grey 700 (if using border) -->
+
+
+
+        <color name="status_upcoming_background">#2196F3</color> <!-- Blue 500 -->
+        <color name="status_active_background">#4CAF50</color>   <!-- Green 500 -->
+        <color name="status_completed_background">#757575</color> <!-- Grey 600 -->
+        <color name="status_cancelled_background">#F44336</color> <!-- Red 500 -->
+    <color name="status_pending_color">#4CAF50</color>
+
+
+
+
+        <!-- Status Colors -->
+        <color name="status_approved_background">#4CAF50</color> <!-- Green -->
+        <color name="status_approved_text">#FFFFFF</color>
+
+        <color name="status_rejected_background">#F44336</color> <!-- Red -->
+        <color name="status_rejected_text">#FFFFFF</color>
+
+        <color name="status_withdrawn_background">#FF9800</color> <!-- Orange -->
+        <color name="status_withdrawn_text">#FFFFFF</color>
+
+        <color name="status_waitlisted_background">#2196F3</color> <!-- Blue -->
+        <color name="status_waitlisted_text">#FFFFFF</color>
+
+        <color name="status_pending_background">#FFC107</color> <!-- Amber/Yellow (from previous example) -->
+        <color name="status_pending_text">#000000</color>
+
+
+     <color name="colorStatusPending">#FFBB86FC</color>  <!-- Example: Purple -->
+     <color name="colorStatusAccepted">#FF03DAC5</color>  <!-- Example: Teal -->
+    <color name="colorStatusRejected">#FFFF7043</color>  <!-- Example: Orange/Red -->
+     <color name="colorStatusDefault">#FFBDBDBD</color>  <!-- Example: Grey -->
+
+
+
+    <!-- Optional: Text colors if you decide to set them individually per status -->
+        <!-- <color name="status_text_upcoming">#FFFFFF</color> -->
+        <!-- <color name="status_text_active">#FFFFFF</color> -->
+        <!-- <color name="status_text_completed">#FFFFFF</color> -->
+        <!-- <color name="status_text_cancelled">#FFFFFF</color> -->
+
+
+
+</resources>

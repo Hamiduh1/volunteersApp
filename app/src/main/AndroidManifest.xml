@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Permissions -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <!-- Add other permissions your app needs, e.g., location for Maps -->
+    <!-- <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" /> -->
+    <!-- <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" /> -->
+
+
+    <application
+        android:name=".VolunteersAppApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.VolunteersApp"
+        tools:targetApi="31"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:enableOnBackInvokedCallback="true">
+
+        <!-- Google Maps API Key - Injected from build.gradle -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${MAPS_API_KEY}"/> <!-- Ensure MAPS_API_KEY is defined in your build.gradle -->
+
+        <!-- Activities -->
+        <activity
+            android:name=".LoginActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.VolunteersApp" /> <!-- Assuming this is your main activity post-login -->
+
+        <activity
+            android:name=".EmployerMainActivity"
+            android:label="Employer Dashboard"
+            android:exported="false" />
+
+        <!-- Declare MyEventsContainerActivity if you created it -->
+        <!-- This likely replaces the old .MyEvents Activity functionality -->
+        <activity
+            android:name=".MyEventsContainerActivity"
+            android:label="@string/title_my_events"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+        <!--  <activity
+            android:name=".MyPostedJobsActivity"
+            android:label="My Posted Jobs"
+            android:exported="false"
+            android:parentActivityName=".EmployerMainActivity"
+            android:theme="@style/Theme.VolunteersApp.WithActionBar"/>-->
+
+        <!-- Other Activities - Review if they are still needed as separate Activities -->
+        <!-- or if they have been converted to Fragments -->
+        <activity
+            android:name=".EditEventActivity"
+            android:label="Edit Event"
+            android:exported="false"
+            android:parentActivityName=".EmployerMainActivity" />
+
+        <activity android:name=".accountSettings" android:label="Account" android:parentActivityName=".SettingsActivity" android:exported="false"/>
+        <activity android:name=".ProfileSupportActivity" android:label="Support" android:parentActivityName=".SettingsActivity" android:exported="false"/>
+        <activity android:name=".NotificationSettingsActivity" android:label="Notification Settings" android:parentActivityName=".SettingsActivity" android:exported="false"/>
+        <activity android:name=".PrivacySecurityActivity" android:label="Privacy &amp; Security" android:parentActivityName=".SettingsActivity" android:exported="false"/>
+        <activity android:name=".HowToUseActivity" android:label="How to Use" android:parentActivityName=".SettingsActivity" android:exported="false"/>
+        <activity android:name=".TermsConditionsActivity" android:label="Terms and Conditions" android:parentActivityName=".SettingsActivity" android:exported="false"/>
+
+        <activity
+            android:name=".organizer.CreateEventActivity"
+            android:label="Create Event"
+            android:exported="false"
+            android:parentActivityName=".EmployerMainActivity" />
+
+        <activity
+            android:name=".auth.ForgotPasswordActivity"
+            android:exported="false" />
+        <activity
+            android:name=".SignUpActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".MapsActivity"
+            android:label="Map"
+            android:exported="false" />
+        <activity
+            android:name=".ChatBox"
+            android:label="Chat"
+            android:exported="false" />
+        <activity
+            android:name=".EventDetailActivity"
+            android:label="Event Details"
+            android:exported="false" />
+        <activity
+            android:name="com.example.volunteersApp.organizer.OrganizerMainActivity"
+            android:label="Organizer Dashboard"
+            android:exported="false" />
+        <!-- Set exported based on whether other apps should launch it -->
+        <!-- Add parentActivityName if needed for Up navigation -->
+
+
+
+
+
+    <!-- REMOVED .MyEvents Activity declaration as the class was removed -->
+        <!--
+        <activity
+            android:name=".MyEvents"
+            android:label="My Events"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+        -->
+
+        <activity
+            android:name=".List_of_Events"
+            android:label="My Hosted Events"
+            android:parentActivityName=".MyEventsContainerActivity"
+        android:exported="false"/>
+
+        <activity
+            android:name=".Waitlisted"
+            android:label="My Applied Events"
+            android:parentActivityName=".MyEventsContainerActivity"
+        android:exported="false"/>
+
+        <activity
+            android:name=".VolunteerEvents"
+            android:label="Volunteer Events"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".HostAnEvent"
+            android:label="Host an Event"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".feedBackTab"
+            android:label="Feedback"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".Report"
+            android:label="Report Issue"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".Profile"
+            android:label="My Profile"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".ChangePhoneNumber"
+            android:label="Change Phone Number"
+            android:parentActivityName=".Profile"
+            android:exported="false"/>
+        <activity
+            android:name=".ChangePassword"
+            android:label="Change Password"
+            android:parentActivityName=".Profile"
+            android:exported="false"/>
+        <activity
+            android:name=".changeUserName"
+            android:label="Change Username"
+            android:parentActivityName=".Profile"
+            android:exported="false"/>
+
+        <activity
+            android:name=".EventDescription"
+            android:label="Event Details"
+            android:exported="false" />
+        <activity
+            android:name=".Wallet"
+            android:label="Wallet"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".SettingsActivity"
+            android:label="Settings"
+            android:parentActivityName=".Profile"
+            android:exported="false"/>
+        <activity
+            android:name=".Gallery"
+            android:label="Achievements"
+            android:parentActivityName=".Profile"
+            android:exported="false"/>
+
+        <!-- Employer Specific Activities -->
+        <activity
+            android:name=".employer.PostJobActivity"
+            android:label="Post New Job"
+            android:exported="false"
+            android:parentActivityName=".EmployerMainActivity"
+            android:theme="@style/Theme.VolunteersApp.WithActionBar"/>
+
+        <activity
+            android:name=".employer.ManageProfileActivity"
+            android:label="Manage Organization Profile"
+            android:exported="false"
+            android:parentActivityName=".EmployerMainActivity"
+            android:theme="@style/Theme.VolunteersApp.WithActionBar"/>
+        <activity
+            android:name=".OrganizationProfileActivity"
+            android:label="@string/organization_profile_title"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".ViewApplicationsActivity"
+            android:label="View Volunteer Applications"
+            android:exported="false"
+            android:parentActivityName=".EmployerMainActivity"
+            android:theme="@style/Theme.VolunteersApp.WithActionBar"/>
+        <activity
+            android:name=".JobPostDetailActivity"
+            android:exported="false"
+            android:label="Job Post Details"
+            android:parentActivityName=".AvailableJobsActivity" /> <!-- Make sure AvailableJobsActivity is defined or remove parent -->
+        <activity
+            android:name=".CalenderActivity"
+            android:label="Select Date"
+            android:exported="false" />
+        <activity
+            android:name=".JobDetailsActivity"
+            android:exported="false"
+            android:label="Job Details"/>
+        <activity
+            android:name=".SupportActivity"
+            android:label="@string/title_support"
+            android:parentActivityName=".MainActivity"
+            android:exported="false"/>
+
+        <!-- Provider for sharing files (e.g., images from camera) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Firebase Messaging Service (Uncomment and configure if used) -->
+        <!--
+        <service
+            android:name=".MyFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        -->
+
+    </application>
+
+</manifest>

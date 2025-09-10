@@ -1,0 +1,15 @@
+I0504 23:13:39.831898   20260 load.go:37] Reloading schema and connectors...
+I0504 23:13:39.870915   20260 control.go:73] [/emulator/VolunteersApp 803a] UpdateResources(): done
+Schema: sources: schema\schema.gql [2088B] 
+Connector "default": sources: connector\mutations.gql [1233B] connector\queries.gql [1802B] 
+I0504 23:13:39.907650   20260 codegen.go:82] [connector "default" kotlinSdk] Generating sources into "C:\\Users\\16147\\volunteersApp2\\VolunteersApp\\app\\src\\main\\java\\connectors\\default"
+I0504 23:13:39.929249   20260 collector.go:107] schema extensions wrote into "C:\\Users\\16147\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [71117B] 
+I0504 23:13:39.949985   20260 collector.go:107] connector "default" kotlinSdk wrote into "C:\\Users\\16147\\volunteersApp2\\VolunteersApp\\app\\src\\main\\java\\connectors\\default"
+Generated sources: DefaultConnectorEnums.kt [797B] DefaultConnector.kt [8307B] DefaultConnectorKeys.kt [799B] 
+I0504 23:13:39.949985   20260 load.go:115] Finished reloading
+I0504 23:13:39.968211   20260 dev.go:95] Listening on address (HTTP + gRPC): 127.0.0.1:9399
+I0504 23:13:39.970653   20260 dev.go:95] Listening on address (HTTP + gRPC): [::1]:9399
+I0504 23:13:46.716194   20260 control.go:73] [/emulator/VolunteersApp 4050] UpdateResources(): done
+Schema: sources: schema\schema.gql [2088B] 
+Connector "default": sources: connector\mutations.gql [1233B] connector\queries.gql [1802B] 

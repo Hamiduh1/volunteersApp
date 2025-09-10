@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/mobile_navigation"
+    app:startDestination="@id/nav_home">
+
+    <!-- Event Detail Screen (Consolidated ID) -->
+    <fragment
+        android:id="@+id/eventDetailFragment"
+        android:name="com.example.volunteersApp.ui.eventdetails.EventDetailFragment"
+        android:label="@string/title_event_details"
+        tools:layout="@layout/fragment_event_detail">
+        <argument
+            android:name="eventId"
+            app:argType="string" />
+    </fragment>
+
+    <!-- Volunteer's Applied Events Screen -->
+    <fragment
+        android:id="@+id/appliedEventsFragment"
+        android:name="com.example.volunteersApp.fragments.AppliedEventsFragment"
+        android:label="@string/title_applied_events"
+        tools:layout="@layout/fragment_applied_events">
+        <action
+            android:id="@+id/action_appliedEventsFragment_to_eventDetailFragment"
+            app:destination="@id/eventDetailFragment" />
+    </fragment>
+
+    <!-- Home Screen -->
+    <fragment
+        android:id="@+id/nav_home"
+        android:name="com.example.volunteersApp.ui.home.HomeFragment"
+        android:label="@string/menu_home"
+        tools:layout="@layout/fragment_home">
+        <action
+            android:id="@+id/action_nav_home_to_eventDetailFragment"
+            app:destination="@id/eventDetailFragment">
+            <argument
+                android:name="eventId"
+                app:argType="string" />
+        </action>
+        <action
+            android:id="@+id/action_nav_home_to_nav_volunteering_events"
+            app:destination="@id/nav_volunteering_events" />
+        <action
+            android:id="@+id/action_nav_home_organizer_to_nav_host_event"
+            app:destination="@id/nav_host_event" />
+        <action
+            android:id="@+id/action_nav_home_to_viewApplicantsFragment"
+            app:destination="@id/viewApplicantsFragment">
+            <argument
+                android:name="eventId"
+                app:argType="string" />
+        </action>
+        <action
+            android:id="@+id/action_nav_home_to_browseEventsFragment"
+            app:destination="@id/browseEventsFragment" />
+        <action
+            android:id="@+id/action_nav_home_to_myHostedEventsFragment"
+            app:destination="@id/myHostedEventsFragment" />
+        <action
+            android:id="@+id/action_nav_home_to_myEventFragment"
+            app:destination="@id/myEventFragment" />
+    </fragment>
+
+    <!-- General Volunteering/Event Browsing Screen -->
+    <fragment
+        android:id="@+id/nav_volunteering_events"
+        android:name="com.example.volunteersApp.VolunteeringFragment"
+        android:label="@string/menu_volunteering_events"
+        tools:layout="@layout/fragment_volunteering">
+        <argument
+            android:name="category_filter"
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
+        <action
+            android:id="@+id/action_nav_volunteering_events_to_eventDetailFragment"
+            app:destination="@id/eventDetailFragment" />
+    </fragment>
+
+    <!-- Host/Create/Edit Event Screen -->
+    <fragment
+        android:id="@+id/nav_host_event"
+        android:name="com.example.volunteersApp.ui.hostevent.HostEventFragment"
+        android:label="@string/title_host_event"
+        tools:layout="@layout/fragment_host_event">
+        <argument
+            android:name="eventId"
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
+        <action
+            android:id="@+id/action_nav_host_event_to_mapsActivity"
+            app:destination="@id/mapsActivity" />
+        <action
+            android:id="@+id/action_nav_host_event_to_viewApplicantsFragment"
+            app:destination="@id/viewApplicantsFragment">
+            <argument
+                android:name="eventId"
+                app:argType="string" />
+        </action>
+        <action
+            android:id="@+id/action_nav_host_event_to_myEventFragment"
+            app:destination="@id/myEventFragment" />
+        <action
+            android:id="@+id/action_nav_host_event_to_nav_host_final"
+            app:destination="@id/nav_host_final">
+            <!-- These arguments within the action primarily inform Safe Args about what can be passed.
+                 The actual parameter names in the generated Directions method are determined by
+                 the argument names in the DESTINATION fragment (nav_host_final). -->
+            <argument
+                android:name="eventId"
+                app:argType="string" />
+            <argument
+                android:name="eventTitle"
+                app:argType="string"
+                app:nullable="true" />
+        </action>
+    </fragment>
+
+    <!-- Profile Screen -->
+    <fragment
+        android:id="@+id/nav_profile"
+        android:name="com.example.volunteersApp.ui.profile.ProfileFragment"
+        android:label="@string/menu_profile"
+        tools:layout="@layout/fragment_profile">
+        <argument
+            android:name="userId"
+            app:argType="string"
+            app:nullable="true" />
+        <action
+            android:id="@+id/action_nav_profile_to_appliedEventsFragment"
+            app:destination="@id/appliedEventsFragment" />
+        <action
+            android:id="@+id/action_nav_profile_to_myHostedEventsFragment"
+            app:destination="@id/myHostedEventsFragment" />
+        <action
+            android:id="@+id/action_nav_profile_to_becomeOrganizerFragment"
+            app:destination="@id/becomeOrganizerFragment" />
+    </fragment>
+
+    <!-- NEW FRAGMENT: Become an Organizer Screen -->
+    <fragment
+        android:id="@+id/becomeOrganizerFragment"
+        android:name="com.example.volunteersApp.ui.auth.BecomeOrganizerFragment"
+        android:label="@string/title_become_an_organizer"
+        tools:layout="@layout/fragment_become_organizer">
+    </fragment>
+
+    <!-- Event Hosting Finalization Screen - Destination for the action -->
+    <fragment
+        android:id="@+id/nav_host_final"
+        android:name="com.example.volunteersApp.ui.hostevent.HostFinalFragment"
+        android:label="@string/title_event_creation_complete"
+        tools:layout="@layout/fragment_host_final">
+        <argument
+            android:name="eventId"
+            app:argType="string" />
+        <argument
+            android:name="eventTitle"
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
+    </fragment>
+
+    <!-- Organizer's "My Hosted Events" Screen -->
+    <fragment
+        android:id="@+id/myHostedEventsFragment"
+        android:name="com.example.volunteersApp.fragments.MyHostedEventsFragment"
+        android:label="@string/title_my_hosted_events"
+        tools:layout="@layout/fragment_my_hosted_events">
+        <action
+            android:id="@+id/action_myHostedEventsFragment_to_eventDetailFragment"
+            app:destination="@id/eventDetailFragment" />
+        <action
+            android:id="@+id/action_myHostedEventsFragment_to_nav_host_event"
+            app:destination="@id/nav_host_event">
+            <argument
+                android:name="eventId"
+                app:argType="string"
+                app:nullable="false" />
+        </action>
+        <action
+            android:id="@+id/action_myHostedEventsFragment_to_viewApplicantsFragment"
+            app:destination="@id/viewApplicantsFragment">
+            <argument
+                android:name="eventId"
+                app:argType="string" />
+        </action>
+    </fragment>
+
+    <!-- Browse All Events Screen -->
+    <fragment
+        android:id="@+id/browseEventsFragment"
+        android:name="com.example.volunteersApp.fragments.BrowseEventsFragment"
+        android:label="@string/title_browse_all_events"
+        tools:layout="@layout/fragment_browse_events">
+        <action
+            android:id="@+id/action_browseEventsFragment_to_eventDetailFragment"
+            app:destination="@id/eventDetailFragment" />
+    </fragment>
+
+    <!-- View Applicants Screen (for Organizers) -->
+    <fragment
+        android:id="@+id/viewApplicantsFragment"
+        android:name="com.example.volunteersApp.fragments.ViewApplicantsFragment"
+        android:label="@string/title_view_applicants"
+        tools:layout="@layout/fragment_view_applicants">
+        <argument
+            android:name="eventId"
+            app:argType="string" />
+        <action
+            android:id="@+id/action_viewApplicantsFragment_to_userProfileFragment"
+            app:destination="@id/userProfileFragment">
+            <argument
+                android:name="volunteerUid"
+                app:argType="string" />
+        </action>
+    </fragment>
+
+    <!-- User Profile Screen -->
+    <fragment
+        android:id="@+id/userProfileFragment"
+        android:name="com.example.volunteersApp.ui.profile.ProfileFragment"
+        android:label="@string/title_user_profile"
+        tools:layout="@layout/fragment_profile">
+        <argument
+            android:name="volunteerUid"
+            app:argType="string"
+            app:nullable="true" />
+    </fragment>
+
+    <!-- MyEventFragment (Distinct from MyHostedEventsFragment) -->
+    <fragment
+        android:id="@+id/myEventFragment"
+        android:name="com.example.volunteersApp.fragments.MyEventFragment"
+        android:label="@string/title_my_event_fragment"
+        tools:layout="@layout/fragment_my_event">
+        <action
+            android:id="@+id/action_myEventFragment_to_eventDetailFragment"
+            app:destination="@id/eventDetailFragment" />
+        <action
+            android:id="@+id/action_myEventFragment_to_viewApplicantsFragment"
+            app:destination="@id/viewApplicantsFragment">
+            <argument
+                android:name="eventId"
+                app:argType="string" />
+        </action>
+    </fragment>
+
+    <!-- Maps Activity -->
+    <activity
+        android:id="@+id/mapsActivity"
+        android:name="com.example.volunteersApp.MapsActivity"
+        android:label="@string/title_map"
+        tools:layout="@layout/activity_maps">
+        <argument
+            android:name="eventId"
+            app:argType="string"
+            app:nullable="true" />
+        <argument
+            android:name="organizerId"
+            app:argType="string"
+            app:nullable="true" />
+    </activity>
+
+</navigation>
+

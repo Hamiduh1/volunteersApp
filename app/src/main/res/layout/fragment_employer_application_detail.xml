@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".employer.ui.applications.EmployerApplicationDetailFragment">
+
+    <!--
+        Note: The Toolbar is typically part of the Activity hosting this fragment.
+        If this fragment needs its own specific toolbar, you can add it here,
+        but usually the Activity's toolbar (e.g., from EmployerMainActivity)
+        will be updated with the title for this fragment.
+        For simplicity, I'm omitting a dedicated Toolbar within this fragment's layout.
+        The title will be set on the Activity's toolbar from within the fragment.
+    -->
+
+    <ProgressBar
+        android:id="@+id/progressBarApplicationDetail"
+        style="?android:attr/progressBarStyleLarge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:visibility="gone"
+        tools:visibility="visible"/>
+
+    <ScrollView
+        android:id="@+id/contentContainerApplicationDetail"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <de.hdodenhof.circleimageview.CircleImageView
+                android:id="@+id/imageViewVolunteerProfileDetail"
+                android:layout_width="96dp"
+                android:layout_height="96dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginBottom="16dp"
+                android:src="@drawable/ic_profile_placeholder"
+                app:civ_border_width="2dp"
+                app:civ_border_color="#FFDDDDDD"/>
+
+            <TextView
+                android:id="@+id/textViewVolunteerNameDetail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                tools:text="Volunteer Name"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"
+                android:layout_marginBottom="4dp"/>
+
+            <TextView
+                android:id="@+id/textViewApplicationDateDetail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                tools:text="Applied on: Jan 1, 2024 - 10:00 AM"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+                android:layout_marginBottom="16dp"/>
+
+            <com.google.android.material.divider.MaterialDivider
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/status"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+                android:textStyle="bold"/>
+            <TextView
+                android:id="@+id/textViewApplicationStatusDetail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                tools:text="Pending"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:layout_marginBottom="16dp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/volunteer_email"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+                android:textStyle="bold"/>
+            <TextView
+                android:id="@+id/textViewVolunteerEmailDetail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                tools:text="volunteer@example.com"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
+                android:layout_marginBottom="16dp"
+                android:autoLink="email"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/volunteer_phone"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+                android:textStyle="bold"/>
+            <TextView
+                android:id="@+id/textViewVolunteerPhoneDetail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                tools:text="123-456-7890"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
+                android:layout_marginBottom="16dp"
+                android:autoLink="phone"/>
+
+            <TextView
+                android:id="@+id/textViewLabelCoverLetter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/cover_letter_message"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+                android:textStyle="bold"
+                android:layout_marginTop="8dp"/>
+            <TextView
+                android:id="@+id/textViewCoverLetterDetail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                tools:text="This is a sample cover letter from the volunteer, expressing their interest in the event and their qualifications."
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:layout_marginBottom="24dp"/>
+
+
+            <LinearLayout
+                android:id="@+id/layoutActionButtons"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="16dp"
+                android:gravity="center">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonAcceptApplication"
+                    style="@style/Widget.MaterialComponents.Button"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:text="@string/accept"
+                    app:icon="@drawable/ic_check_circle_default"
+                    android:backgroundTint="@color/colorStatusAccepted" /> <!-- Use your color -->
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonRejectApplication"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="@string/reject"
+                    app:icon="@drawable/ic_cancel_default"
+                    app:strokeColor="@color/colorStatusRejected"
+                    android:textColor="@color/colorStatusRejected"/>
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+</RelativeLayout>

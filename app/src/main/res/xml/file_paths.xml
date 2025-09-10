@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        This entry allows FileProvider to share files from the "MyAppImages" subdirectory
+        within your app's dedicated "Pictures" directory on external storage.
+        This corresponds to files created in:
+        Context.getExternalFilesDir(Environment.DIRECTORY_PICTURES).getAbsolutePath() + "/MyAppImages/"
+    -->
+    <external-files-path
+        name="my_app_images"
+        path="Pictures/MyAppImages/" />
+
+    <!--
+        If you were using the external cache directory instead, it would look like this:
+        (This corresponds to files in Context.getExternalCacheDir())
+    -->
+    <!--
+    <external-cache-path
+        name="my_cached_images"
+        path="images/" />
+    -->
+
+    <!--
+        If you were using the internal cache directory:
+        (This corresponds to files in Context.getCacheDir())
+    -->
+    <!--
+    <cache-path
+        name="my_internal_cached_images"
+        path="images/" />
+    -->
+</paths>

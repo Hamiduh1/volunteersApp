@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+
+    <!-- Background Color -->
+    <solid android:color="@color/other_message_bubble_color" />
+    <!-- Define this color in your colors.xml, e.g., <color name="other_message_bubble_color">#E5E5EA</color> (a light grey)
+         or use a predefined Android color like @android:color/darker_gray -->
+
+    <!-- Rounded Corners -->
+    <corners
+        android:radius="16dp" />
+    <!-- Similar to the "my_chat_bubble", you can customize individual corners -->
+
+    <!-- Optional: Padding inside the bubble -->
+    <!--
+    <padding
+        android:left="12dp"
+        android:top="8dp"
+        android:right="12dp"
+        android:bottom="8dp" />
+    -->
+</shape>

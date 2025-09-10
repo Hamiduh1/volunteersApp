@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="?attr/colorPrimary" /> <!-- Color when checked -->
+    <item android:state_enabled="false" android:color="@android:color/darker_gray" /> <!-- Color when disabled -->
+    <item android:color="?attr/colorOnSurfaceVariant" /> <!-- Default color (unchecked and enabled) -->
+</selector>

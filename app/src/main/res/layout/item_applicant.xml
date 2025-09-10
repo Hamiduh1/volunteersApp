@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginEnd="8dp"
+    android:layout_marginBottom="4dp"
+    app:cardElevation="2dp"
+    app:cardCornerRadius="8dp">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="12dp">
+
+        <de.hdodenhof.circleimageview.CircleImageView
+            android:id="@+id/imageViewApplicantProfile"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:src="@drawable/default_profile_image"
+            app:civ_border_width="1dp"
+            app:civ_border_color="@color/grey_light"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"/>
+
+        <TextView
+            android:id="@+id/textViewApplicantName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textAppearance="?attr/textAppearanceHeadline6"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            app:layout_constraintStart_toEndOf="@id/imageViewApplicantProfile"
+            app:layout_constraintTop_toTopOf="@id/imageViewApplicantProfile"
+            app:layout_constraintEnd_toStartOf="@+id/buttonAcceptApplicant"
+            tools:text="Applicant Name" />
+
+        <TextView
+            android:id="@+id/textViewApplicantEmail"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="?attr/textAppearanceBody2"
+            android:textSize="14sp"
+            app:layout_constraintStart_toStartOf="@id/textViewApplicantName"
+            app:layout_constraintTop_toBottomOf="@id/textViewApplicantName"
+            app:layout_constraintEnd_toEndOf="@id/textViewApplicantName"
+            tools:text="applicant.email@example.com" />
+
+        <TextView
+            android:id="@+id/textViewApplicationDate"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textSize="12sp"
+            android:textAppearance="?attr/textAppearanceCaption"
+            app:layout_constraintStart_toStartOf="@id/textViewApplicantName"
+            app:layout_constraintTop_toBottomOf="@id/textViewApplicantEmail"
+            app:layout_constraintEnd_toEndOf="@id/textViewApplicantName"
+            tools:text="Applied on: Jan 1, 2024" />
+
+        <TextView
+            android:id="@+id/textViewApplicationStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textSize="12sp"
+            android:textStyle="italic"
+            android:textAppearance="?attr/textAppearanceCaption"
+            app:layout_constraintStart_toStartOf="@id/textViewApplicantName"
+            app:layout_constraintTop_toBottomOf="@id/textViewApplicationDate"
+            app:layout_constraintEnd_toEndOf="@id/textViewApplicantName"
+            app:layout_constraintBottom_toBottomOf="@id/imageViewApplicantProfile"
+            app:layout_constraintVertical_bias="0.0"
+            tools:text="Status: Pending" />
+
+        <ImageButton
+            android:id="@+id/buttonAcceptApplicant"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@drawable/ic_check_circle"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/accept_applicant"
+            android:padding="8dp"
+            android:layout_marginEnd="4dp"
+            app:tint="@color/green_accept"
+            app:layout_constraintEnd_toStartOf="@+id/buttonRejectApplicant"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
+
+        <ImageButton
+            android:id="@+id/buttonRejectApplicant"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@drawable/ic_cancel_circle"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/reject_applicant"
+            android:padding="8dp"
+            app:tint="@color/red_reject"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</com.google.android.material.card.MaterialCardView>

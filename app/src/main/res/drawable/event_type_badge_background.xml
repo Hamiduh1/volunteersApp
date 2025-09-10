@@ -1,0 +1,6 @@
+<!-- res/drawable/event_type_badge_background.xml -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/colorPrimary" /> <!-- Or any color you prefer, e.g., #FF6200EE -->
+    <corners android:radius="4dp" />
+</shape>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+    <menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+
+        <item
+            android:id="@+id/action_volunteer_view_details"
+            android:title="@string/menu_view_event_details"
+            android:orderInCategory="100" />
+
+        <item
+            android:id="@+id/action_volunteer_bookmark_event"
+            android:title="@string/menu_bookmark_event"
+            android:orderInCategory="200"
+            android:checkable="true" /> <!-- If you want to show a checked state for bookmarked items -->
+
+        <item
+            android:id="@+id/action_volunteer_share_event"
+            android:title="@string/menu_share_event"
+            android:orderInCategory="300" />
+
+        <item
+            android:id="@+id/action_volunteer_report_event"
+            android:title="@string/menu_report_event"
+            android:orderInCategory="400" />
+
+        <!--
+        Optional: Add if a volunteer can withdraw their application from this menu
+        <item
+            android:id="@+id/action_volunteer_withdraw_application"
+            android:title="@string/menu_withdraw_application"
+            android:orderInCategory="250" />
+        -->
+
+    </menu>

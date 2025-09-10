@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- State when the button is pressed -->
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="?attr/colorSecondaryVariant" /> <!-- Darker shade of your secondary color or a subtle gray -->
+            <corners android:radius="24dp" /> <!-- Adjust for desired roundness -->
+            <stroke android:width="1dp" android:color="?attr/colorSecondary" />
+        </shape>
+    </item>
+
+    <!-- State when the button is focused (e.g., with keyboard navigation) -->
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="?attr/colorSurface" /> <!-- Or a very light shade of your secondary color -->
+            <corners android:radius="24dp" />
+            <stroke android:width="2dp" android:color="?attr/colorSecondary" /> <!-- Thicker border for focus -->
+        </shape>
+    </item>
+
+    <!-- State when the button is disabled -->
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <solid android:color="#E0E0E0" /> <!-- Light gray for disabled background -->
+            <corners android:radius="24dp" />
+            <stroke android:width="1dp" android:color="#BDBDBD" /> <!-- Lighter gray for disabled border -->
+        </shape>
+    </item>
+
+    <!-- Default state (enabled and not pressed/focused) - This is your main secondary button look -->
+    <item>
+        <shape android:shape="rectangle">
+            <!-- Option 1: Outlined button (transparent fill, colored border) -->
+            <solid android:color="@android:color/transparent" />
+            <stroke android:width="1dp" android:color="?attr/colorSecondary" /> <!-- Use your theme's secondary color for the outline -->
+
+            <!-- Option 2: Solid light background button -->
+            <!-- <solid android:color="?attr/colorSurface" /> --> <!-- Or a specific light color like #EEEEEE -->
+            <!-- <stroke android:width="1dp" android:color="?attr/colorSecondary" /> --> <!-- Optional border if using solid bg -->
+
+            <corners android:radius="24dp" /> <!-- Make this large enough for a "round" feel if the button isn't square -->
+            <!-- If your button is square, radius = height/2 makes it a circle -->
+        </shape>
+    </item>
+
+</selector>

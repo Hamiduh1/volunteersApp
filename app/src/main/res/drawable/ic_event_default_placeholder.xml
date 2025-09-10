@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="24.0"
+    android:viewportHeight="24.0">
+
+    <!-- Background rectangle (optional, could be transparent or part of the overall card) -->
+    <path
+        android:fillColor="#E0E0E0"
+        android:pathData="M3,3h18v18h-18z"/> <!-- A light grey background -->
+
+    <!-- Stylized landscape/image icon -->
+    <path
+        android:fillColor="#BDBDBD"
+        android:pathData="M19,5L5,5c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2L21,7c0,-1.1 -0.9,-2 -2,-2zM5,17l3.5,-4.5 2.5,3.01L14.5,11l4.5,6L5,17z"/>
+
+</vector>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:showIn="navigation_view"> <!-- This attribute helps in the layout editor -->
+
+    <!-- Group for navigation items -->
+    <group android:checkableBehavior="single">
+        <item android:title="@string/my_events"
+            android:id="@+id/nav_events"
+            android:icon="@drawable/ic_menu_events" /> <!-- Replace with your actual icon resource -->
+
+        <item
+            android:id="@+id/nav_volunteer"
+            android:icon="@drawable/ic_menu_volunteer"
+             android:title="@string/volunteer_events" /> <!-- Replace with your string resource -->
+        <item
+            android:id="@+id/nav_wallet"
+            android:icon="@drawable/ic_menu_wallet"
+            android:title="@string/wallet" /> <!-- Replace with your string resource -->
+        <item
+            android:id="@+id/nav_host"
+            android:icon="@drawable/ic_menu_host"
+            android:title="@string/host_event" /> <!-- Replace with your string resource -->
+    </group>
+
+    <!-- Optional: Add a separator or another group for other actions -->
+    <item android:title="@string/communicate">
+        <menu>
+            <item
+                android:id="@+id/nav_share"
+                android:icon="@drawable/ic_menu_share"
+            android:title="@string/share" /> <!-- Replace with your string resource -->
+            <item
+                android:id="@+id/nav_feedback"
+                android:icon="@drawable/ic_menu_feedback"
+            android:title="@string/feedback" /> <!-- Replace with your string resource -->
+            <item
+                android:id="@+id/nav_report"
+                android:icon="@drawable/ic_menu_report"
+            android:title="@string/report" /> <!-- Replace with your string resource -->
+        </menu>
+    </item>
+
+    <!-- The original items are removed as they are likely for an Options Menu, not a Navigation Drawer -->
+    <!-- <item
+        android:id="@+id/action_settings"
+        android:title="@string/settings"
+        android:orderInCategory="100"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_search"
+        android:title="@string/search"
+        android:orderInCategory="100"
+        app:showAsAction="ifRoom|withText" /> -->
+
+</menu>

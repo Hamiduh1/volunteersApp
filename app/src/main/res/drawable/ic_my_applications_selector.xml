@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- State when the item is selected -->
+    <item android:drawable="@drawable/ic_my_applications_selected" android:state_selected="true" />
+
+    <!-- State when the item is checked (can be used similarly to selected for some components) -->
+    <item android:drawable="@drawable/ic_my_applications_selected" android:state_checked="true" />
+
+    <!-- State when the item is pressed -->
+    <item android:drawable="@drawable/ic_my_applications_pressed" android:state_pressed="true" />
+    <!-- Optional: Add if you have a distinct pressed state icon -->
+
+    <!-- State when the item is focused -->
+    <item android:drawable="@drawable/ic_my_applications_focused" android:state_focused="true" />
+    <!-- Optional: Add if you have a distinct focused state icon -->
+
+    <!-- Default state (not selected, not pressed, not focused) -->
+    <item android:drawable="@drawable/ic_my_applications_default" />
+
+</selector>

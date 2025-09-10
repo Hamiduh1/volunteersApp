@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="16dp">
+
+    <!-- Event Name -->
+    <TextView
+        android:id="@+id/event_name_textview"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="8dp"
+    android:textAppearance="?attr/textAppearanceHeadline6"
+    android:textStyle="bold"
+    app:layout_constraintEnd_toStartOf="@+id/textViewEventType"
+    app:layout_constraintHorizontal_bias="0.0"
+    app:layout_constraintStart_toStartOf="parent"
+    app:layout_constraintTop_toTopOf="parent"
+    tools:text="Community Cleanup Drive" />
+
+    <!-- Event Type (Badge-like) - Keep for now, but not used by the simple adapter -->
+    <TextView
+        android:id="@+id/textViewEventType"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/event_type_badge_background"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        app:layout_constraintTop_toTopOf="@+id/event_name_textview"
+        app:layout_constraintBottom_toBottomOf="@+id/event_name_textview"
+        app:layout_constraintEnd_toEndOf="parent"
+        tools:text="Charity" />
+
+    <!-- Event Date Label - Keep for context, but the value will go into event_date_textview -->
+    <TextView
+        android:id="@+id/textViewEventDateLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/date"
+        android:textAppearance="?attr/textAppearanceCaption"
+        android:textStyle="bold"
+        app:layout_constraintTop_toBottomOf="@+id/event_name_textview"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- Event Date Value -->
+    <TextView
+        android:id="@+id/event_date_textview"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:textAppearance="?attr/textAppearanceBody2"
+    app:layout_constraintTop_toTopOf="@+id/textViewEventDateLabel"
+    app:layout_constraintBottom_toBottomOf="@+id/textViewEventDateLabel"
+    app:layout_constraintStart_toEndOf="@+id/textViewEventDateLabel"
+    app:layout_constraintEnd_toEndOf="parent"
+    tools:text="25/12/2024" />
+
+    <!-- Event Location Label - Keep for context -->
+    <TextView
+        android:id="@+id/textViewEventLocationLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/location"
+        android:textAppearance="?attr/textAppearanceCaption"
+        android:textStyle="bold"
+        app:layout_constraintTop_toBottomOf="@+id/event_date_textview"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- Event Location Value -->
+    <TextView
+        android:id="@+id/event_location_textview"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:textAppearance="?attr/textAppearanceBody2"
+    app:layout_constraintTop_toTopOf="@+id/textViewEventLocationLabel"
+    app:layout_constraintBottom_toBottomOf="@+id/textViewEventLocationLabel"
+    app:layout_constraintStart_toEndOf="@+id/textViewEventLocationLabel"
+    app:layout_constraintEnd_toEndOf="parent"
+    tools:text="Central Park Pavilion" />
+
+    <!-- Event Payment Label - Keep for now, but not used by the simple adapter -->
+    <TextView
+        android:id="@+id/textViewEventPaymentLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/payment"
+        android:textAppearance="?attr/textAppearanceCaption"
+        android:textStyle="bold"
+        app:layout_constraintTop_toBottomOf="@+id/event_location_textview"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- Event Payment Value - Keep for now, but not used by the simple adapter -->
+    <TextView
+        android:id="@+id/textViewEventPayment"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:textAppearance="?attr/textAppearanceBody2"
+        android:textColor="?attr/colorAccent"
+        android:textStyle="bold"
+        app:layout_constraintTop_toTopOf="@+id/textViewEventPaymentLabel"
+        app:layout_constraintBottom_toBottomOf="@+id/textViewEventPaymentLabel"
+        app:layout_constraintStart_toEndOf="@+id/textViewEventPaymentLabel"
+        app:layout_constraintEnd_toEndOf="parent"
+        tools:text="$50" />
+
+    <!-- Average Rating - Keep for now, but not used by the simple adapter -->
+    <RatingBar
+        android:id="@+id/ratingBarEventItem"
+        style="?android:attr/ratingBarStyleSmall"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:isIndicator="true"
+        android:numStars="5"
+        android:stepSize="0.1"
+        app:layout_constraintTop_toBottomOf="@+id/textViewEventPayment"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

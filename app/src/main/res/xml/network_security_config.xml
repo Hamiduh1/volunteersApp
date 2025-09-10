@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain> <!-- Emulator localhost -->
+        <domain includeSubdomains="true">localhost</domain>   <!-- Just in case -->
+    </domain-config>
+    <!-- You can also add a base-config for production if needed,
+         but the domain-config above is specific to emulator IPs. -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

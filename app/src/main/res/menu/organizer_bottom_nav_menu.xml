@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/nav_organizer_home"
+        android:icon="@drawable/ic_home_black_24dp"
+        android:title="@string/bottom_nav_organizer_home"
+        app:showAsAction="ifRoom" />
+    <!-- Corresponds to OrganizerDashboardFragment -->
+
+    <item
+        android:id="@+id/nav_hosted_events"
+        android:icon="@drawable/ic_event_black_24dp"
+        android:title="@string/bottom_nav_hosted_events"
+        app:showAsAction="ifRoom" />
+    <!-- Corresponds to HostedEventsFragment -->
+
+    <item
+        android:id="@+id/nav_organizer_applications"
+        android:icon="@drawable/ic_people_black_24dp"
+        android:title="@string/bottom_nav_organizer_applications"
+        app:showAsAction="ifRoom" />
+    <!-- Corresponds to OrganizerApplicationsFragment -->
+
+    <item
+        android:id="@+id/nav_organizer_activity_summary"
+        android:icon="@drawable/ic_summary_black_24dp"
+        android:title="@string/bottom_nav_organizer_activity_summary"
+        app:showAsAction="ifRoom" />
+    <!-- Corresponds to OrganizerActivitySummaryFragment -->
+
+    <item
+        android:id="@+id/nav_organizer_profile"
+        android:icon="@drawable/ic_person_black_24dp"
+        android:title="@string/bottom_nav_organizer_profile"
+        app:showAsAction="ifRoom" />
+    <!-- Corresponds to OrganizerProfileFragment -->
+
+</menu>
+

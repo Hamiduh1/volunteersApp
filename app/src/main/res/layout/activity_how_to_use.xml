@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    tools:context=".HowToUseActivity">
+
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/toolbar_how_to_use"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="?attr/colorPrimary"
+        app:titleTextColor="@android:color/white"
+        app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
+
+    <!-- Optional: A general title for the page if needed, distinct from toolbar -->
+    <!-- <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/how_to_use_page_title" // Create this string resource
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:layout_gravity="center_horizontal"
+        android:paddingTop="16dp"
+        android:paddingBottom="8dp"/> -->
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerViewTips"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="8dp"
+            android:scrollbars="vertical"
+            android:visibility="gone"
+            tools:listitem="@layout/item_how_to_use_tip" /> <!-- Create item_how_to_use_tip.xml for list items -->
+
+        <TextView
+            android:id="@+id/textViewNoTips"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/loading_tips"
+            android:textSize="18sp"
+            android:visibility="gone"
+            android:padding="16dp"/>
+
+        <ProgressBar
+            android:id="@+id/progressBarTips"
+            style="?android:attr/progressBarStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:visibility="visible" /> <!-- Initially visible -->
+
+    </FrameLayout>
+
+    <!--
+        The TextView with id "placeholderTextForTips" is removed as its functionality
+        is now covered by recyclerViewTips for content and textViewNoTips for status messages.
+        If you had specific content in @string/how_to_use_page_content_here that wasn't
+        part of the dynamic tips, you might want to place it differently, perhaps above
+        the FrameLayout or handle it within the RecyclerView as a special item type.
+    -->
+
+</LinearLayout>

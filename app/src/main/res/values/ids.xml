@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--
+<resources>
+    <item name="nav_events" type="id">nav_events</item>
+    <item name="nav_volunteer" type="id">nav_volunteer</item>
+    <item name="nav_wallet" type="id">nav_wallet</item>
+    <item name="nav_host" type="id">nav_host</item>
+    <item name="nav_share" type="id">nav_share</item>
+    <item name="nav_feedback" type="id">nav_feedback</item>
+    <item name="nav_report" type="id">nav_report</item>
+    <item name="pro1" type="id">pro1</item>
+</resources>
+-->
+
+<resources>
+<item name="nav_events" type="id"/>
+<item name="nav_volunteer" type="id"/>
+<item name="nav_wallet" type="id"/>
+<item name="nav_host" type="id"/>
+<item name="nav_share" type="id"/>
+<item name="nav_feedback" type="id"/>
+<item name="nav_report" type="id"/>
+<item name="pro1" type="id"/>
+    <item name="profileDP" type="id"/>
+    <item name="forgotpassword" type="id"/>
+    <item name="logintoolbar" type="id"/>
+    <item name="recycler_view_all_events" type="id"/>
+    <item name="account_item_icon" type="id"/>
+    <item name="account_item_text" type="id"/>
+    <item name="event_name_textview" type="id"/>
+    <item name="event_date_textview" type="id"/>
+    <item name="event_time_textview" type="id"/>
+    <item name="event_location_textview" type="id"/>
+    <item name="event_description_textview" type="id"/>
+    <item name="event_type_textview" type="id"/>
+    <item name="event_skills_textview" type="id"/>
+    <item name="event_limit_textview" type="id"/>
+    <item name="event_host_textview" type="id"/>
+    <item name="event_status_textview" type="id"/>
+    <item name="event_banner_imageview" type="id"/>
+    <item name="event_detail_name" type="id"/>
+    <item name="event_detail_date" type="id"/>
+    <item name="event_detail_time" type="id"/>
+    <item name="event_detail_location" type="id"/>
+    <item name="event_detail_description" type="id"/>
+    <item name="event_detail_type" type="id"/>
+    <item name="event_detail_skills" type="id"/>
+    <item name="event_detail_limit" type="id"/>
+    <item name="event_detail_host" type="id"/>
+    <item name="event_detail_status" type="id"/>
+    <item name="event_detail_banner" type="id"/>
+    <item name="event_detail_toolbar" type="id"/>
+    <item name="event_detail_applicants_count" type="id"/>
+    <item name ="toolbarEventDetail" type="id"/>"
+    <item name="edit_event_name" type="id"/>
+    <item name="edit_event_date" type="id"/>
+    <item name="edit_event_time" type="id"/>
+    <item name="edit_event_location" type="id"/>
+    <item name="edit_event_description" type="id"/>
+    <item name="edit_event_type" type="id"/>
+    <item name="edit_event_skills" type="id"/>
+    <item name="edit_event_limit" type="id"/>
+    <item name="edit_event_banner" type="id"/>
+    <item name="edit_event_toolbar" type="id"/>
+    <item name="edit_event_banner_imageview" type="id"/>
+    <item name="image_view_event_banner" type="id"/>
+    <item name="edit_event_name_edittext" type="id"/>
+    <item name="edit_event_date_edittext" type="id"/>
+    <item name="edit_event_time_edittext" type="id"/>
+    <item name="edit_event_location_edittext" type="id"/>
+    <item name="edit_event_description_edittext" type="id"/>
+    <item name="edit_event_type_edittext" type="id"/>
+    <item name="edit_event_skills_edittext" type="id"/>
+    <item name="edit_event_limit_edittext" type="id"/>
+    <item name="edit_event_banner_edittext" type="id"/>
+    <item name="button_edit_event" type="id"/>
+    <item name="button_delete_event" type="id"/>
+    <item name="edit_event_activity" type="id"/>
+<item name="imageViewEventDetailBanner" type="id"/>
+    <item name="textViewEventDetailName" type="id"/>
+    <item name="textViewEventDetailDate" type="id"/>
+    <item name="textViewEventDetailTime" type="id"/>
+    <item name="textViewEventDetailLocation" type="id"/>
+    <item name="textViewEventDetailDescription" type="id"/>
+    <item name="textViewEventDetailType" type="id"/>
+    <item name="textViewEventDetailSkills" type="id"/>
+    <item name="textViewEventDetailLimit" type="id"/>
+    <item name="textViewEventDetailHost" type="id"/>
+    <item name="textViewVolunteersAppliedCount" type="id"/>
+    <item name="textViewEventDetailStatus" type="id"/>
+    <item name="progressBarEventDetail" type="id"/>
+    <item name="buttonEditEvent" type="id"/>
+    <item name="buttonDeleteEvent" type="id"/>
+    <item name="toolbarEditEvent" type="id"/>
+<item name="progressBarEditEvent" type="id"/>
+    <item name="nav_my_events" type="id"/>
+    <item name="nav_my_profile" type="id"/>
+    <item name="nav_my_wallet" type="id"/>
+    <item name="nav_my_settings" type="id"/>
+    <item name="nav_my_help" type="id"/>
+    <item name="nav_my_about" type="id"/>
+    <item name="nav_my_logout" type="id"/>
+    <item name="nav_my_toolbar" type="id"/>
+    <item name="nav_my_name" type="id"/>
+    <item name="nav_my_email" type="id"/>
+    <item name="nav_my_phone" type="id"/>
+    <item name="nav_my_profile_image" type="id"/>
+    <item name="nav_my_name_edittext" type="id"/>
+    <item name="nav_my_email_edittext" type="id"/>
+    <item name="nav_my_phone_edittext" type="id"/>
+    <item name="nav_my_profile_image_edittext" type="id"/>
+    <item name="nav_my_profile_image_view" type="id"/>
+    <item name="nav_my_profile_image_button" type="id"/>
+    <item name="nav_my_profile_image_button_text" type="id"/>
+
+    <item name="nav_my_profile_name" type="id"/>
+    <item name="nav_my_profile_email" type="id"/>
+    <item name="nav_my_profile_phone" type="id"/>
+    <item name="nav_my_profile_profile_image" type="id"/>
+    <item name="nav_my_profile_name_edittext" type="id"/>
+    <item name="nav_my_profile_email_edittext" type="id"/>
+    <item name="nav_my_profile_phone_edittext" type="id"/>
+    <item name="nav_my_profile_profile_image_edittext" type="id"/>
+    <item name="nav_my_profile_profile_image_view" type="id"/>
+    <item name="nav_my_profile_profile_image_button" type="id"/>
+    <item name="nav_my_profile_profile_image_button_text" type="id"/>
+    <item name="nav_my_profile_toolbar" type="id"/>
+    <item name="nav_my_profile_name_textview" type="id"/>
+    <item name="nav_my_profile_email_textview" type="id"/>
+    <item name="nav_my_profile_phone_textview" type="id"/>
+    <item name="mapsFragment" type="id"/>
+    <item name="HostAnEventTimeLabel" type="id"/>
+    <item name="HostAnEventTime" type="id"/>
+    <item name="HostAnEventDateLabel" type="id"/>
+    <item name="HostAnEventDate" type="id"/>
+    <item name="HostAnEventNameLabel" type="id"/>
+    <item name="HostAnEventName" type="id"/>
+    <item name="HostAnEventHostNameLabel" type="id"/>
+    <item name="HostAnEventHostName" type="id"/>
+    <item name="HostAnEventDescriptionLabel" type="id"/>
+    <item name="HostAnEventDescription" type="id"/>
+    <item name="HostAnEventMoneyLabel" type="id"/>
+    <item name="HostAnEventMoney" type="id"/>
+    <item name="HostAnEventImageUrlLabel" type="id"/>
+    <item name="HostAnEventDescriptionLayout" type="id"/>
+    <item name="HostAnEventImageUrl" type="id"/>
+    <item name="HostAnEventRequiredVolunteersLabel" type="id"/>
+    <item name="HostAnEventRequiredVolunteers" type="id"/>
+    <item name="HostAnEventVolunteerLimitLabel" type="id"/>
+    <item name="HostAnEventVolunteerLimit" type="id"/>
+    <item name="HostAnEventNameLayout" type="id"/>
+    <item name="app_bar_layout" type="id"/>
+    <item name="toolbar" type="id"/>
+    <item name="GoToCalender" type="id"/>
+    <item name="typesLabel" type="id"/>
+    <item name="types" type="id"/>
+    <item name="skillsLabel" type="id"/>
+    <item name="skills" type="id"/>
+    <item name="locationLabel" type="id"/>
+    <item name="nav_events_list" type="id"/>
+    <item name="swipeRefreshLayoutBrowseEvents" type="id"/>
+    <item name="editTextSearchBrowseEvents" type="id"/>
+    <item name="buttonSearchBrowseEvents" type="id"/>
+    <item name="recyclerViewMyEvents" type="id"/>
+    <item name="swipeRefreshLayoutMyEvents" type="id"/>
+    <item name="progressBarMyEvents" type="id"/>
+<item name="textViewMyEvents" type="id"/>
+    <item name="textViewMyEventsTitle" type="id"/>
+    <item name="textViewMyEventsSubtitle" type="id"/>
+    <item name="textViewMyEventsDescription" type="id"/>
+    <item name="textViewMyEventsStatus" type="id"/>
+
+    <item name="textViewStatusAllEvents" type="id"/>
+    <item name="textViewStatusMyProfile" type="id"/>
+    <item name="textViewStatusMyWallet" type="id"/>
+    <item name="textViewStatusMySettings" type="id"/>
+    <item name="textViewStatusMyHelp" type="id"/>
+    <item name="textViewStatusMyAbout" type="id"/>
+    <item name="textViewStatusMyLogout" type="id"/>
+    <item name="nav_host_fragment_content_employer_main" type="id"/>
+
+    <item name="employer_bottom_nav_view" type="id"/>
+    <item name="employer_nav_view" type="id"/>
+    <item name="employer_drawer_layout" type="id"/>
+    <item name="nav_employer_home" type="id"/>
+    <item name="nav_employer_post_job" type="id"/>
+    <item name="nav_employer_posted_jobs" type="id"/>
+    <item name="nav_employer_applications" type="id"/>
+    <item name="nav_employer_profile_management" type="id"/>
+    <item name="nav_employer_application_detail" type="id"/>
+    <item name="nav_employer_application_detail_toolbar" type="id"/>
+    <item name="nav_employer_application_detail_name" type="id"/>
+    <item name="nav_employer_application_detail_email" type="id"/>
+    <item name="nav_employer_application_detail_phone" type="id"/>
+    <item name="nav_employer_application_detail_profile_image" type="id"/>
+    <item name="nav_employer_application_detail_name_textview" type="id"/>
+    <item name="nav_employer_application_detail_email_textview" type="id"/>
+    <item name="nav_employer_application_detail_phone_textview" type="id"/>
+    <item name="nav_employer_application_detail_profile_image_view" type="id"/>
+
+    <item name="textViewStatusMyEvents" type="id"/>
+    <item name="textView_confirmation_message_main" type="id"/>
+    <item name="buttonContactApplicant" type="id"/>
+    <item name="action_nav_host_event_to_nav_home" type="id"/>
+    <item name="action_view_event_details_menu" type="id"/>
+    <item name="action_share_event_menu" type="id" />
+    <item name="action_view_event_analytics" type="id" />
+    <item name="nav_organizer_home" type="id" />
+    <item name="nav_hosted_events" type="id" />
+    <item name="nav_organizer_applications" type="id" />
+    <item name="nav_organizer_profile" type="id" />
+    <item name="textView_item_event_name" type="id" />
+    <item name="textView_item_event_date_time" type="id" />
+    <item name="imageView_location_icon" type="id" />
+    <item name="textView_item_event_location" type="id" />
+    <item name="imageView_event_options" type="id" />
+    <item name="textView_item_volunteers_info" type="id" />
+    <item name="action_organizerDashboardFragment_to_viewApplicationsFragment" type="id" />
+    <item name="action_organizerDashboardFragment_to_createEventActivityDestination" type="id" />
+    <item name="action_organizerDashboardFragment_to_OrganizerApplicationsFragment" type="id" />
+    <item name="nav_organizer_activity_summary" type="id" />
+    <item name="action_report_event_menu" type="id" />
+    <item name="toolbar_my_events_fragment" type="id" />
+    <item name="view_pager_my_events" type="id" />
+    <item name="tab_layout_my_events" type="id" />
+    <item name="my_events_fragment_container" type="id" />
+
+
+</resources>
+
+

@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="8dp"
+    tools:context=".EventDescription3">
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="16dp"/>
+
+    <TextView
+        android:id="@+id/textViewEventName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        tools:text="Event Title Placeholder"
+        android:textSize="28sp"
+        android:textColor="?attr/colorPrimary"
+    android:textAllCaps="true"
+    android:textStyle="bold"
+    android:gravity="center"
+    android:paddingBottom="8dp"
+    />
+    <!-- Consider using Material Text Appearance:
+    android:textAppearance="@style/TextAppearance.MaterialComponents.Headline5"
+    android:gravity="center" -->
+
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="16dp"/>
+
+    <androidx.cardview.widget.CardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardCornerRadius="8dp"
+        app:cardElevation="4dp"
+        app:contentPadding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Location Section -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingVertical="4dp">
+
+                <TextView
+                    android:id="@+id/textViewLocationLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/event_label_location"
+                    android:textColor="@android:color/black"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+                <!-- Consider Material Text Appearance:
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+                android:textStyle="bold" -->
+
+                <TextView
+                    android:id="@+id/textViewLocationValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    tools:text="123 Main St, Anytown"
+                    android:textSize="18sp" />
+                <!-- Consider Material Text Appearance:
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body1" -->
+            </LinearLayout>
+
+            <!-- Date Section -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingVertical="4dp">
+
+                <TextView
+                    android:id="@+id/textViewDateLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/event_label_date"
+                    android:textColor="@android:color/black"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+                <!-- android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+                     android:textStyle="bold" -->
+
+                <TextView
+                    android:id="@+id/textViewDateValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    tools:text="October 27, 2023"
+                    android:textSize="18sp" />
+                <!-- android:textAppearance="@style/TextAppearance.MaterialComponents.Body1" -->
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="16dp"/>
+
+            <!-- Payment Section -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingVertical="4dp">
+
+                <TextView
+                    android:id="@+id/textViewPaymentLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/event_label_payment"
+                    android:textColor="@android:color/black"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+                <!-- android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+                     android:textStyle="bold" -->
+
+                <TextView
+                    android:id="@+id/textViewPaymentValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    tools:text="Free"
+                    android:textSize="18sp" />
+                <!-- android:textAppearance="@style/TextAppearance.MaterialComponents.Body1" -->
+            </LinearLayout>
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="24dp"/>
+
+            <!-- Description Section -->
+            <TextView
+                android:id="@+id/textViewDescriptionLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/event_label_description"
+                android:textColor="@android:color/black"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:paddingBottom="4dp"/>
+            <!-- android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+                 android:textStyle="bold" -->
+
+            <TextView
+                android:id="@+id/textViewDescriptionValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                tools:text="This is a detailed description of the event, explaining what it is about, what activities will take place, and any other relevant information for potential attendees."
+                android:textSize="16sp" />
+            <!-- android:textAppearance="@style/TextAppearance.MaterialComponents.Body2" -->
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+</LinearLayout>

@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+    <!-- Using controlColorNormal so it adapts to theme (light/dark)
+         You can change this to a specific color like #FFAAAAAA (a light gray)
+         if you want it to always be a specific color.
+         If the CircleImageView has a background, this tint might interact with it.
+         Often, for logos shown in a CircleImageView with a white border and dark header,
+         the logo itself might be designed to be white or a light color on a transparent background,
+         or you'd use android:fillColor directly without tint for specific logo colors.
+         For a generic placeholder, tinting controlColorNormal is often fine.
+    -->
+
+    <path
+        android:fillColor="@android:color/white"
+    android:pathData="M12,7V3H2v18h20V7H12zM6,19H4v-2h2V19zM6,15H4v-2h2V15zM6,11H4V9h2V11zM6,7H4V5h2V7zM10,19H8v-2h2V19zM10,15H8v-2h2V15zM10,11H8V9h2V11zM10,7H8V5h2V7zM20,19h-8V9h8V19zM18,11h-4v2h4V11zM18,15h-4v2h4V15z"/>
+</vector>
