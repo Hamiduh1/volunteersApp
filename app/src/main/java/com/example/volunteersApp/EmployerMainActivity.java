@@ -2,47 +2,49 @@ package com.example.volunteersApp;
 
 import android.content.Intent;
 import android.os.Bundle;
-import android.view.MenuItem; // For menu item clicks
+import android.view.MenuItem;
 import android.view.View;
-import android.widget.TextView; // For nav header
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.appcompat.app.ActionBarDrawerToggle;
+// Removed ActionBarDrawerToggle as it's handled by NavigationUI with AppBarConfiguration
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
-import androidx.media3.common.util.Log;
-import androidx.media3.common.util.UnstableApi; // Import the annotation
+// Corrected Log import if you intended android.util.Log
+import android.util.Log; // Changed from androidx.media3.common.util.Log
+// androidx.media3.common.util.UnstableApi is fine if you are using Media3 features,
+// but not strictly needed for basic navigation setup. Remove if not using Media3 directly here.
+// import androidx.media3.common.util.UnstableApi;
 
 import androidx.navigation.NavController;
-import androidx.navigation.Navigation;
+// Removed Navigation.findNavController as NavHostFragment.getNavController() is preferred
 import androidx.navigation.fragment.NavHostFragment;
 import androidx.navigation.ui.AppBarConfiguration;
 import androidx.navigation.ui.NavigationUI;
 
-import com.example.volunteersApp.databinding.ActivityEmployerMainBinding; // Your binding class
-// Import for CircleImageView if you use it in employer nav header
+import com.example.volunteersApp.databinding.ActivityEmployerMainBinding;
 import de.hdodenhof.circleimageview.CircleImageView;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.navigation.NavigationView;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
-// Glide for image loading in nav header
-// import com.bumptech.glide.Glide;
 
 public class EmployerMainActivity extends AppCompatActivity implements NavigationView.OnNavigationItemSelectedListener {
 
-    private ActivityEmployerMainBinding binding; // Replaces individual view binding
+    private static final String TAG = "EmployerMainActivity"; // Added for logging
+
+    private ActivityEmployerMainBinding binding;
     private FirebaseAuth mAuth;
     private AppBarConfiguration mAppBarConfiguration;
     private NavController navController;
-    private DrawerLayout drawerLayout; // Renamed from binding.employerDrawerLayout for clarity
-    private NavigationView navigationView; // Renamed
-    private BottomNavigationView bottomNavView; // Renamed
+    private DrawerLayout drawerLayout;
+    private NavigationView navigationView;
+    private BottomNavigationView bottomNavView;
 
-    @UnstableApi // If you want to opt-in for the whole onCreate method
+    // @UnstableApi // Only if specific Media3 APIs are used directly in this method
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -58,147 +60,127 @@ public class EmployerMainActivity extends AppCompatActivity implements Navigatio
             return;
         }
 
-        // Initialize components from binding
         drawerLayout = binding.employerDrawerLayout;
         navigationView = binding.employerNavView;
         bottomNavView = binding.employerBottomNavView;
-        Toolbar toolbar = binding.employerToolbar; // Get toolbar from binding
+        Toolbar toolbar = binding.employerToolbar;
         setSupportActionBar(toolbar);
 
-
-        // Setup AppBarConfiguration: Define top-level destinations for the drawer
-        // These are the destinations where the drawer icon will be shown instead of the up arrow.
-        // You'll define these IDs in your employer_navigation.xml and employer_drawer_menu.xml
+        // Define ALL top-level destinations for AppBarConfiguration
+        // (those in bottom nav and potentially unique top-level drawer items)
         mAppBarConfiguration = new AppBarConfiguration.Builder(
-                R.id.nav_employer_home, // Example: Create this destination
+                R.id.nav_employer_home,
+                R.id.nav_employer_post_job,         // Added
                 R.id.nav_employer_posted_jobs,
                 R.id.nav_employer_applications,
                 R.id.nav_employer_profile_management
-                // Add other top-level destinations for employer
         )
-                .setOpenableLayout(drawerLayout)
+                .setOpenableLayout(drawerLayout) // Use build() on the Builder
                 .build();
 
-        // Setup NavController
 
-        // Recommended way - get NavController directly from the NavHostFragment
         NavHostFragment navHostFragment = (NavHostFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.nav_host_fragment_content_employer_main);
 
         if (navHostFragment != null) {
             navController = navHostFragment.getNavController();
-            // Now that you have the navController, proceed with your setup
             NavigationUI.setupActionBarWithNavController(this, navController, mAppBarConfiguration);
-            NavigationUI.setupWithNavController(navigationView, navController);
-            NavigationUI.setupWithNavController(bottomNavView, navController);
+            NavigationUI.setupWithNavController(navigationView, navController); // For Drawer
+            NavigationUI.setupWithNavController(bottomNavView, navController);  // For BottomNav
         } else {
-            // This is a critical error - the NavHostFragment itself wasn't found.
-            // This would happen if R.id.nav_host_fragment_content_employer_main isn't in your layout
-            // OR if the FragmentContainerView with that ID isn't correctly named as NavHostFragment.
-            Log.e("EmployerMain", "NavHostFragment not found in layout. " +
-                    "Ensure R.id.nav_host_fragment_content_employer_main is a FragmentContainerView " +
-                    "with android:name=\"androidx.navigation.fragment.NavHostFragment\"");
-            // You might want to finish the activity or show an error message,
-            // as navigation will not work.
-            Toast.makeText(this, "Critical error: Navigation host not found.", Toast.LENGTH_LONG).show();
-            finish(); // Example: close the activity if navigation is essential
-            return; // Stop further execution in onCreate if navHostFragment is null
+            Log.e(TAG, "NavHostFragment (R.id.nav_host_fragment_content_employer_main) not found.");
+            Toast.makeText(this, "Critical navigation error.", Toast.LENGTH_LONG).show();
+            finish();
+            return;
         }
 
-        //  navController = Navigation.findNavController(this, R.id.nav_host_fragment_content_employer_main);
-        //navController = Navigation.findNavController(this, R.id.nav_host_test);
-        // Setup Toolbar with NavController and AppBarConfiguration
-        NavigationUI.setupActionBarWithNavController(this, navController, mAppBarConfiguration);
+        // Set the listener for drawer items AFTER setupWithNavController if you need to override
+        // or add custom behavior like sign out.
+        navigationView.setNavigationItemSelectedListener(this);
 
-        // Setup NavigationView (Drawer) with NavController
-        NavigationUI.setupWithNavController(navigationView, navController);
-        navigationView.setNavigationItemSelectedListener(this); // Handle drawer item clicks
-
-        // Setup BottomNavigationView with NavController
-        NavigationUI.setupWithNavController(bottomNavView, navController);
-
-        // Optional: Update Nav Header dynamically
         updateNavHeader(currentUser);
     }
 
-    // Corrected code in EmployerMainActivity.java
     private void updateNavHeader(FirebaseUser user) {
         View headerView = navigationView.getHeaderView(0);
-        // Use the IDs from nav_header_employer_main.xml
         TextView textViewName = headerView.findViewById(R.id.employer_profile_name);
         TextView textViewEmail = headerView.findViewById(R.id.employer_profile_email);
         CircleImageView imageViewProfile = headerView.findViewById(R.id.employer_profile_image);
 
-        // It's a good practice to check if the views were actually found before using them,
-        // though if the layout and IDs are correct, they should be found.
+        if (user == null) { // Should not happen due to onCreate check, but good practice
+            Log.w(TAG, "updateNavHeader called with null user");
+            return;
+        }
+
         if (textViewName != null) {
             if (user.getDisplayName() != null && !user.getDisplayName().isEmpty()) {
                 textViewName.setText(user.getDisplayName());
             } else {
-                // Ensure R.string.employer_name_placeholder is defined in your strings.xml
                 textViewName.setText(R.string.employer_name_placeholder);
             }
         }
 
-        if (textViewEmail != null && user.getEmail() != null) { // Also check if user.getEmail() is null
-            textViewEmail.setText(user.getEmail());
+        if (textViewEmail != null) {
+            textViewEmail.setText(user.getEmail()); // FirebaseUser.getEmail() can be null
         }
 
         if (imageViewProfile != null) {
-            // Load profile image using Glide or Picasso (example)
-            // if (user.getPhotoUrl() != null) {
-            // Glide.with(this).load(user.getPhotoUrl()).placeholder(R.drawable.default_org_logo).into(imageViewProfile);
-            // } else {
-            // imageViewProfile.setImageResource(R.drawable.default_org_logo); // From your XML
-            // }
-            imageViewProfile.setImageResource(R.drawable.default_org_logo); // From your XML
+            // Placeholder, implement actual image loading if needed
+            imageViewProfile.setImageResource(R.drawable.default_org_logo);
         }
     }
 
-
     @Override
     public boolean onSupportNavigateUp() {
-        // Handles the Up button in the toolbar (back navigation and drawer toggle)
         return NavigationUI.navigateUp(navController, mAppBarConfiguration)
                 || super.onSupportNavigateUp();
     }
 
     @Override
     public void onBackPressed() {
-        // Close drawer if open, otherwise default back behavior
         if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
             drawerLayout.closeDrawer(GravityCompat.START);
         } else {
-            super.onBackPressed();
+            // Let NavController handle back press first for fragment transactions
+            if (navController != null && navController.navigateUp()) {
+                // Navigation handled by NavController
+            } else {
+                // If NavController doesn't handle it (e.g., at start destination), then default
+                super.onBackPressed();
+            }
         }
     }
 
     @Override
     public boolean onNavigationItemSelected(@NonNull MenuItem item) {
-        // Handle navigation view item clicks here.
-        // The id corresponds to the menu item id in employer_drawer_menu.xml
         int id = item.getItemId();
 
-        // Basic navigation is handled by NavigationUI.setupWithNavController.
-        // This is for custom actions like sign out or navigating to non-graph activities.
-
-        if (id == R.id.nav_employer_sign_out) { // Example: Create this ID in employer_drawer_menu
+        if (id == R.id.nav_employer_sign_out) { // Ensure this ID exists in your employer_drawer_menu.xml
             signOutUser();
-        } else {
-            // Allow NavigationUI to handle the navigation for other items
-            // Need to close the drawer manually if NavigationUI doesn't handle the item.
-            // However, if the item ID matches a destination in the nav graph,
-            // NavigationUI.onNavDestinationSelected will handle it.
-            // For simplicity, we can let NavigationUI try first.
-            boolean handled = NavigationUI.onNavDestinationSelected(item, navController);
-            if (!handled) {
-                // Handle other custom cases if needed
-                Toast.makeText(this, "Selected: " + item.getTitle(), Toast.LENGTH_SHORT).show();
-            }
+            drawerLayout.closeDrawer(GravityCompat.START); // Close drawer after handling
+            return true; // Item handled
         }
+        // IMPORTANT: Let NavigationUI try to handle navigation for drawer items that
+        // match destinations in your navigation graph FIRST.
+        // onNavDestinationSelected returns true if it handles the navigation.
+        boolean handledByNavigationUI = NavigationUI.onNavDestinationSelected(item, navController);
 
-        drawerLayout.closeDrawer(GravityCompat.START);
-        return true; // Return true to display the item as the selected item
+        if (handledByNavigationUI) {
+            drawerLayout.closeDrawer(GravityCompat.START);
+            return true;
+        } else {
+            // If NavigationUI didn't handle it, it's not a direct graph destination.
+            // Handle other custom cases here if any.
+            // For example, if you had a "Settings" item that opens a new Activity:
+            // if (id == R.id.nav_settings_activity) {
+            //     startActivity(new Intent(this, SettingsFragment.class));
+            //     drawerLayout.closeDrawer(GravityCompat.START);
+            //     return true;
+            // }
+            Log.w(TAG, "Drawer item " + item.getTitle() + " not handled by NavigationUI or custom cases.");
+            drawerLayout.closeDrawer(GravityCompat.START); // Still close the drawer
+            return false; // Item not fully handled (or let default behavior if that's desired)
+        }
     }
 
     private void signOutUser() {
@@ -209,4 +191,3 @@ public class EmployerMainActivity extends AppCompatActivity implements Navigatio
         finish();
     }
 }
-

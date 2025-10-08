@@ -1,12 +1,12 @@
-<?xml version="1.0" encoding="utf-8"?>
+<!-- res/layout/item_event_card_small.xml -->
 <com.google.android.material.card.MaterialCardView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    android:layout_width="180dp"
+    android:layout_width="160dp"
     android:layout_height="wrap_content"
     android:layout_marginEnd="8dp"
-    android:layout_marginBottom="8dp"
+    app:cardCornerRadius="8dp"
     app:cardElevation="2dp">
 
     <LinearLayout
@@ -17,33 +17,29 @@
         <ImageView
             android:id="@+id/imageViewEventSmall"
             android:layout_width="match_parent"
-            android:layout_height="100dp"
+            android:layout_height="90dp"
             android:scaleType="centerCrop"
-            tools:srcCompat="@drawable/ic_image_placeholder"
-            android:contentDescription="@string/cd_event_header_image" />
+            tools:src="@tools:sample/backgrounds/scenic"
+            android:contentDescription="@string/cd_event_placeholder" />
 
-        <LinearLayout
+        <TextView
+            android:id="@+id/textViewEventTitleSmall"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="8dp">
+            android:padding="8dp"
+            tools:text="Event Title"
+            android:textAppearance="?attr/textAppearanceSubtitle2"
+            android:maxLines="2"
+            android:ellipsize="end"/>
 
-            <TextView
-                android:id="@+id/textViewEventNameSmall"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2"
-                android:maxLines="2"
-                android:ellipsize="end"
-                tools:text="@string/preview_event_name_short" />
-
-            <TextView
-                android:id="@+id/textViewEventDateSmall"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
-                tools:text="@string/preview_event_date_short"
-                android:layout_marginTop="4dp"/>
-        </LinearLayout>
+        <TextView
+            android:id="@+id/textViewEventDateSmall"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="8dp"
+            tools:text="Jan 01"
+            android:textAppearance="?attr/textAppearanceCaption"/>
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

@@ -1,3 +1,4 @@
+import com.android.build.api.dsl.Packaging
 import java.util.Properties
 import java.io.FileInputStream
 
@@ -6,34 +7,28 @@ plugins {
     alias(libs.plugins.google.gms.google.services)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization) // For KotlinX Serialization
-    alias(libs.plugins.androidx.navigation.safeargs) // Ensure this alias is correctly defined in libs.versions.toml
+    alias(libs.plugins.androidx.navigation.safeargs)
+   // alias(libs.plugins.google.devtools.ksp) // <<< Ensure KSP plugin is applied here if needed
 
-      //  id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0" // Check for latest version
-
-
-    }
-
+}
 
 android {
     namespace = "com.example.volunteersApp"
-    compileSdk = 35
-        // Using 34 as a stable SDK, 35 is often beta. Adjust if 35 is specifically needed and stable.
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.LVCA.volunteersApp"
-        minSdk = 25
-        targetSdk = 35 // Match compileSdk for consistency with stable releases
+        minSdk = 26
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        // Access API KEY from local.properties
 
         val localProperties = Properties()
         val localPropertiesFile = rootProject.file("local.properties")
         if (localPropertiesFile.exists()) {
             try {
-                FileInputStream(localPropertiesFile).use { fis -> // Use try-with-resources
+                FileInputStream(localPropertiesFile).use { fis ->
                     localProperties.load(fis)
                 }
             } catch (e: Exception) {
@@ -42,53 +37,115 @@ android {
         }
 
         val mapsApiKeyFromLocalProps = localProperties.getProperty("MAPS_API_KEY", "")
-        // Ensure buildFeatures.buildConfig is true for this to work
         buildConfigField("String", "MAPS_API_KEY_BUILDCONFIG", "\"$mapsApiKeyFromLocalProps\"")
-
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKeyFromLocalProps
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true // This should resolve if AGP is correct
-            isShrinkResources = true // This should resolve if AGP is correct
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
-            ) // This should resolve if AGP is correct
+            )
         }
-        // debug {} // You can also define debug specific settings if needed
     }
+
+
+        packagingOptions {
+            resources {
+                pickFirsts.add("messages/JavaOptionBundle.properties")
+                pickFirsts.add("messages/JavaErrorBundle.properties")
+                pickFirsts.add("kotlin/reflect/reflect.kotlin_builtins")
+                pickFirsts.add("kotlin/collections/collections.kotlin_builtins")
+                pickFirsts.add("misc/registry.properties")
+                pickFirsts.add("META-INF/extensions/compiler.xml")
+                pickFirsts.add("META-INF/proguard/androidx-service.pro")
+                pickFirsts.add("kotlin/concurrent/atomics/atomics.kotlin_builtins")
+                pickFirsts.add("kotlin/annotation/annotation.kotlin_builtins")
+                pickFirsts.add("kotlin/coroutines/coroutines.kotlin_builtins")
+                pickFirsts.add("kotlin/internal/internal.kotlin_builtins")
+                pickFirsts.add("kotlin/jvm/jvm.kotlin_builtins")
+                pickFirsts.add("kotlin/math/math.kotlin_builtins")
+                pickFirsts.add("kotlin/sequences/sequences.kotlin_builtins")
+                pickFirsts.add("kotlin/text/text.kotlin_builtins")
+                pickFirsts.add("DebugProbesKt.bin")
+                pickFirsts.add("kotlinManifest.properties")
+                pickFirsts.add("kotlin/kotlin.kotlin_builtins") // <<< ADD THIS LINE
+                pickFirsts.add("messages/CoreBundle.properties") // <<< ADD THIS LINE
+                pickFirsts.add("messages/UtilBundle.properties") // <<< ADD THIS LINE
+                pickFirsts.add("messages/CoreDeprecatedMessagesBundle.properties") // <<< ADD THIS LINE
+                pickFirsts.add("kotlin/ranges/ranges.kotlin_builtins") // <<< ADD THIS LINE
+                pickFirsts.add("META-INF/kotlinx_coroutines_core.version") // <<< ADD THIS LINE
+                pickFirsts.add("messages/JavaPsiBundle.properties") // <<< ADD THIS LINE
+
+
+
+
+
+
+
+                // Any other proactive additions you might have made
+
+        // ... other android configurations ...
+
+
+            // Proactive additions for common Kotlin/KSP/Compiler internals:
+           // pickFirsts.add("META-INF/MANIFEST.MF")
+           // pickFirsts.add("META-INF/INDEX.LIST")
+           // pickFirsts.add("META-INF/io.netty.versions.properties") // If you ever use Netty indirectly
+           // pickFirsts.add("META-INF/LICENSE*") // Catches LICENSE, LICENSE.txt, LICENSE.md etc.
+           // pickFirsts.add("META-INF/NOTICE*")  // Catches NOTICE, NOTICE.txt, NOTICE.md etc.
+            //pickFirsts.add("META-INF/ASL2.0")
+           // pickFirsts.add("META-INF/DEPENDENCIES")
+           // pickFirsts.add("META-INF/kotlin-tooling-metadata.json")
+
+            // More Kotlin built-ins (some might be redundant with your existing ones if paths are slightly different)
+           // pickFirsts.add("kotlin/comparisons/comparisons.kotlin_builtins")
+           // pickFirsts.add("kotlin/jvm/internal/jvm_internal.kotlin_builtins")
+          //  pickFirsts.add("kotlin/ranges/ranges.kotlin_builtins")
+            //pickFirsts.add("kotlin/time/time.kotlin_builtins")
+          //  pickFirsts.add("kotlin/unsigned/unsigned.kotlin_builtins")
+
+            // KSP related (if errors point to files specifically in META-INF/services/ for KSP)
+            // pickFirsts.add("META-INF/services/com.google.devtools.ksp.processing.SymbolProcessorProvider")
+
+            // Sometimes an empty directory causes issues, though less common for pickFirsts
+            // pickFirsts.add("") // Use with extreme caution, usually for 'excludes' of empty dirs
+
+            // If you see errors for specific *.kotlin_module files
+            // pickFirsts.add("META-INF/*.kotlin_module") // Wildcard for all kotlin_module files
+
+        }
+    }
+
+
+    // --- END OF BLOCK ---
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-
-    kotlinOptions { // Or just kotlin {} with jvmToolchain(17)
+    kotlinOptions {
         jvmTarget = "17"
         freeCompilerArgs = listOf("-Xjvm-default=all")
-        // Add this for each experimental/unstable API you want to opt into module-wide
         freeCompilerArgs += "-Xopt-in=androidx.media3.common.util.UnstableApi"
-
     }
 
     buildFeatures {
         viewBinding = true
-        buildConfig = true // Crucial for buildConfigField to work
-
+        dataBinding = true
+        buildConfig = true
     }
 
     lint {
         baseline = file("lint-baseline.xml")
     }
-
 }
+
 dependencies {
-
-
-
     implementation(platform(libs.firebase.bom))
 
     // AndroidX & Google Material
@@ -101,6 +158,11 @@ dependencies {
     implementation(libs.recyclerview)
     implementation(libs.swiperefreshlayout)
     implementation(libs.annotation)
+
+    // Room compiler processing testing with auto-value exclusion
+    implementation(libs.androidx.room.compiler.processing.testing) {
+        exclude(group = "com.google.auto.value", module = "auto-value")
+    }
 
     // Navigation
     implementation(libs.navigation.fragment.ktx)
@@ -120,27 +182,19 @@ dependencies {
     implementation(libs.firebase.config)
     implementation(libs.firebase.functions)
     implementation(libs.firebase.analytics)
-    implementation(libs.firebase.dataconnect) // Ensure this is covered by BoM or specify version if needed
+    implementation(libs.firebase.dataconnect)
 
     // Google Play Services
     implementation(libs.credentials)
     implementation(libs.credentials.play.services.auth)
     implementation(libs.googleid)
     implementation(libs.play.services.identity)
-    implementation(libs.play.services.auth.v2130) // Make sure this is the single play-services-auth version you intend to use
+    implementation(libs.play.services.auth.v2130)
     implementation(libs.gms.play.services.maps.v1920)
     implementation(libs.play.services.location)
 
-
-
-    implementation(libs.glide) // Check for the latest version
-    // annotationProcessor "com.github.bumptech.glide:compiler:4.12.0" // If using Java
-    // kapt "com.github.bumptech.glide:compiler:4.12.0" // If using Kotlin with kapt
-    // Image Loading
+    implementation(libs.glide)
     implementation(libs.picasso)
-    //implementation(libs.glide)
-
-    // Other UI
     implementation(libs.hdodenhof.circleimageview)
 
     // KotlinX
@@ -152,10 +206,11 @@ dependencies {
 
     // Media & Sceneform (if used)
     implementation(libs.media3.common)
-    implementation(libs.scenecore) // Check if you have both scenecore and androidx.scenecore, might only need one
+    implementation(libs.androidx.scenecore) // Assuming this is the primary scenecore lib
+    // implementation(libs.scenecore) // If this is different and also needed
     implementation(libs.impress)
-    implementation(libs.androidx.scenecore)
-    implementation(libs.firebase.crashlytics.buildtools) // This or libs.scenecore
+    implementation(libs.firebase.crashlytics.buildtools)
+    // libs.androidx.room.compiler.processing.testing is already above with the exclusion
 
     // Test
     testImplementation(libs.junit)

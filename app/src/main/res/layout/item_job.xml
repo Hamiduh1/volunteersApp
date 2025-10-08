@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginEnd="8dp"
+    android:layout_marginBottom="4dp"
+    app:cardElevation="2dp"
+    app:cardCornerRadius="8dp">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="12dp">
+
+        <ImageView
+            android:id="@+id/image_view_job_icon"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@drawable/ic_default_work_outline"
+            android:scaleType="centerCrop"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            android:contentDescription="@string/cd_job_icon" />
+
+        <TextView
+            android:id="@+id/text_view_job_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textAppearance="?attr/textAppearanceListItem"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            tools:text="Software Engineer Intern"
+            app:layout_constraintStart_toEndOf="@id/image_view_job_icon"
+            app:layout_constraintTop_toTopOf="@id/image_view_job_icon"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <TextView
+            android:id="@+id/text_view_job_employer"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:textAppearance="?attr/textAppearanceListItemSecondary"
+            android:textSize="14sp"
+            tools:text="Google Inc."
+            app:layout_constraintStart_toStartOf="@id/text_view_job_title"
+            app:layout_constraintTop_toBottomOf="@id/text_view_job_title"
+            app:layout_constraintEnd_toEndOf="parent"/>
+
+        <TextView
+            android:id="@+id/text_view_job_location"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:drawablePadding="4dp"
+            android:gravity="center_vertical"
+            android:textAppearance="?attr/textAppearanceCaption"
+            app:drawableStartCompat="@drawable/ic_location_on_18"
+            tools:text="Mountain View, CA"
+            app:layout_constraintStart_toStartOf="@id/text_view_job_employer"
+            app:layout_constraintTop_toBottomOf="@id/text_view_job_employer"
+            app:layout_constraintEnd_toEndOf="parent"/>
+
+        <TextView
+            android:id="@+id/text_view_job_category"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/background_category_tag"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:textColor="?attr/colorOnSecondary"
+            android:textSize="12sp"
+            tools:text="Technology"
+            app:layout_constraintStart_toStartOf="@id/text_view_job_location"
+            app:layout_constraintTop_toBottomOf="@id/text_view_job_location"/>
+
+        <TextView
+            android:id="@+id/text_view_job_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textAppearance="?attr/textAppearanceCaption"
+            android:textSize="12sp"
+            tools:text="Posted on Jan 1, 2023"
+            app:layout_constraintStart_toStartOf="@id/text_view_job_category"
+            app:layout_constraintTop_toBottomOf="@id/text_view_job_category"
+            app:layout_constraintBottom_toTopOf="@id/button_apply_job"
+            android:layout_marginBottom="8dp"/>
+
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_apply_job"
+            style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/job_apply_button_text"
+            android:layout_marginTop="8dp"
+            app:icon="@drawable/ic_send_apply"
+            app:iconGravity="textStart"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/text_view_job_date"/>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</com.google.android.material.card.MaterialCardView>
+

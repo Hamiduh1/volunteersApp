@@ -1,120 +1,168 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:fillViewport="true">
-
-    <androidx.constraintlayout.widget.ConstraintLayout
+    <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+        xmlns:app="http://schemas.android.com/apk/res-auto"
+        xmlns:tools="http://schemas.android.com/tools"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="16dp"
-        tools:context=".ui.auth.BecomeOrganizerFragment"> <!-- Adjust context path if needed -->
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        tools:context=".ui.auth.BecomeOrganizerFragment">
+        <!-- Ensure tools:context matches your fragment's package -->
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/toolbar_become_organizer"
-            android:layout_width="0dp"
-            android:layout_height="?attr/actionBarSize"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:title="@string/title_become_an_organizer" /> <!-- Make sure this string exists -->
-
-        <TextView
-            android:id="@+id/tv_become_organizer_title"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/become_organizer_form_title"
-        android:textAppearance="?attr/textAppearanceHeadline6"
-        app:layout_constraintTop_toBottomOf="@id/toolbar_become_organizer"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/til_organization_name"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:hint="@string/hint_organization_name"
-        app:layout_constraintTop_toBottomOf="@id/tv_become_organizer_title"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/et_organization_name"
+        <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:inputType="textCapWords"
-            android:maxLines="1" />
-    </com.google.android.material.textfield.TextInputLayout>
+            android:padding="16dp">
 
-    <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/til_organization_contact_email"
-        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:hint="@string/hint_organization_contact_email"
-    app:layout_constraintTop_toBottomOf="@id/til_organization_name"
-    app:layout_constraintStart_toStartOf="parent"
-    app:layout_constraintEnd_toEndOf="parent">
+            <com.google.android.material.appbar.MaterialToolbar
+                android:id="@+id/toolbar_become_organizer"
+                android:layout_width="0dp"
+                android:layout_height="?attr/actionBarSize"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:title="@string/title_become_an_organizer" />
+            <!-- Ensure @string/title_become_an_organizer exists -->
 
-    <com.google.android.material.textfield.TextInputEditText
-        android:id="@+id/et_organization_contact_email"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:inputType="textEmailAddress"
-        android:maxLines="1" />
-</com.google.android.material.textfield.TextInputLayout>
+            <TextView
+                android:id="@+id/tv_become_organizer_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/become_organizer_form_title"
+                android:textAppearance="?attr/textAppearanceHeadline6"
+                app:layout_constraintTop_toBottomOf="@id/toolbar_become_organizer"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
+            <!-- Ensure @string/become_organizer_form_title exists -->
 
-<com.google.android.material.textfield.TextInputLayout
-android:id="@+id/til_organization_description"
-style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-android:layout_width="0dp"
-android:layout_height="wrap_content"
-android:layout_marginTop="8dp"
-android:hint="@string/hint_organization_description"
-    app:layout_constraintTop_toBottomOf="@id/til_organization_contact_email"
-    app:layout_constraintStart_toStartOf="parent"
-    app:layout_constraintEnd_toEndOf="parent">
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/til_organization_name"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:hint="@string/hint_organization_name"
+                app:layout_constraintTop_toBottomOf="@id/tv_become_organizer_title"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
 
-<com.google.android.material.textfield.TextInputEditText
-android:id="@+id/et_organization_description"
-android:layout_width="match_parent"
-android:layout_height="wrap_content"
-android:gravity="top"
-android:inputType="textMultiLine"
-android:minLines="3"
-android:maxLines="5" />
-    </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_organization_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textCapWords"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
 
-    <!-- You can add more fields here like Website, Phone, Address, etc. -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/til_organization_contact_email"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/hint_organization_contact_email"
+                app:layout_constraintTop_toBottomOf="@id/til_organization_name"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
 
-<ProgressBar
-android:id="@+id/progress_bar_become_organizer"
-android:layout_width="wrap_content"
-android:layout_height="wrap_content"
-android:layout_marginTop="24dp"
-android:visibility="gone"
-app:layout_constraintTop_toBottomOf="@id/til_organization_description"
-app:layout_constraintStart_toStartOf="parent"
-app:layout_constraintEnd_toEndOf="parent"
-tools:visibility="visible"/>
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_organization_contact_email"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textEmailAddress"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
 
-<com.google.android.material.button.MaterialButton
-android:id="@+id/btn_submit_organization_details"
-android:layout_width="0dp"
-android:layout_height="wrap_content"
-android:layout_marginTop="24dp"
-android:text="@string/button_submit_organization_details"
-    app:layout_constraintTop_toBottomOf="@id/progress_bar_become_organizer"
-    app:layout_constraintStart_toStartOf="parent"
-    app:layout_constraintEnd_toEndOf="parent"
-    app:layout_constraintBottom_toBottomOf="parent"
-    android:layout_marginBottom="16dp"/>
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/til_organization_description"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/hint_organization_description"
+                app:layout_constraintTop_toBottomOf="@id/til_organization_contact_email"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
 
-    </androidx.constraintlayout.widget.ConstraintLayout>
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_organization_description"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="top"
+                    android:inputType="textMultiLine"
+                    android:minLines="3"
+                    android:maxLines="5" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Optional fields to consider adding: -->
+            <!-- Organization Website -->
+            <!--
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/til_organization_website"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/hint_organization_website"
+                app:layout_constraintTop_toBottomOf="@id/til_organization_description"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_organization_website"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textUri"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+            -->
+
+            <!-- Organization Phone -->
+            <!--
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/til_organization_phone"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/hint_organization_phone"
+                app:layout_constraintTop_toBottomOf="@id/til_organization_website_or_description"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_organization_phone"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="phone"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+            -->
+
+            <ProgressBar
+                android:id="@+id/progress_bar_become_organizer"
+                style="?android:attr/progressBarStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:visibility="gone"
+                app:layout_constraintTop_toBottomOf="@id/til_organization_description"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                tools:visibility="visible"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_submit_organization_details"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="@string/button_submit_organization_details"
+                app:layout_constraintTop_toBottomOf="@id/progress_bar_become_organizer"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent"
+                android:layout_marginBottom="16dp"/>
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
     </androidx.core.widget.NestedScrollView>
+

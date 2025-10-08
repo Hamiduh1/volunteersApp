@@ -292,7 +292,7 @@
     <string name="job_deleted_successfully">Job post deleted successfully.</string>
     <string name="job_deletion_failed">Failed to delete job post.</string>
     <string name="no_applicants_yet_for_this_job">No applicants yet for this job.</string>
-    <string name="error_loading_jobs">Error loading jobs</string>
+    <string name="error_loading_jobs">Error loading jobs: %1$s</string>
     <string name="no_jobs_available">No jobs available</string>
     <string name="failed_to_load_jobs">Failed to load jobs</string>
     <string name="loading_jobs">Loading jobs…</string>
@@ -458,7 +458,6 @@
    <string name="failed_to_load_opportunities_fragment">Failed to load opportunities.</string>
     <string name="error_displaying_job_details"> Error Displaying Job Details</string>
     <string name="view_details">View Details</string>
-    <string name="error_job_id_missing">Error: Job ID missing.</string>
     <string name="submitting_application_button_text">Submitting Application</string>
     <string name="apply_button_text">"Apply "</string>
     <string name="cancel_button_text">Cancel</string>
@@ -1406,7 +1405,7 @@
         <string name="error_opening_event_details_short">Error opening details.</string>
          <string name="error_navigating_to_details_general">An error occurred while trying to show event details.</string>
 
-        <!-- Application Process -->
+        <!-- EventApplication Process -->
         <string name="cannot_process_application_event">Cannot process application for this event.</string>
         <string name="event_data_incomplete_cannot_apply_short">Cannot apply: Event data incomplete.</string>
        <string name="error_submitting_application_default_with_message">Error submitting application: %1$s</string> <!-- From previous version, good to have -->
@@ -1454,7 +1453,6 @@
         <string name="error_please_try_again">An error occurred. Please try again.</string>
 
 
-        <string name="error_fetching_application_status">Could not check your application status.</string>
         <string name="no_upcoming_events_found_matching_criteria">No events found matching your criteria.</string>
          <string name="cannot_open_event_details_no_id">Cannot open event: Details are missing.</string>
         <string name="error_navigating_to_details">Error opening event details.</string>
@@ -1468,7 +1466,7 @@
     <string name="options_for_applied_event">Options for applied event: %1$s</string>
 
         <!-- For a potential PopupMenu in onEventOptionsClicked if you implement it -->
-        <!-- <string name="action_withdraw_application_applied_menu">Withdraw Application</string> -->
+        <!-- <string name="action_withdraw_application_applied_menu">Withdraw EventApplication</string> -->
 
      <string name="error_user_not_logged_in_hosted">You need to be logged in to see your hosted events.</string> <!-- Similar to please_log_in..., but could be context specific -->
 
@@ -1569,7 +1567,7 @@
         <string name="button_logout">Logout</string>
     <string name="organizer_application_pending">Application Pending</string> <!-- New -->
 
-        <!-- For ProfileFragment.java logic -->
+        <!-- For VolunteerProfileFragment.java logic -->
         <string name="user_not_logged_in">User not logged in.</string>
         <string name="camera_permission_denied">Camera permission denied.</string>
         <string name="failed_to_process_image">Failed to process image.</string>
@@ -1722,8 +1720,7 @@
     <string name="navigating_to_view_applications">Navigating to View Applications…</string>
 
     <string name="select_event_to_see_applications">Select an event to see applications.</string>
-    <string name="cannot_load_applications_no_ids">Cannot load applications. Event or Organizer not specified.</string>
-    <string name="clicked_volunteer">Clicked: %s</string>
+     <string name="clicked_volunteer">Clicked: %s</string>
     <string name="rejection_reason_placeholder">Not a good fit at this time.</string>
     <string name="error_loading_applications">Error: %s</string>
     <string name="application_status_updated">Application status updated!</string>
@@ -1770,12 +1767,46 @@
     <string name="menu_my_applications">My applications</string>
 
 
+    <string name="cd_employer_logo">Employer Logo</string>
+    <string name="label_job_description">Job Description</string>
+    <string name="label_job_responsibilities">Responsibilities</string>
+    <string name="label_required_skills">Required Skills</string>
+     <string name="job_posted_date_label">Posted on: %1$s</string>
+    <string name="job_deadline_label">Apply by: %1$s</string>
+    <string name="job_not_found">Job not found.</string>
+    <string name="job_application_successful_detail">Application Submitted!</string>
+    <string name="job_application_failed_detail">Application Failed. Please try again.</string>
+    <string name="already_applied_to_this_job_detail">You have already applied to this job.</string>
+    <string name="login_to_apply_detail">Please log in to apply.</string>
+
+
+
+
+      <string name="please_log_in_to_apply_for_event">Please log in to apply for this event.</string>
+
+
+
+        <string name="attempting_to_apply">Submitting your application…</string>
+        <string name="attempting_to_withdraw">Withdrawing your application…</string>
+           <string name="error_parsing_event_data">Error parsing event data.</string> <!-- Used by ViewModel -->
+        <string name="event_id_missing">Event ID is missing or invalid.</string> <!-- Used by ViewModel -->
+
+        <string name="apply_failed">Application failed</string> <!-- Used by ViewModel -->
+        <string name="withdraw_failed">Withdrawal failed</string> <!-- Used by ViewModel -->
+
+        <!-- Options Menu Items (for R.menu.event_detail_organizer_menu) -->
+        <string name="action_edit_event_details">Edit Event</string>
+        <string name="action_delete_event_details">Delete Event</string>
+        <string name="action_apply_for_event">Apply</string>
+        <string name="action_withdraw_from_event">Withdraw</string>
+        <string name="action_view_event_details">View Details</string>
 
 
 
 
 
-     <string name="edit_opportunity_title">Edit Opportunity</string>
+
+    <string name="edit_opportunity_title">Edit Opportunity</string>
         <string name="organization_name_optional">Organization Name (Optional)</string>
         <string name="event_opportunity_title_required">Event / Opportunity Title*</string>
         <string name="specific_role_title_optional">Specific Role / Job Title (Optional)</string>
@@ -1843,9 +1874,7 @@
     <string name="applications_for_event_with_id">Applications for Event ID: %s</string>
     <string name="error_loading_applications_message">Error loading applications: %s</string>
 
-     <string name="application_updated_successfully">Application %s!</string>
-     <string name="application_details_not_found">Application details not found.</string>
-    <string name="could_not_load_full_volunteer_details">Could not load full volunteer details.</string>
+      <string name="application_details_not_found">Application details not found.</string>
     <string name="title_application_detail">Application Detail</string> <!-- For Toolbar -->
     <string name="volunteer_details_not_available">Volunteer (Details N/A)</string>
     <string name="application_status_not_available">Application Status N/A</string>
@@ -1866,20 +1895,260 @@
     <string name="profile_role_updated_message">Your role has been updated to %1$s. Restarting app to apply changes.</string>
     <string name="profile_role_update_failed">Failed to update role. Please try again.</string>
 
+    <string name="wallet_title">My Wallet</string>
+    <string name="sign_in_to_view_wallet">Please sign in to view your wallet.</string>
+    <string name="sign_in_to_transact">Please sign in to make a transaction.</string>
+    <string name="failed_to_load_wallet_balance">Failed to load balance.</string>
+     <string name="cd_currency_icon_eur">Euro</string>
+    <string name="cd_currency_icon_default">Currency</string>
+
+    <string name="transaction_activity_title">Send Money</string>
+    <string name="auth_user_not_authenticated">User not authenticated. Please login again.</string>
+    <string name="error_fetching_wallet_balance">Error fetching your wallet balance.</string>
+    <string name="error_receiver_email_required">Receiver\'s email is required.</string>
+    <string name="error_amount_required">Enter amount to send.</string>
+    <string name="error_invalid_amount_format">Invalid amount format.</string>
+    <string name="error_amount_greater_than_zero">Amount must be greater than zero.</string>
+    <string name="error_insufficient_balance">Insufficient balance. Current: %1$s</string>
+    <string name="error_cannot_send_to_self">You cannot send money to yourself.</string>
+    <string name="error_receiver_email_not_found">Receiver email not found.</string>
+    <string name="error_finding_receiver">Error finding receiver. Please try again.</string>
+    <string name="success_money_sent">Money sent successfully!</string>
+    <string name="transaction_failed_insufficient_funds">Transaction failed: Insufficient funds.</string>
+    <string name="transaction_failed_wallet_issue">Transaction failed: Problem with sender or receiver wallet data.</string>
+    <string name="transaction_failed_generic">Transaction failed: %1$s</string>
+    <string name="transaction_failed_unknown">Transaction failed. Please try again.</string>
+    <string name="transaction_log_entry">Transaction of %1$s %2$s from %3$s to %4$s</string>
+    <string name="transaction_title">Send Money</string>
+    <string name="hint_receiver_email">Receiver\'s Email</string>
+    <string name="hint_amount">Amount</string>
+    <string name="button_send_money">Send</string>
+    <string name="menu_browse_jobs">Browse Jobs</string>
+    <string name="menu_my_jobs">My Jobs</string>
+    <string name="error_user_not_authenticated_critical">Critical Error: User not authenticated. Please restart the app.</string>
+    <string name="organizer_registration_successful">You are now registered as an organizer!</string>
+    <string name="error_registration_failed_firebase">Registration failed</string>
+    <string name="error_organization_description_required">Organization description is required</string><string name="hint_organization_website">Organization Website (Optional)</string>
+    <string name="hint_organization_phone">Organization Phone (Optional)</string>
+    <string name="hint_organization_address">Organization Address (Optional)</string>
+    <string name="error_unknown_occurred">An unknown error occurred. Please try again.</string>
+    <string name="search_jobs_hint">Search jobs by title, keyword…</string>
+    <string name="cd_search_button">Search Jobs</string>
+      <string name="no_jobs_found_browse">No jobs found matching your criteria.</string>
+    <string name="error_loading_jobs_list">Error loading jobs. Please try again.</string>
+    <string name="cd_job_icon">Job Icon</string>
+    <string name="job_posted_on">Posted: %1$s</string>
+    <string name="job_apply_button_text">Apply</string>
+    <string name="job_applied_button_text">Applied</string>
+    <!-- Also ensure R.color.grey_400 and R.color.buttonColor (or your primary button color) are defined in colors.xml -->
+
+        <!-- For BrowseJobsFragment.kt (Kotlin code - Toast messages, logs, dynamic text) -->
+        <string name="error_fetching_application_status">Could not update application statuses.</string>
+        <string name="cannot_open_job_details_no_id">Cannot open job details: Job ID is missing.</string>
+         <string name="must_be_logged_in_to_apply_job">You need to be logged in to apply for jobs.</string>
+        <string name="job_data_incomplete_for_apply">Job data is incomplete. Cannot apply.</string>
+        <string name="already_applied_to_this_job">You have already applied to this job.</string>
+        <string name="job_application_submitted_success">Application submitted successfully!</string>
+        <string name="error_submitting_job_application">Failed to submit application: %1$s</string>
+    <string name="no_jobs_found">No Jobs Found</string>
+    <string name="job_not_accepting_applications">Job Not Accepting applications</string>
+    <string name="menu_my_activity">My Applications</string>
+    <string name="menu_browse_events">Events</string> <!-- %1$s is for the error message -->
+
+    <string name="no_jobs_applied_for_yet">You haven\'t applied for any jobs yet.</string>
+    <string name="failed_to_load_applied_jobs">Failed to load applied jobs</string>
+    <string name="please_log_in_to_see_applied_jobs">Please log in to see applied jobs</string>
+    <string name="tab_my_job_applications">My Job Applications</string>
+    <string name="tab_my_event_signups">My Event Signups</string>
+    <string name="job_not_found_or_invalid_id">Job not found or Invalid Id</string>
+
+
+        <string name="job_id_missing_cannot_apply">Job ID is missing. Cannot submit application.</string>
+        <string name="job_details_not_available_try_again">Job details are not available. Please try again.</string>
+        <string name="error_checking_application_status">Error checking your application status. Please try again.</string>
+    <string name="event_not_found_or_invalid_id">Error not found or Invalid Id</string>
+    <string name="error_loading_event_details_critical">Error Loading Event Details</string>
+    <string name="status_indicator">Status Indicator</string>
+    <string name="title_job_details">Job Details</string>
+
+    <!-- For "Browse All Jobs" Button -->
+        <string name="browse_all_jobs">Browse All Jobs</string>
+        <string name="cd_browse_all_jobs_button">Button to browse all available jobs</string>
+        <string name="error_navigating_browse_jobs">Could not open browse jobs.</string> <!-- From HomeFragment.java -->
+
+        <!-- For "My Jobs" Button -->
+        <string name="my_jobs_button">My Jobs</string>
+        <string name="cd_my_jobs_button">Button to view your applied or saved jobs</string>
+        <string name="error_navigating_my_jobs">Could not open my jobs.</string> <!-- From HomeFragment.java -->
+
+        <!-- Content Descriptions for Icons (if not already present) -->
+        <string name="cd_event_icon_upcoming">Icon for upcoming event</string>
+        <string name="cd_event_placeholder">Placeholder image for event</string>
+
+
+
+
+
+
+      <string name="no_message_provided">No message provided.</string>
+        <string name="error_loading_data">Error loading data</string>
+        <string name="application_updated_successfully">Application status updated to %1$s.</string>
+        <string name="could_not_load_full_volunteer_details">Could not load full volunteer details.</string>
+        <string name="ic_profile_placeholder_desc">Placeholder for profile image</string> <!-- For content description -->
+
+
+
+        <!-- Labels -->
+        <string name="label_job_title">Job Title:</string>
+        <string name="label_volunteer_name">Applicant Name:</string>
+        <string name="label_volunteer_email">Applicant Email:</string>
+        <string name="label_volunteer_phone">Applicant Phone:</string>
+        <string name="label_application_date">Applied On:</string>
+        <string name="label_application_status">Application Status:</string>
+        <string name="label_notes_from_volunteer">Notes from Volunteer:</string> <!-- Was LabelCoverLetter -->
+        <string name="label_resume">Resume:</string>
+        <string name="label_cover_letter">Cover Letter:</string>
+
+
+        <!-- Button Texts -->
+        <string name="button_accept_application">Accept</string>
+        <string name="button_reject_application">Reject</string>
+        <string name="button_view_resume">View Resume</string>
+        <string name="button_view_cover_letter">View Cover Letter</string>
+
+        <!-- Status Texts (if you display them beyond the enum name, otherwise capitalize(enum.name) is fine) -->
+        <!-- These might not be needed if you just capitalize the enum names -->
+
+        <string name="status_viewed">Viewed</string>
+        <string name="status_shortlisted">Shortlisted</string>
+        <string name="status_interviewing">Interviewing</string>
+        <string name="status_offer_extended">Offer Extended</string>
+        <string name="status_accepted_by_volunteer">Accepted by Volunteer</string>
+        <string name="status_rejected_by_employer">Rejected by Employer</string>
+        <string name="status_withdrawn_by_volunteer">Withdrawn by Volunteer</string>
+
+
+        <!-- Messages & Errors -->
+         <string name="job_application_updated_successfully">Job application status updated to %1$s.</string>
+          <string name="error_missing_job_application_data">Error: Missing required job application data.</string>
+        <string name="confirm_action_accept_application">Are you sure you want to accept this application?</string>
+        <string name="confirm_action_reject_application">Are you sure you want to reject this application?</string>
+
+         <!-- Content Descriptions for Accessibility -->
+        <string name="cd_volunteer_profile_image">Volunteer\'s profile image</string>
+        <string name="cd_accept_application_button">Accept application button</string>
+        <string name="cd_reject_application_button">Reject application button</string>
+    <string name="title_job_applications">Job Applications</string>
+    <string name="error_job_id_missing">Error: Job ID not provided. Cannot load applications.</string>
+    <string name="cannot_load_applications_no_ids">Cannot load applications without a Job ID.</string>
+    <string name="applications_for_job_with_id">Applications for Job ID: %1$s</string>
+    <string name="job_not_found_applications">Job not found. Applications for Job ID: %1$s</string>
+    <string name="no_applications_found_for_this_job">No applications found for this job yet.</string>
+
+    <string name="applications_for_dynamic_job_title">Applications for: %1$s</string>
+    <!-- For JobListFragment -->
+        <string name="please_log_in_to_see_my_jobs">Please log in to see these jobs.</string>
+        <string name="unknown_filter_type">Unknown filter type selected.</string>
+        <string name="no_jobs_available_currently">No jobs are available currently.</string>
+        <string name="you_have_not_applied_to_any_jobs">You have not applied to any jobs yet.</string>
+        <string name="you_have_not_posted_any_jobs">You have not posted any jobs yet.</string>
+        <string name="no_jobs_found_for_this_category">No jobs found for this category.</string>
+
+        <string name="cannot_open_job_missing_id">Cannot open job: ID is missing.</string>
+        <string name="error_opening_job_details">Could not open job details.</string>
+ <string name="cannot_apply_job_missing_id">Cannot apply: Job ID is missing.</string>
+           <string name="application_submission_failed">Application submission failed: %1$s</string>
+        <!-- Placeholder for unknown filter if you had it from previous version -->
+        <string name="unknown_filter">Unknown filter applied.</string>
+
+
+
+
+
+    <!-- Employer Bottom Navigation Menu Titles -->
+        <string name="menu_employer_dashboard">Dashboard</string>
+        <string name="menu_employer_post_job">Post Job</string>
+        <string name="menu_employer_posted_jobs">Posted Jobs</string>
+        <string name="menu_employer_applications">Applications</string>
+        <string name="menu_employer_profile">Profile</string>
+    <string name="title_available_volunteer_events">Available Volunteer Events</string>
+    <string name="error_organizer_id_missing">Organizer Id is Missing</string>
+    <string name="failed_to_update_job_application_status">Failed to update job application status</string>
+     <string name="job_application_details_not_found">Job Application details not found</string>
+    <string name="title_job_application_detail">Job Application Detail</string>
+    <string name="cd_view_cover_letter_button">View Cover Letter</string>
+    <string name="select_job_to_see_applications">Select job to see applications\n</string>
+    <string name="reject_application_title">Reject Application</string>
+    <string name="rejection_reason_hint">Enter reason (optional)</string>
+    <string name="submit_button_text">Submit</string>
+       <string name="error_application_id_missing">Error: Application ID missing.</string>
+          <string name="error_loading_details_param">Error loading details: %s</string> <!-- %s is a placeholder for the error message -->
+        <string name="status_already_set">This status is already set.</string>
+        <string name="invalid_status_selected">Invalid status selected.</string> <!-- More specific than just "Invalid status." -->
+        <string name="application_status_updated_successfully">Application status updated successfully.</string>
+        <string name="update_failed_param">Update failed: %s</string> <!-- %s is a placeholder for the error message -->
+
+        <!-- From fragment_application_detail.xml (based on typical usage) -->
+        <string name="applicant_name_label">Applicant Name</string>
+        <string name="event_title_label">Event Title</string>
+        <string name="applicant_email_label">Applicant Email</string>
+        <string name="applied_date_label">Applied Date</string>
+        <string name="applicant_notes_label">Applicant Notes</string>
+        <string name="current_status_label">Current Status</string>
+        <string name="rejection_reason_label">Reason for Rejection</string>
+        <string name="update_status_label">Update Status:</string>
+        <string name="update_status_button">Update Status</string>
+
+
+
+        <string name="application_sent_status">Application Sent</string>
+        <string name="application_approved_status">Approved</string>
+        <string name="application_not_selected_status">Not Selected</string>
+
+
+
+
+    <!-- For old buttons (if you decide to remove them entirely from XML, these aren't strictly needed) -->
+        <string name="approve_button">Approve</string>
+        <string name="reject_button">Reject</string>
+    <string name="date_na">Date N/A</string>
     <string-array name="event_types_array">
-        <item>Community Service</item>
-            <item>Environmental Cleanup</item>
-            <item>Workshops</item>
-            <item>Meetup</item>
-            <item>Conference</item>
-            <item>Educational Workshop</item>
-            <item>Fundraising</item>
-            <item>Animal Welfare</item>
-            <item>Health &amp; Wellness</item>
-            <item>Arts &amp; Culture</item>
-            <item>Other</item>
-        </string-array>
-        <!-- You can have other string arrays or individual strings -->
+            <item>Community Service</item>
+                <item>Environmental Cleanup</item>
+                <item>Workshops</item>
+                <item>Meetup</item>
+                <item>Conference</item>
+                <item>Educational Workshop</item>
+                <item>Fundraising</item>
+                <item>Animal Welfare</item>
+                <item>Health &amp; Wellness</item>
+                <item>Arts &amp; Culture</item>
+                <item>Other</item>
+            </string-array>
+            <!-- You can have other string arrays or individual strings -->
+
+        <!-- ... other strings ... -->
+        <plurals name="number_of_applicants">
+            <item quantity="one">%d applicant</item>
+            <item quantity="other">%d applicants</item>
+        </plurals>
+        <string name="organized_by">Organized by: %s</string>
+    <string name="withdraw">Withdraw</string>
+    <string name="no_jobs_in_this_category">No jobs in this category</string>
+    <string name="get_notified_about_new_events_matching_your_interests">Get notified about new events matching your interests</string>
+    <string name="application_status_updates">Application Status</string>
+    <string name="receive_updates_when_your_application_is_approved_or_rejected">Receive_updates when your application is approved or rejected\"</string>
+    <string name="new_event_reminders">New Event reminders</string>
+    <string name="terms_and_conditions">Terms and Conditions</string>
+    <string name="my_jobs">My Jobs</string>
+    <string name="completed">Completed</string>
+
+
+
+        <!-- For MyJobsFragment Withdraw Dialog -->
+        <string name="withdraw_application">Withdraw Application</string>
+        <string name="withdraw_confirmation_message">Are you sure you want to withdraw your application for \'%1$s\'?</string>
+           <string name="withdrawing_application_toast">Withdrawing application…</string>
 
 
 </resources>

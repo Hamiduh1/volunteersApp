@@ -1,3 +1,10 @@
+/**
+
+ (HostedEventsFragment.kt, OrganizerEventsAdapter.kt,
+ and the associated ViewModels), the HostedEventsFragment is the modern,
+ Kotlin-based replacement for this older Java-based MyEventFragment.
+**/
+/**
 package com.example.volunteersApp.fragments;
 
 import android.os.Bundle;
@@ -23,9 +30,11 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
+
 import com.example.volunteersApp.models.EventModel;
 import com.example.volunteersApp.R;
 import com.example.volunteersApp.adapters.EventAdapter;
+import com.example.volunteersApp.fragments.MyEventFragmentDirections;
 import com.example.volunteersApp.viewmodels.EventViewModel; // Make sure this is the correct ViewModel
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
@@ -141,13 +150,26 @@ public class MyEventFragment extends Fragment {
                 Log.d(TAG, "onApplyClick called in MyEventFragment (Organizer View) for " + (event != null ? event.getTitle() : "null event") + ". This is unexpected.");
             }
 
+            // Inside the onViewApplicantsClick method in MyEventFragment.java
+
             @Override
             public void onViewApplicantsClick(EventModel event, int position) {
                 if (!isAdded() || getContext() == null || event == null) return;
                 Log.d(TAG, "View Applicants clicked for: " + event.getTitle() + " ID: " + event.getEventId());
-                if (event.getEventId() != null && !event.getEventId().isEmpty()) {
+
+                String eventId = event.getEventId();
+                // Get the currentOrganizerId which you already have in this fragment
+                String organizerId = currentOrganizerId;
+
+                if (eventId != null && !eventId.isEmpty()) {
+                    if (organizerId == null || organizerId.isEmpty()) {
+                        Log.e(TAG, "Organizer ID is null or empty. Cannot navigate to view applicants.");
+                        Toast.makeText(getContext(), R.string.error_organizer_id_missing, Toast.LENGTH_SHORT).show(); // Add this string resource
+                        return;
+                    }
                     try {
-                        NavDirections action = MyEventFragmentDirections.actionMyEventFragmentToViewApplicantsFragment(event.getEventId());
+                        // CORRECTED: Pass both eventId and organizerId
+                        NavDirections action = MyEventFragmentDirections.actionMyEventFragmentToViewApplicantsFragment(eventId, organizerId);
                         NavHostFragment.findNavController(MyEventFragment.this).navigate(action);
                     } catch (Exception e) {
                         Log.e(TAG, "Navigation to ViewApplicantsFragment failed.", e);
@@ -314,5 +336,5 @@ public class MyEventFragment extends Fragment {
 }
 
 
-
+**/
 

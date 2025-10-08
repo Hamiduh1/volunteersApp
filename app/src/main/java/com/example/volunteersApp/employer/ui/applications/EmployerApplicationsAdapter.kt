@@ -11,16 +11,16 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.example.volunteersApp.R
-import com.example.volunteersApp.databinding.ItemApplicationSummaryBinding
-import com.example.volunteersApp.models.ApplicationModel
-import com.example.volunteersApp.models.ApplicationStatus // <<< IMPORT YOUR ENUM
+import com.example.volunteersApp.databinding.ItemApplicationSummaryBinding // Ensure this layout is suitable for JobApplication display
+import com.example.volunteersApp.models.JobApplication // UPDATED
+import com.example.volunteersApp.models.JobApplicationStatus // UPDATED
 import java.text.SimpleDateFormat
 import java.util.Locale
 
 class EmployerApplicationsAdapter(
     private val context: Context,
-    private val onApplicationClicked: (ApplicationModel) -> Unit
-) : ListAdapter<ApplicationModel, EmployerApplicationsAdapter.ApplicationViewHolder>(ApplicationDiffCallback()) {
+    private val onApplicationClicked: (JobApplication) -> Unit // UPDATED
+) : ListAdapter<JobApplication, EmployerApplicationsAdapter.ApplicationViewHolder>(JobApplicationDiffCallback()) { // UPDATED
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ApplicationViewHolder {
         val binding = ItemApplicationSummaryBinding.inflate(LayoutInflater.from(parent.context), parent, false)
@@ -28,77 +28,91 @@ class EmployerApplicationsAdapter(
     }
 
     override fun onBindViewHolder(holder: ApplicationViewHolder, position: Int) {
-        val application = getItem(position)
-        holder.bind(application, context)
+        val jobApplication = getItem(position) // Variable name updated for clarity
+        holder.bind(jobApplication, context)
         holder.itemView.setOnClickListener {
-            onApplicationClicked(application)
+            onApplicationClicked(jobApplication)
         }
     }
 
     class ApplicationViewHolder(private val binding: ItemApplicationSummaryBinding) :
         RecyclerView.ViewHolder(binding.root) {
 
-        fun bind(application: ApplicationModel, context: Context) {
-            binding.textViewItemVolunteerName.text = application.volunteerName.ifEmpty { "N/A" }
+        fun bind(application: JobApplication, context: Context) { // UPDATED parameter type
+            binding.textViewItemVolunteerName.text = application.volunteerName?.ifEmpty { context.getString(R.string.n_a) } ?: context.getString(R.string.n_a)
 
-            // Use 'appliedAt' from your ApplicationModel
-            application.appliedAt?.toDate()?.let { date ->
+            // Use 'applicationTimestamp' from JobApplication
+            application.applicationTimestamp?.toDate()?.let { date ->
                 val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
+                // Ensure R.string.applied_on_date exists and takes one string argument (the date)
                 binding.textViewItemApplicationDate.text = context.getString(R.string.applied_on_date, sdf.format(date))
             } ?: run {
-                binding.textViewItemApplicationDate.text = context.getString(R.string.applied_on_date, "N/A")
+                binding.textViewItemApplicationDate.text = context.getString(R.string.applied_on_date, context.getString(R.string.n_a))
             }
 
-            // Use 'applicationStatus' from your ApplicationModel
-            // Ensure applicationStatus is not null or empty before replaceFirstChar if it can be
-            val statusText = application.applicationStatus
+            // Use 'status' from JobApplication
+            val statusText = application.status ?: JobApplicationStatus.PENDING.name // Default if null
             if (statusText.isNotEmpty()) {
                 binding.textViewItemApplicationStatus.text = statusText.replaceFirstChar {
                     if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
                 }
             } else {
-                binding.textViewItemApplicationStatus.text = "N/A"
+                binding.textViewItemApplicationStatus.text = context.getString(R.string.n_a)
             }
 
-
-            // Set status background using 'applicationStatus' and your ApplicationStatus enum
-            when (application.applicationStatus.uppercase(Locale.getDefault())) { // Compare with uppercase enum names
-                ApplicationStatus.PENDING.name -> {
-                    binding.textViewItemApplicationStatus.background = ContextCompat.getDrawable(context, R.drawable.status_background_pending)
-                    binding.textViewItemApplicationStatus.setTextColor(ContextCompat.getColor(context, android.R.color.white))
-                }
-                ApplicationStatus.ACCEPTED.name -> {
-                    binding.textViewItemApplicationStatus.background = ContextCompat.getDrawable(context, R.drawable.status_background_accepted)
-                    binding.textViewItemApplicationStatus.setTextColor(ContextCompat.getColor(context, android.R.color.white))
-                }
-                ApplicationStatus.REJECTED.name -> {
-                    binding.textViewItemApplicationStatus.background = ContextCompat.getDrawable(context, R.drawable.status_background_rejected)
-                    binding.textViewItemApplicationStatus.setTextColor(ContextCompat.getColor(context, android.R.color.white))
-                }
-                // Add other statuses from your ApplicationStatus enum if needed
-                else -> {
-                    binding.textViewItemApplicationStatus.background = ContextCompat.getDrawable(context, R.drawable.status_background_default)
-                    binding.textViewItemApplicationStatus.setTextColor(ContextCompat.getColor(context, android.R.color.black))
-                }
+            // Set status background using 'status' from JobApplication and JobApplicationStatus enum
+            val statusDrawableRes = when (statusText.uppercase(Locale.getDefault())) {
+                JobApplicationStatus.PENDING.name -> R.drawable.status_background_pending
+                JobApplicationStatus.VIEWED.name -> R.drawable.status_background_viewed
+                JobApplicationStatus.SHORTLISTED.name -> R.drawable.status_background_shortlisted
+                JobApplicationStatus.INTERVIEWING.name -> R.drawable.status_background_interviewing
+                JobApplicationStatus.OFFER_EXTENDED.name -> R.drawable.status_background_offer_extended
+                JobApplicationStatus.ACCEPTED.name -> R.drawable.status_background_accepted
+                JobApplicationStatus.REJECTED_BY_EMPLOYER.name -> R.drawable.status_background_rejected
+                JobApplicationStatus.WITHDRAWN.name -> R.drawable.status_background_withdrawn
+                // Add JobApplicationStatus.REJECTED_BY_VOLUNTEER if relevant for this list
+                else -> R.drawable.status_background_default
             }
+            binding.textViewItemApplicationStatus.background = ContextCompat.getDrawable(context, statusDrawableRes)
+
+            // Set text color based on status
+            val statusTextColorRes = when (statusText.uppercase(Locale.getDefault())) {
+                JobApplicationStatus.PENDING.name,
+                JobApplicationStatus.VIEWED.name,
+                JobApplicationStatus.SHORTLISTED.name,
+                JobApplicationStatus.INTERVIEWING.name,
+                JobApplicationStatus.OFFER_EXTENDED.name,
+                JobApplicationStatus.ACCEPTED.name,
+                JobApplicationStatus.REJECTED_BY_EMPLOYER.name,
+                JobApplicationStatus.WITHDRAWN.name -> android.R.color.white
+                else -> android.R.color.black
+            }
+            binding.textViewItemApplicationStatus.setTextColor(ContextCompat.getColor(context, statusTextColorRes))
+
 
             Glide.with(context)
-                .load(application.volunteerProfileImageUrl)
+                .load(application.volunteerProfileImageUrl) // Assumes JobApplication has this field
                 .placeholder(R.drawable.ic_profile_placeholder)
                 .error(R.drawable.ic_profile_placeholder)
                 .circleCrop()
                 .into(binding.imageViewItemVolunteerProfile)
+
+            // Optional: Display Job Title if item_application_summary.xml has a TextView for it
+            // binding.textViewItemJobTitle.text = application.jobTitle ?: "Job Title N/A"
         }
     }
 
-    class ApplicationDiffCallback : DiffUtil.ItemCallback<ApplicationModel>() {
-        override fun areItemsTheSame(oldItem: ApplicationModel, newItem: ApplicationModel): Boolean {
-            // Use the unique ID of the Application document itself for DiffUtil
+    // UPDATED DiffCallback to use JobApplication
+    class JobApplicationDiffCallback : DiffUtil.ItemCallback<JobApplication>() {
+        override fun areItemsTheSame(oldItem: JobApplication, newItem: JobApplication): Boolean {
+            // Use the unique ID of the JobApplication document
             return oldItem.applicationId == newItem.applicationId
         }
 
-        override fun areContentsTheSame(oldItem: ApplicationModel, newItem: ApplicationModel): Boolean {
-            return oldItem == newItem // Relies on ApplicationModel being a data class
+        override fun areContentsTheSame(oldItem: JobApplication, newItem: JobApplication): Boolean {
+            // Relies on JobApplication being a data class (which it is in Kotlin)
+            // or having a well-defined equals() method.
+            return oldItem == newItem
         }
     }
 }

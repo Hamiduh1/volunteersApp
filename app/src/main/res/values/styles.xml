@@ -1,4 +1,4 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources xmlns:tools="http://schemas.android.com/tools" xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <!--
         Old AppCompat themes.
@@ -39,5 +39,49 @@
         <item name="android:textColor">@color/my_chip_text_color</item>
         <item name="chipCornerRadius">16dp</item>
     </style>
+
+    <!-- *** ADDED STYLES FOR SETTINGS SCREEN *** -->
+
+    <!-- Style for each CardView in the settings grid -->
+    <style name="SettingsCardView" parent="Widget.MaterialComponents.CardView">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_columnWeight">1</item>
+        <item name="android:layout_rowWeight">1</item>
+        <item name="cardElevation">4dp</item>
+        <item name="cardCornerRadius">8dp</item>
+        <item name="android:layout_margin">8dp</item>
+    </style>
+
+    <!-- Style for the clickable LinearLayout inside each card -->
+    <style name="SettingsCardInnerLayout">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center</item>
+        <item name="android:padding">16dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:background">?android:attr/selectableItemBackground</item>
+    </style>
+
+    <!-- Style for the icon inside each settings card -->
+    <style name="SettingsCardIcon">
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:tint">?attr/colorPrimary</item>
+    </style>
+
+    <!-- Style for the text inside each settings card -->
+    <style name="SettingsCardText">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:gravity">center_horizontal</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+
 
 </resources>

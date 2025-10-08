@@ -225,6 +225,12 @@
     <item name="view_pager_my_events" type="id" />
     <item name="tab_layout_my_events" type="id" />
     <item name="my_events_fragment_container" type="id" />
+    <item name="nav_host_event" type="id" />
+    <item name="nav_organizer_event_details" type="id" />
+    <item name="nav_profile_viewer" type="id" />
+    <item name="eventNameTextView" type="id" />
+    <item name="eventDateTextView" type="id" />
+    <item name="action_settingsFragment_to_notificationSettingsFragment" type="id" />
 
 
 </resources>

@@ -14,7 +14,7 @@ import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.volunteersApp.R;
-import com.example.volunteersApp.models.Application;
+import com.example.volunteersApp.models.EventApplication;
 import com.example.volunteersApp.models.ApplicationWithUserDetails;
 import com.squareup.picasso.Picasso;
 
@@ -153,7 +153,7 @@ public class ApplicantAdapter extends ListAdapter<ApplicationWithUserDetails, Ap
             textViewApplicantName.setText(details.getTitle() != null ? details.getTitle() : itemViewContext.getString(R.string.placeholder_na));
             textViewApplicantEmail.setText(details.getEmail() != null ? details.getEmail() : itemViewContext.getString(R.string.placeholder_na));
 
-            Application application = details.getApplication();
+            EventApplication application = details.getApplication();
             if (textViewApplicationDate != null && application != null && application.getApplicationTimestamp() != null) {
                 try {
                     SimpleDateFormat sdf = new SimpleDateFormat("MMM dd, yyyy", Locale.getDefault());

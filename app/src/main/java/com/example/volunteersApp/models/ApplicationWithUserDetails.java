@@ -5,20 +5,20 @@ import java.util.Objects;
 public class ApplicationWithUserDetails {
 
     // User-specific details
-    private String uid;                 // User's UID (from User object or Application's volunteerUid)
+    private String uid;                 // User's UID (from User object or EventApplication's volunteerUid)
     private String name;                // User's name (from User object)
     private String email;               // User's email (from User object)
     private String profileImageUrl;     // User's profile image URL (from User object)
 
-    // Encapsulated Application object
-    private Application application;    // Holds all details of the application itself
+    // Encapsulated EventApplication object
+    private EventApplication application;    // Holds all details of the application itself
 
     // No-argument constructor required for Firestore deserialization
     public ApplicationWithUserDetails() {
     }
 
-    // Constructor to combine Application and User details
-    public ApplicationWithUserDetails(Application application, User user) {
+    // Constructor to combine EventApplication and User details
+    public ApplicationWithUserDetails(EventApplication application, User user) {
         this.application = application;
         if (user != null) {
             this.uid = user.getUid(); // Primary source for UID
@@ -42,7 +42,7 @@ public class ApplicationWithUserDetails {
 
     // Alternative constructor if you already have individual user fields
     // This constructor assumes 'volunteerUid' is the primary identifier for the user part.
-    public ApplicationWithUserDetails(Application application, String volunteerUid, String volunteerName, String volunteerEmail, String volunteerProfileImageUrl) {
+    public ApplicationWithUserDetails(EventApplication application, String volunteerUid, String volunteerName, String volunteerEmail, String volunteerProfileImageUrl) {
         this.application = application;
         this.uid = volunteerUid; // This is the volunteer's UID
         this.name = volunteerName;
@@ -83,12 +83,12 @@ public class ApplicationWithUserDetails {
         return uid;
     }
 
-    // Application object getter
-    public Application getApplication() {
+    // EventApplication object getter
+    public EventApplication getApplication() {
         return application;
     }
 
-    // --- Convenience Getters (delegating to the Application object) ---
+    // --- Convenience Getters (delegating to the EventApplication object) ---
     public String getApplicationId() {
         return (application != null) ? application.getApplicationId() : null;
     }
@@ -128,7 +128,7 @@ public class ApplicationWithUserDetails {
         this.profileImageUrl = profileImageUrl;
     }
 
-    public void setApplication(Application application) {
+    public void setApplication(EventApplication application) {
         this.application = application;
     }
 
@@ -149,13 +149,13 @@ public class ApplicationWithUserDetails {
         if (o == null || getClass() != o.getClass()) return false;
         ApplicationWithUserDetails that = (ApplicationWithUserDetails) o;
 
-        // Primary comparison based on Application ID if available
+        // Primary comparison based on EventApplication ID if available
         if (application != null && that.application != null &&
                 application.getApplicationId() != null && that.application.getApplicationId() != null) {
             if (!application.getApplicationId().equals(that.application.getApplicationId())) {
                 return false;
             }
-            // If Application IDs match, check content
+            // If EventApplication IDs match, check content
             return Objects.equals(uid, that.uid) &&
                     Objects.equals(getTitle(), that.getTitle()) && // Use getter for consistent comparison
                     Objects.equals(getEmail(), that.getEmail()) && // Use getter

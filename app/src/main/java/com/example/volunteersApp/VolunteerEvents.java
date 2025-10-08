@@ -1,3 +1,8 @@
+/** VolunteerEvents.java(activity) has been replaced by VolunteeringFragment.java
+ * VolunteeringFragment.java is the modern replacement that fits within single-activity,
+ * navigation-component-based app
+
+
 package com.example.volunteersApp;
 
 import android.content.Intent;
@@ -17,9 +22,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 
 import com.example.volunteersApp.databinding.ActivityVolunteereventsBinding;
 import com.example.volunteersApp.models.EventModel;
-import com.example.volunteersApp.VolunteerEventItem;
-import com.example.volunteersApp.VolunteerEventItemCallback; // Assuming this is your DiffUtil.ItemCallback
-
+import com.example.volunteersApp.ui.eventdetails.EventDetailActivity;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.FirebaseFirestore;
@@ -194,7 +197,7 @@ public class VolunteerEvents extends AppCompatActivity implements SearchView.OnQ
             }
 
             @Override
-            public void onNothingSelected(AdapterView<?> parent) { /* Can be ignored */ }
+            public void onNothingSelected(AdapterView<?> parent) {  }
         };
         if (binding != null) { // Guard against null binding
             binding.sortSpinner.setOnItemSelectedListener(listener);
@@ -515,3 +518,4 @@ public class VolunteerEvents extends AppCompatActivity implements SearchView.OnQ
         }
     }
 }
+**/

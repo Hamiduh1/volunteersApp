@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    tools:context=".ui.profile.SettingsFragment">
+
+    <!-- The Toolbar is handled by the Fragment's code, so it's placed here -->
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar">
+
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar_settings"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:popupTheme="@style/ThemeOverlay.AppCompat.Light"
+            app:title="@string/settings" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <!-- Using GridLayout for the card-based menu -->
+        <GridLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:alignmentMode="alignMargins"
+            android:columnCount="2"
+            android:columnOrderPreserved="false"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:rowCount="3">
+
+            <!-- Account Card -->
+            <androidx.cardview.widget.CardView
+                style="@style/SettingsCardView">
+                <LinearLayout
+                    android:id="@+id/settings_account"
+                    style="@style/SettingsCardInnerLayout">
+                    <ImageView
+                        style="@style/SettingsCardIcon"
+                        android:src="@drawable/ic_account_vector" />
+                    <TextView
+                        style="@style/SettingsCardText"
+                        android:text="@string/account" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Notification Card -->
+            <androidx.cardview.widget.CardView
+                style="@style/SettingsCardView">
+                <LinearLayout
+                    android:id="@+id/settings_notification"
+                    style="@style/SettingsCardInnerLayout">
+                    <ImageView
+                        style="@style/SettingsCardIcon"
+                        android:src="@drawable/ic_notifications" /> <!-- Use standard notification icon -->
+                    <TextView
+                        style="@style/SettingsCardText"
+                        android:text="@string/notifications" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Privacy Security Card -->
+            <androidx.cardview.widget.CardView
+                style="@style/SettingsCardView">
+                <LinearLayout
+                    android:id="@+id/settings_privacy_security"
+                    style="@style/SettingsCardInnerLayout">
+                    <ImageView
+                        style="@style/SettingsCardIcon"
+                        android:src="@drawable/ic_privacy_tip" /> <!-- Use standard privacy icon -->
+                    <TextView
+                        style="@style/SettingsCardText"
+                        android:text="@string/privacy_security" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Support Card -->
+            <androidx.cardview.widget.CardView
+                style="@style/SettingsCardView">
+                <LinearLayout
+                    android:id="@+id/settings_support"
+                    style="@style/SettingsCardInnerLayout">
+                    <ImageView
+                        style="@style/SettingsCardIcon"
+                        android:src="@drawable/ic_support" /> <!-- Use standard support icon -->
+                    <TextView
+                        style="@style/SettingsCardText"
+                        android:text="@string/support" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- How to use Card -->
+            <androidx.cardview.widget.CardView
+                style="@style/SettingsCardView">
+                <LinearLayout
+                    android:id="@+id/settings_how_to_use"
+                    style="@style/SettingsCardInnerLayout">
+                    <ImageView
+                        style="@style/SettingsCardIcon"
+                        android:src="@drawable/ic_how_to_use" /> <!-- Use standard help/question icon -->
+                    <TextView
+                        style="@style/SettingsCardText"
+                        android:text="@string/how_to_use" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Terms and Conditions Card -->
+            <androidx.cardview.widget.CardView
+                style="@style/SettingsCardView">
+                <LinearLayout
+                    android:id="@+id/settings_terms_and_conditions"
+                    style="@style/SettingsCardInnerLayout">
+                    <ImageView
+                        style="@style/SettingsCardIcon"
+                        android:src="@drawable/ic_terms" /> <!-- Use standard document/terms icon -->
+                    <TextView
+                        style="@style/SettingsCardText"
+                        android:text="@string/terms_and_conditions" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+        </GridLayout>
+    </ScrollView>
+</LinearLayout>

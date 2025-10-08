@@ -16,11 +16,12 @@ import androidx.appcompat.widget.Toolbar;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.example.volunteersApp.models.EventApplication;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.CollectionReference;
 import com.google.firebase.firestore.DocumentChange;
-// DocumentId import is not directly used in Activity, but good to know it's in Application.java
+// DocumentId import is not directly used in Activity, but good to know it's in EventApplication.java
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
@@ -32,7 +33,6 @@ import java.util.Objects;
 // OptionalInt and IntStream not used in this revised version for findApplication...
 
 import com.example.volunteersApp.adapters.ApplicantAdapter;
-import com.example.volunteersApp.models.Application;
 import com.example.volunteersApp.models.ApplicationWithUserDetails;
 import com.example.volunteersApp.models.User; // Ensure this User model has getUid, getTitle, getEmail, getProfileImageUrl
 import com.google.firebase.firestore.QueryDocumentSnapshot;
@@ -144,11 +144,11 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
                 return;
             }
 
-            List<Application> applicationsFromSnapshot = new ArrayList<>();
+            List<EventApplication> applicationsFromSnapshot = new ArrayList<>();
             for (DocumentChange dc : snapshots.getDocumentChanges()) {
-                Application application = dc.getDocument().toObject(Application.class);
+                EventApplication application = dc.getDocument().toObject(EventApplication.class);
                 if (application.getApplicationId() == null || application.getApplicationId().isEmpty()) {
-                    Log.e(TAG, "Application object from Firestore is missing ID. Skipping: " + dc.getDocument().getId());
+                    Log.e(TAG, "EventApplication object from Firestore is missing ID. Skipping: " + dc.getDocument().getId());
                     continue;
                 }
                 // Instead of processing one by one immediately, collect all applications first
@@ -162,10 +162,10 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
 
             // --- Simplified approach for ListAdapter: Re-fetch all and submit ---
             // Get all current applications from the snapshot
-            List<Application> allApplications = new ArrayList<>();
+            List<EventApplication> allApplications = new ArrayList<>();
             if (!snapshots.isEmpty()) {
                 for (QueryDocumentSnapshot doc : snapshots) {
-                    Application app = doc.toObject(Application.class);
+                    EventApplication app = doc.toObject(EventApplication.class);
                     if (app.getApplicationId() != null && !app.getApplicationId().isEmpty()) {
                         allApplications.add(app);
                     }
@@ -184,7 +184,7 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
         });
     }
 
-    private void fetchAllUserDetailsAndSubmit(List<Application> applications) {
+    private void fetchAllUserDetailsAndSubmit(List<EventApplication> applications) {
         List<ApplicationWithUserDetails> fullDetailsList = new ArrayList<>();
         if (applications.isEmpty()) {
             applicantAdapter.submitList(fullDetailsList); // Submit empty list
@@ -194,7 +194,7 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
 
         int[] completionCounter = {0}; // Counter to track completion of async calls
 
-        for (Application app : applications) {
+        for (EventApplication app : applications) {
             fetchUserDetails(app, awud -> {
                 if (awud != null) { // Ensure awud is not null before adding
                     fullDetailsList.add(awud);
@@ -211,15 +211,15 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
 
 
     // This method now fetches details for a single application and uses a callback.
-    private void fetchUserDetails(Application application, UserDetailsCallback callback) {
+    private void fetchUserDetails(EventApplication application, UserDetailsCallback callback) {
         if (application == null || application.getVolunteerUid() == null || application.getVolunteerUid().isEmpty()) {
             Log.w(TAG, "Cannot fetch user details: App or Volunteer UID is null/empty. AppID: " + (application != null ? application.getApplicationId() : "Unknown"));
             // Create a placeholder using the appropriate constructor
             // Assuming ApplicationWithUserDetails has a constructor like:
-            // ApplicationWithUserDetails(Application app, String name, String email, String profileImgUrl)
-            Application placeholderApp = application != null ? application : new Application(); // Ensure placeholderApp is not null
+            // ApplicationWithUserDetails(EventApplication app, String name, String email, String profileImgUrl)
+            EventApplication placeholderApp = application != null ? application : new EventApplication(); // Ensure placeholderApp is not null
             placeholderApp.setVolunteerName("Volunteer UID Missing"); // Set some default in the app if user is missing
-            // Use the constructor that takes Application and individual user fields
+            // Use the constructor that takes EventApplication and individual user fields
             callback.onCallback(new ApplicationWithUserDetails(placeholderApp,
                     placeholderApp.getVolunteerUid(), // or "UID Missing"
                     "N/A",
@@ -257,12 +257,12 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
                 });
     }
 
-    private ApplicationWithUserDetails createPlaceholderAwud(Application application, String detailStatus) {
+    private ApplicationWithUserDetails createPlaceholderAwud(EventApplication application, String detailStatus) {
         String namePlaceholder = (application != null && application.getVolunteerName() != null && !application.getVolunteerName().isEmpty()) ?
                 application.getVolunteerName() : "Name Not Found";
         String emailPlaceholder = detailStatus; // Or more specific like "Email N/A"
 
-        // Use the constructor: ApplicationWithUserDetails(Application app, String name, String email, String profileImgUrl)
+        // Use the constructor: ApplicationWithUserDetails(EventApplication app, String name, String email, String profileImgUrl)
         return new ApplicationWithUserDetails(application,
                 application != null ? application.getVolunteerUid() : "UID Missing", // Provide UID if available
                 namePlaceholder,
@@ -278,7 +278,7 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
         if (applicationId == null) return -1;
         List<ApplicationWithUserDetails> currentList = applicantAdapter.getCurrentList();
         for (int i = 0; i < currentList.size(); i++) {
-            Application app = currentList.get(i).getApplication();
+            EventApplication app = currentList.get(i).getApplication();
             if (app != null && applicationId.equals(app.getApplicationId())) {
                 return i;
             }
@@ -330,8 +330,8 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
     @Override
     public void onAcceptApplicant(ApplicationWithUserDetails applicant) {
         if (applicant.getApplication() == null || applicant.getApplicationId() == null) {
-            Toast.makeText(this, "Error: Application details missing.", Toast.LENGTH_SHORT).show();
-            Log.e(TAG, "Cannot accept: Application or Application ID is null.");
+            Toast.makeText(this, "Error: EventApplication details missing.", Toast.LENGTH_SHORT).show();
+            Log.e(TAG, "Cannot accept: EventApplication or EventApplication ID is null.");
             return;
         }
         String applicationId = applicant.getApplicationId();
@@ -340,7 +340,7 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
         applicationsRef.document(applicationId)
                 .update("status", "accepted")
                 .addOnSuccessListener(aVoid -> {
-                    Log.d(TAG, "Application " + applicationId + " successfully marked as accepted.");
+                    Log.d(TAG, "EventApplication " + applicationId + " successfully marked as accepted.");
                     Toast.makeText(JobApplicantsActivity.this, applicant.getTitle() + " accepted.", Toast.LENGTH_SHORT).show();
                     // Firestore listener should pick up the change and ListAdapter will update UI.
                 })
@@ -353,8 +353,8 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
     @Override
     public void onRejectApplicant(ApplicationWithUserDetails applicant) {
         if (applicant.getApplication() == null || applicant.getApplicationId() == null) {
-            Toast.makeText(this, "Error: Application details missing.", Toast.LENGTH_SHORT).show();
-            Log.e(TAG, "Cannot reject: Application or Application ID is null.");
+            Toast.makeText(this, "Error: EventApplication details missing.", Toast.LENGTH_SHORT).show();
+            Log.e(TAG, "Cannot reject: EventApplication or EventApplication ID is null.");
             return;
         }
         String applicationId = applicant.getApplicationId();
@@ -363,7 +363,7 @@ public class JobApplicantsActivity extends AppCompatActivity implements Applican
         applicationsRef.document(applicationId)
                 .update("status", "rejected")
                 .addOnSuccessListener(aVoid -> {
-                    Log.d(TAG, "Application " + applicationId + " successfully marked as rejected.");
+                    Log.d(TAG, "EventApplication " + applicationId + " successfully marked as rejected.");
                     Toast.makeText(JobApplicantsActivity.this, applicant.getTitle() + " rejected.", Toast.LENGTH_SHORT).show();
                 })
                 .addOnFailureListener(e -> {

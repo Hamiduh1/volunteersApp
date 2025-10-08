@@ -1,3 +1,7 @@
+/** THIS IS OLD VERSION OF MYEVENTSFRAGMENT. KEEP FOR REFERENCE ONLY.
+  MyEventsFragment.java NEW VERSION IS LOCATED IN FRAGMENT FOLDER:
+
+
 package com.example.volunteersApp.ui.myevents;
 
 import android.os.Bundle;
@@ -19,11 +23,11 @@ import androidx.viewpager2.adapter.FragmentStateAdapter;
 import androidx.viewpager2.widget.ViewPager2;
 
 // Import your child fragments:
-import com.example.volunteersApp.fragments.AppliedEventsFragment;
+import com.example.volunteersApp.ui.myactivity.myapplied.MyAppliedEventsFragment;
 // If the above paths are incorrect, ensure they point to the correct location
 // e.g., if they are also in the ui package:
 // import com.example.volunteersApp.ui.myevents.subfragments.HostedEventsFragment;
-// import com.example.volunteersApp.ui.myevents.subfragments.AppliedEventsFragment;
+// import com.example.volunteersApp.ui.myevents.subfragments.MyAppliedEventsFragment;
 
 
 import com.example.volunteersApp.R; // Ensure R is imported correctly
@@ -135,7 +139,7 @@ public class MyEventsFragment extends Fragment {
                 case 0:
                     return new HostedEventsFragment(); // Your fragment for hosted events
                 case 1:
-                    return new AppliedEventsFragment(); // Your fragment for applied events
+                    return new MyAppliedEventsFragment(); // Your fragment for applied events
                 default:
                     // Fallback, though with getItemCount() == 2, this shouldn't be reached.
                     return new HostedEventsFragment();
@@ -159,3 +163,4 @@ public class MyEventsFragment extends Fragment {
                 || super.onOptionsItemSelected(item);
     }
 }
+**/

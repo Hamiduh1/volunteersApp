@@ -62,7 +62,7 @@ public class ApplicationDetailActivity extends AppCompatActivity {
         setSupportActionBar(toolbar);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-            getSupportActionBar().setTitle("Application Details");
+            getSupportActionBar().setTitle("EventApplication Details");
         }
 
         db = FirebaseFirestore.getInstance();
@@ -129,8 +129,8 @@ public class ApplicationDetailActivity extends AppCompatActivity {
                     // Now, load general volunteer details from the 'users' collection
                     loadVolunteerUserDetails(applicationId); // applicationId is volunteer's UID
                 } else {
-                    Log.w(TAG, "Application document not found: " + applicationRef.getPath());
-                    Toast.makeText(ApplicationDetailActivity.this, "Application details not found.", Toast.LENGTH_SHORT).show();
+                    Log.w(TAG, "EventApplication document not found: " + applicationRef.getPath());
+                    Toast.makeText(ApplicationDetailActivity.this, "EventApplication details not found.", Toast.LENGTH_SHORT).show();
                     setLoadingState(false);
                     // Optionally finish activity or show error message permanently
                     finish();
@@ -206,7 +206,7 @@ public class ApplicationDetailActivity extends AppCompatActivity {
 
                 } else {
                     Log.w(TAG, "Volunteer user document not found: " + userRef.getPath());
-                    // Application data is already loaded, so we don't necessarily show a fatal error here
+                    // EventApplication data is already loaded, so we don't necessarily show a fatal error here
                     // Just means extra user details are unavailable
                     if (textViewVolunteerName.getText().toString().isEmpty()) {
                         textViewVolunteerName.setText("Volunteer (Details N/A)");
@@ -235,7 +235,7 @@ public class ApplicationDetailActivity extends AppCompatActivity {
         applicationRef.update("status", newStatus)
                 .addOnSuccessListener(aVoid -> {
                     setLoadingState(false);
-                    Toast.makeText(ApplicationDetailActivity.this, "Application " + newStatus + "!", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(ApplicationDetailActivity.this, "EventApplication " + newStatus + "!", Toast.LENGTH_SHORT).show();
                     textViewApplicationStatus.setText(capitalize(newStatus));
 
                     // Update button visibility after status change

@@ -1,3 +1,9 @@
+/** Looking at the file MyEventsPagerAdapter.java, its entire purpose
+is to create instances of EventListFragment.  we identified that
+ EventListFragment was redundant and its functionality was being replaced
+ by more modern, ViewModel-driven fragments. We made the decision to
+ delete EventListFragment.
+
 package com.example.volunteersApp.adapters;
 
 import androidx.annotation.NonNull;
@@ -5,7 +11,7 @@ import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity; // or FragmentManager + Lifecycle
 import androidx.viewpager2.adapter.FragmentStateAdapter;
 
-import com.example.volunteersApp.fragments.EventListFragment; // A generic fragment to display a list of events
+import com.example.volunteersApp.ui.eventdetails.EventListFragment; // A generic fragment to display a list of events
 
 public class MyEventsPagerAdapter extends FragmentStateAdapter {
 
@@ -36,3 +42,4 @@ public class MyEventsPagerAdapter extends FragmentStateAdapter {
         return NUM_TABS;
     }
 }
+ **/

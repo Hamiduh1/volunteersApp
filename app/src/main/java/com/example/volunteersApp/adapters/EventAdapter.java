@@ -36,6 +36,7 @@ public class EventAdapter extends ListAdapter<EventModel, EventAdapter.EventView
 
     private static final String TAG = "EventAdapter";
 
+
     private final Context context;
     private final OnEventListener onEventListener;
     private final boolean isOrganizerView;

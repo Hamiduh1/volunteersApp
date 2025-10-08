@@ -11,14 +11,12 @@ import androidx.fragment.app.Fragment
 //import androidx.glance.visibility
 import androidx.lifecycle.ViewModelProvider
 // import androidx.lifecycle.observe // observe is usually an extension function, not a direct import like this
-import androidx.navigation.fragment.findNavController // For potential navigation on item click
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.volunteersApp.R
 import com.example.volunteersApp.databinding.FragmentOrganizerActivitySummaryBinding
-import com.example.volunteersApp.models.OrganizerActivityViewModel
+import com.example.volunteersApp.viewmodels.OrganizerActivityViewModel
 // import com.example.volunteersApp.models.EventWithVolunteerCount // Not directly used in this snippet
 import com.example.volunteersApp.models.Resource
-import com.example.volunteersApp.organizer.OrganizerActivityViewModelFactory
 import com.example.volunteersApp.repository.ApplicationRepository
 import com.example.volunteersApp.repository.EventRepository
 import com.example.volunteersApp.adapters.HostedEventsSummaryAdapter

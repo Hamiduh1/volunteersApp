@@ -7,23 +7,20 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-//import androidx.compose.ui.geometry.isEmpty
 //import androidx.compose.ui.semantics.text
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
 //import androidx.glance.visibility
 import androidx.navigation.NavController
-import androidx.navigation.Navigation
+import androidx.navigation.fragment.findNavController
+// import androidx.navigation.fragment.navArgs // Uncomment if using Safe Args
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.example.volunteersApp.R
+import com.example.volunteersApp.R // For R.id.action_... and R.string...
 import com.example.volunteersApp.databinding.FragmentEmployerApplicationsBinding
-//import com.example.volunteersApp.employer.ui.applications.EmployerApplicationsFragment
-//import com.example.volunteersApp.employer.models.Application
-import com.example.volunteersApp.models.ApplicationModel // Your ApplicationModel
-import com.example.volunteersApp.models.EventModel // To fetch event title
-import com.google.firebase.auth.FirebaseAuth
+import com.example.volunteersApp.models.JobApplication
+import com.example.volunteersApp.models.Job // << CORRECTED: Using your Job.kt model
+import com.example.volunteersApp.models.Resource // << CORRECTED: Assuming Resource is in 'utils'
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.Query
 
 class EmployerApplicationsFragment : Fragment() {
 
@@ -31,31 +28,39 @@ class EmployerApplicationsFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var navController: NavController
-    private lateinit var mAuth: FirebaseAuth
-    private lateinit var db: FirebaseFirestore
-    private var applicationsListener: ListenerRegistration? = null
+    private val viewModel: EmployerApplicationsViewModel by viewModels()
+
+    private var jobId: String? = null
+    private var jobTitle: String? = null // To store the fetched or passed job title
+
     private lateinit var applicationsAdapter: EmployerApplicationsAdapter
 
-    private var eventId: String? = null // Argument passed to this fragment
-    private var eventTitle: String? = null // To display the event title
+    // TODO: This direct DB access for fetchJobTitle should be moved to a Repository and accessed via ViewModel.
+    // For now, keeping it here for simplicity of the current request.
+    private lateinit var db: FirebaseFirestore
 
     companion object {
         private const val TAG = "EmpApplicationsFrag"
-        const val ARG_EVENT_ID = "event_id" // For navigation arguments
-        const val ARG_EVENT_TITLE = "event_title"
-        const val ARG_APPLICATION_ID = "application_id"
-        //const val ARG_VOLUNTEER_UID = "volunteer_id"
-        //const val ARG_VOLUNTEER_NAME = "volunteer_name"
+        const val ARG_JOB_ID = "job_id"
+        const val ARG_JOB_TITLE = "job_title"
+        // ARG_APPLICATION_ID, ARG_JOB_ID, ARG_VOLUNTEER_ID are used for navigating TO EmployerApplicationDetailFragment
     }
+
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        mAuth = FirebaseAuth.getInstance()
-        db = FirebaseFirestore.getInstance()
+        db = FirebaseFirestore.getInstance() // For the temporary fetchJobTitle
+
+        // Argument retrieval
+        // Consider using Safe Args for type safety and cleaner argument passing.
+        // val safeArgs: EmployerApplicationsFragmentArgs by navArgs()
+        // jobId = safeArgs.jobId
+        // jobTitle = safeArgs.jobTitle
 
         arguments?.let {
-            eventId = it.getString(ARG_EVENT_ID)
-            eventTitle = it.getString(ARG_EVENT_TITLE) // Get title if passed
+            jobId = it.getString(ARG_JOB_ID)
+            jobTitle = it.getString(ARG_JOB_TITLE) // Can be null if not passed
         }
     }
 
@@ -69,130 +74,166 @@ class EmployerApplicationsFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        navController = Navigation.findNavController(view)
+        navController = findNavController()
 
-        (activity as? AppCompatActivity)?.supportActionBar?.title =
-            getString(R.string.title_applications_for_event) // "Applications for Event"
+        (activity as? AppCompatActivity)?.supportActionBar?.title = getString(R.string.title_job_applications)
 
-        if (eventId == null) {
-            Log.e(TAG, "Event ID is missing. Cannot load applications.")
-            Toast.makeText(context, "Error: Event ID not provided.", Toast.LENGTH_LONG).show()
+        if (jobId == null) {
+            Log.e(TAG, "Job ID is null. Cannot proceed.")
+            Toast.makeText(requireContext(), getString(R.string.error_job_id_missing), Toast.LENGTH_LONG).show()
+            binding.textViewJobTitleForApplications.text = getString(R.string.select_job_to_see_applications)
             binding.textViewNoApplications.text = getString(R.string.cannot_load_applications_no_ids)
             binding.textViewNoApplications.visibility = View.VISIBLE
             binding.progressBarApplications.visibility = View.GONE
             binding.recyclerViewApplications.visibility = View.GONE
-            binding.textViewEventTitleForApplications.text = getString(R.string.select_event_to_see_applications)
-            // Consider navController.popBackStack() or disabling the view.
+            // Optional: navController.popBackStack()
             return
         }
 
         setupRecyclerView()
+        setupObservers()
 
-        if (eventTitle != null) {
-            binding.textViewEventTitleForApplications.text = getString(R.string.applications_for_dynamic_title, eventTitle)
+        // Set or fetch the job title for display
+        if (!jobTitle.isNullOrEmpty()) {
+            binding.textViewJobTitleForApplications.text = getString(R.string.applications_for_dynamic_job_title, jobTitle)
         } else {
-            // Fetch event title if not passed
-            fetchEventTitle(eventId!!)
+            fetchJobTitle(jobId!!) // Fetch if not passed (jobId is confirmed not null here)
         }
 
-        listenForApplications(eventId!!)
+        // Trigger data fetching from ViewModel
+        viewModel.fetchApplicationsForJob(jobId!!) // jobId is confirmed not null
     }
 
     private fun setupRecyclerView() {
-        applicationsAdapter = EmployerApplicationsAdapter(requireContext()) { application ->
-            // Handle click on an application - navigate to detail view
-            Log.d(TAG, "Clicked application: ${application.applicationId} for volunteer ${application.volunteerName}")
-            val args = Bundle().apply {
-                putString(EmployerApplicationsFragment.ARG_APPLICATION_ID, application.applicationId) // Volunteer's UID
-                putString(EmployerApplicationsFragment.ARG_EVENT_ID, eventId)
+        applicationsAdapter = EmployerApplicationsAdapter(requireContext()) { jobApplication ->
+            Log.d(TAG, "Clicked application: ${jobApplication.applicationId} for job ${jobApplication.jobTitle ?: "N/A"}")
+
+            // Prepare arguments for detail fragment
+            val bundle = Bundle().apply {
+                putString(EmployerApplicationDetailFragment.ARG_APPLICATION_DOC_ID, jobApplication.applicationId)
+                putString(EmployerApplicationDetailFragment.ARG_JOB_ID, jobApplication.jobId) // Should be same as this fragment's jobId
+                putString(EmployerApplicationDetailFragment.ARG_VOLUNTEER_ID, jobApplication.volunteerUid)
             }
-            // Ensure you have EmployerApplicationDetailFragment and its destination ID
-            navController.navigate(R.id.action_employerApplicationsFragment_to_employerApplicationDetailFragment, args)
+            // Navigate using action defined in your nav_graph.xml
+            // Ensure R.id.action_employerApplicationsFragment_to_employerApplicationDetailFragment is correct
+            navController.navigate(R.id.action_employerApplicationsFragment_to_employerApplicationDetailFragment, bundle)
         }
         binding.recyclerViewApplications.apply {
             layoutManager = LinearLayoutManager(context)
             adapter = applicationsAdapter
         }
     }
-    private fun fetchEventTitle(currentEventId: String) {
-        val eventDocRef = db.collection("events").document(currentEventId) // Assuming "events" is your collection name
-        eventDocRef.get().addOnSuccessListener { documentSnapshot ->
+
+    private fun setupObservers() {
+        viewModel.jobApplications.observe(viewLifecycleOwner) { resource ->
+            when (resource) {
+                is Resource.Loading -> {
+                    // This is now primarily handled by the isLoading LiveData for the initial screen load.
+                    // If you have pull-to-refresh, you might handle its loading state here or in isLoading.
+                    // If resource.data is not null here, it means you're showing stale data while loading new.
+                    if (resource.data.isNullOrEmpty()) { // Only show full progress if list is not yet loaded or is empty
+                        binding.progressBarApplications.visibility = View.VISIBLE
+                        binding.recyclerViewApplications.visibility = View.GONE
+                        binding.textViewNoApplications.visibility = View.GONE
+                    }
+                }
+                is Resource.Success -> {
+                    binding.progressBarApplications.visibility = View.GONE
+                    val applications = resource.data
+                    if (applications.isNullOrEmpty()) {
+                        binding.textViewNoApplications.text = getString(R.string.no_applications_found_for_this_job)
+                        binding.textViewNoApplications.visibility = View.VISIBLE
+                        binding.recyclerViewApplications.visibility = View.GONE
+                        applicationsAdapter.submitList(emptyList()) // Ensure adapter is cleared
+                    } else {
+                        applicationsAdapter.submitList(applications)
+                        binding.recyclerViewApplications.visibility = View.VISIBLE
+                        binding.textViewNoApplications.visibility = View.GONE
+                    }
+                }
+                is Resource.Error -> {
+                    binding.progressBarApplications.visibility = View.GONE
+                    val errorMessage = resource.message ?: getString(R.string.error_loading_applications)
+                    binding.textViewNoApplications.text = errorMessage
+                    binding.textViewNoApplications.visibility = View.VISIBLE
+                    binding.recyclerViewApplications.visibility = View.GONE
+                    Toast.makeText(requireContext(), errorMessage, Toast.LENGTH_LONG).show()
+                    Log.e(TAG, "Error loading applications: $errorMessage")
+                }
+            }
+        }
+
+        viewModel.isLoading.observe(viewLifecycleOwner) { isLoading ->
+            // This observer is better for the initial full screen progress bar if the list is not yet populated
+            // and for swipe-to-refresh states.
+            if (isLoading && (viewModel.jobApplications.value?.data.isNullOrEmpty())) {
+                binding.progressBarApplications.visibility = View.VISIBLE
+                binding.recyclerViewApplications.visibility = View.GONE
+                binding.textViewNoApplications.visibility = View.GONE
+            } else if (!isLoading) {
+                // If loading is finished, and jobApplications is still null or its data is empty,
+                // the jobApplications observer will handle showing the "no applications" message.
+                // This just ensures the progress bar is hidden if it was shown by this observer.
+                binding.progressBarApplications.visibility = View.GONE
+            }
+            // If using SwipeRefreshLayout:
+            // binding.swipeRefreshLayout.isRefreshing = isLoading
+        }
+
+        viewModel.errorMessage.observe(viewLifecycleOwner) { errorMessage ->
+            errorMessage?.let {
+                // This can be used for errors not directly related to the list loading,
+                // or if you want a more persistent error display (e.g., a Snackbar).
+                Log.e(TAG, "ViewModel Global Error: $it")
+                // Toast.makeText(requireContext(), it, Toast.LENGTH_LONG).show()
+                // viewModel.clearErrorMessage() // Important if the error is handled (e.g., shown in a dialog)
+            }
+        }
+    }
+
+    // TODO: Move this to JobRepository and access via ViewModel
+    private fun fetchJobTitle(currentJobId: String) {
+        if (currentJobId.isEmpty()) {
+            binding.textViewJobTitleForApplications.text = getString(R.string.select_job_to_see_applications)
+            return
+        }
+        // Set a loading/default state while fetching
+        binding.textViewJobTitleForApplications.text = getString(R.string.applications_for_job_with_id, currentJobId)
+
+        val jobDocRef = db.collection("jobs").document(currentJobId) // Assuming your Firestore collection is "jobs"
+        jobDocRef.get().addOnSuccessListener { documentSnapshot ->
+            if (!isAdded || _binding == null) return@addOnSuccessListener // Check fragment is still valid
+
             if (documentSnapshot.exists()) {
-                val event = documentSnapshot.toObject(EventModel::class.java)
-                event?.title?.let { title ->
-                    this.eventTitle = title
-                    if (isAdded && _binding != null) { // Check fragment is still valid
-                        binding.textViewEventTitleForApplications.text = getString(R.string.applications_for_dynamic_title, title)
+                val job = documentSnapshot.toObject(Job::class.java) // Using Job.kt model
+                job?.title?.let { fetchedTitle ->
+                    if (fetchedTitle.isNotEmpty()) {
+                        this.jobTitle = fetchedTitle // Store for potential re-use (e.g. on rotation if not using ViewModel for this)
+                        binding.textViewJobTitleForApplications.text = getString(R.string.applications_for_dynamic_job_title, fetchedTitle)
+                    } else {
+                        Log.w(TAG, "Fetched job $currentJobId but title is empty.")
+                        // Keep "Applications for Job ID: ..."
                     }
-                } ?: run {
-                    if (isAdded && _binding != null) {
-                        binding.textViewEventTitleForApplications.text = getString(R.string.applications_for_event_with_id, currentEventId)
-                    }
+                } ?: {
+                    Log.w(TAG, "Failed to parse job object or title is null for job $currentJobId.")
+                    // Keep "Applications for Job ID: ..."
                 }
             } else {
-                if (isAdded && _binding != null) {
-                    binding.textViewEventTitleForApplications.text = getString(R.string.applications_for_event_with_id, currentEventId)
-                }
+                Log.w(TAG, "Job document $currentJobId not found.")
+                binding.textViewJobTitleForApplications.text = getString(R.string.job_not_found_applications, currentJobId)
             }
         }.addOnFailureListener { e ->
-            Log.e(TAG, "Error fetching event title", e)
+            Log.e(TAG, "Error fetching job title for $currentJobId", e)
             if (isAdded && _binding != null) {
-                binding.textViewEventTitleForApplications.text = getString(R.string.applications_for_event_with_id, currentEventId)
+                // Keep "Applications for Job ID: ..." or show a specific fetch error
+                binding.textViewJobTitleForApplications.text = getString(R.string.applications_for_job_with_id, currentJobId)
+                Toast.makeText(context, "Failed to fetch job title.", Toast.LENGTH_SHORT).show()
             }
         }
-    }
-
-
-    private fun listenForApplications(forEventId: String) {
-        binding.progressBarApplications.visibility = View.VISIBLE
-        binding.textViewNoApplications.visibility = View.GONE
-        binding.recyclerViewApplications.visibility = View.GONE
-
-        val applicationsQuery = db.collectionGroup("applications") // Use collectionGroup if "applications" is a subcollection
-            .whereEqualTo("eventId", forEventId) // Filter by the specific eventId
-        // .orderBy("applicationTimestamp", Query.Direction.DESCENDING) // Optional: order by date
-
-        applicationsListener = applicationsQuery.addSnapshotListener { snapshots, e ->
-            if (!isAdded || _binding == null) {
-                applicationsListener?.remove()
-                return@addSnapshotListener
-            }
-            binding.progressBarApplications.visibility = View.GONE
-
-            if (e != null) {
-                Log.e(TAG, "Listen failed for applications.", e)
-                Toast.makeText(context, "Error loading applications.", Toast.LENGTH_SHORT).show()
-                binding.textViewNoApplications.text = getString(R.string.error_loading_applications_message, e.localizedMessage)
-                binding.textViewNoApplications.visibility = View.VISIBLE
-                return@addSnapshotListener
-            }
-
-            if (snapshots != null && !snapshots.isEmpty) {
-                val applicationsList = snapshots.toObjects(ApplicationModel::class.java)
-                // Here, you might need to fetch additional volunteer details (name, profile image)
-                // for each application if they are not denormalized in the ApplicationModel.
-                // For simplicity now, assuming ApplicationModel has enough data or will be enhanced.
-                applicationsAdapter.submitList(applicationsList)
-                binding.recyclerViewApplications.visibility = View.VISIBLE
-                binding.textViewNoApplications.visibility = View.GONE
-            } else {
-                Log.d(TAG, "No applications found for event: $forEventId")
-                applicationsAdapter.submitList(emptyList()) // Clear the adapter
-                binding.textViewNoApplications.text = getString(R.string.no_applications_found_for_this_event)
-                binding.textViewNoApplications.visibility = View.VISIBLE
-                binding.recyclerViewApplications.visibility = View.GONE
-            }
-        }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        applicationsListener?.remove()
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
-        applicationsListener?.remove() // Ensure listener is removed
-        _binding = null
+        _binding = null // Crucial to prevent memory leaks
     }
 }

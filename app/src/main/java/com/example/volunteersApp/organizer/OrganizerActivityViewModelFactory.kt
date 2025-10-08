@@ -3,7 +3,7 @@ package com.example.volunteersApp.organizer
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import com.example.volunteersApp.models.OrganizerActivityViewModel
+import com.example.volunteersApp.viewmodels.OrganizerActivityViewModel
 import com.example.volunteersApp.repository.ApplicationRepository
 import com.example.volunteersApp.repository.EventRepository
 

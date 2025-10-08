@@ -1,6 +1,7 @@
 package com.example.volunteersApp.models;
 
 import com.google.firebase.Timestamp;
+import com.google.firebase.database.Exclude;
 import com.google.firebase.firestore.DocumentId;
 import com.google.firebase.firestore.GeoPoint;
 import com.google.firebase.firestore.ServerTimestamp;
@@ -50,7 +51,18 @@ public class EventModel {
     private String recurrenceType; // E.g., "One-time", "Ongoing", "Flexible" (replaces JobPost.jobType)
     private String requirements;   // Specific prerequisites or conditions
     private String contactInfo;    // Generic contact info (could be organizer's or employer's based on type)
+    @Exclude
+    private String userStatus;
 
+    @Exclude
+    public String getUserStatus() {
+        return userStatus;
+    }
+
+    @Exclude
+    public void setUserStatus(String userStatus) {
+        this.userStatus = userStatus;
+    }
 
     @ServerTimestamp
     private Timestamp createdAt;

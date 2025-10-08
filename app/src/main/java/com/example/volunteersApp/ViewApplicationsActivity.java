@@ -9,23 +9,23 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.annotation.NonNull; // Keep for parameter annotations if any
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-// Import the Kotlin adapter and ApplicationModel
-import com.example.volunteersApp.organizer.ApplicationAdapter;
-import com.example.volunteersApp.models.ApplicationModel;
-import com.example.volunteersApp.models.ApplicationStatus; // For approve/reject
+// Using EventApplication and its related status enum
+import com.example.volunteersApp.models.EventApplication;
+import com.example.volunteersApp.models.EventApplicationStatus; // For approve/reject status
+import com.example.volunteersApp.organizer.ApplicationAdapter; // Adapter from organizer package
 
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.Query;
+import com.google.firebase.firestore.Query; // For orderBy
 import com.google.firebase.firestore.QueryDocumentSnapshot;
 import com.google.firebase.firestore.QuerySnapshot;
 import com.google.firebase.Timestamp;
@@ -33,34 +33,32 @@ import com.google.firebase.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
 // For lambda usage with Kotlin adapter from Java
 import kotlin.Unit;
 import kotlin.jvm.functions.Function1;
+import kotlin.jvm.functions.Function2; // For onRejectClicked with reason
 
-
-// No longer implementing ApplicationAdapter.OnApplicationClickListener from the Java adapter
 public class ViewApplicationsActivity extends AppCompatActivity {
 
     private static final String TAG = "ViewAppsActivity";
 
-    // Assuming these constants might need adjustment based on your Firestore structure for ApplicationModel
-    private static final String JOB_POSTINGS_COLLECTION = "events"; // Typically "events" if job postings are events
-    private static final String APPLICATIONS_SUBCOLLECTION = "applications"; // Subcollection under each event
-    private static final String ORGANIZER_UID_FIELD = "organizerId"; // Field in "events" collection for the organizer's UID
-    // Using 'appliedAt' from ApplicationModel, ensure this field exists in your Firestore 'applications' docs
-    private static final String APPLICATION_TIMESTAMP_FIELD = "appliedAt";
+    // Constants for Firestore structure
+    private static final String EVENTS_COLLECTION = "events"; // Collection where events are stored
+    private static final String APPLICATIONS_SUBCOLLECTION = "applications"; // Subcollection under each event for applications
+    private static final String ORGANIZER_UID_FIELD_IN_EVENTS = "organizerUid"; // Field in "events" for organizer's UID (ensure this matches EventModel)
+    // Field in the 'applications' subcollection for sorting by application time
+    private static final String APPLICATION_TIMESTAMP_FIELD_IN_APPS = "applicationTimestamp"; // Matches EventApplication.java
 
     private RecyclerView recyclerViewApplications;
-    private ApplicationAdapter applicationAdapter; // Will be com.example.volunteersApp.organizer.ApplicationAdapter
-    private List<ApplicationModel> applicationList; // Changed to ApplicationModel
+    private ApplicationAdapter applicationAdapter; // from com.example.volunteersApp.organizer
+    private List<EventApplication> applicationList; // <<< CHANGED to EventApplication
 
     private ProgressBar progressBarApplications;
     private TextView textViewApplicationsStatus;
 
     private FirebaseFirestore db;
     private FirebaseUser currentUser;
-    // You might need a ViewModel here to handle status updates more cleanly
-    // For now, direct update for simplicity, but consider a ViewModel for production.
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -69,7 +67,7 @@ public class ViewApplicationsActivity extends AppCompatActivity {
 
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-            getSupportActionBar().setTitle("Event Applications"); // More generic title
+            getSupportActionBar().setTitle("View Event Applications"); // Updated title
         }
 
         db = FirebaseFirestore.getInstance();
@@ -87,25 +85,36 @@ public class ViewApplicationsActivity extends AppCompatActivity {
 
         applicationList = new ArrayList<>();
 
-        // Lambdas for the Kotlin adapter
-        Function1<ApplicationModel, Unit> onAppClick = application -> {
+        // Lambdas for the Kotlin adapter, now expecting EventApplication
+        Function1<EventApplication, Unit> onAppClick = application -> { // <<< CHANGED
             onApplicationItemClick(application);
             return Unit.INSTANCE;
         };
 
-        Function1<ApplicationModel, Unit> onApprove = application -> {
-            updateApplicationStatusInFirestore(application.getApplicationId(), application.getEventId(), ApplicationStatus.APPROVED, null);
+        // This lambda matches the adapter's onApproveClicked: ((EventApplication) -> Unit)?
+        Function1<EventApplication, Unit> onApprove = application -> { // <<< CHANGED
+            updateApplicationStatusInFirestore(
+                    application.getApplicationId(),
+                    application.getEventId(), // EventApplication has eventId
+                    EventApplicationStatus.APPROVED, // Use EventApplicationStatus
+                    null
+            );
             return Unit.INSTANCE;
         };
 
-        Function1<ApplicationModel, Unit> onReject = application -> {
-            // TODO: Consider showing a dialog to input a reason for rejection
-            String reason = "Application did not meet requirements."; // Placeholder
-            updateApplicationStatusInFirestore(application.getApplicationId(), application.getEventId(), ApplicationStatus.REJECTED, reason);
+        // This lambda matches the adapter's onRejectClicked: ((application: EventApplication, reason: String?) -> Unit)?
+        Function2<EventApplication, String, Unit> onReject = (application, reason) -> { // <<< CHANGED
+            updateApplicationStatusInFirestore(
+                    application.getApplicationId(),
+                    application.getEventId(),
+                    EventApplicationStatus.REJECTED, // Use EventApplicationStatus
+                    reason // Reason comes from adapter's dialog
+            );
             return Unit.INSTANCE;
         };
 
-        // Instantiate the Kotlin ApplicationAdapter from the 'organizer' package
+        // Instantiate the Kotlin ApplicationAdapter
+        // Constructor: ApplicationAdapter(context, onApplicationClicked, onApproveClicked, onRejectClicked)
         applicationAdapter = new ApplicationAdapter(
                 this,
                 onAppClick,
@@ -116,69 +125,65 @@ public class ViewApplicationsActivity extends AppCompatActivity {
         recyclerViewApplications.setLayoutManager(new LinearLayoutManager(this));
         recyclerViewApplications.setAdapter(applicationAdapter);
 
-        loadApplicationsForEmployer();
+        loadApplicationsForOrganizer(); // Renamed for clarity
     }
 
     // Method to handle application item click
-    public void onApplicationItemClick(@NonNull ApplicationModel application) {
-        if (application == null || application.getApplicationId() == null || application.getEventId() == null) {
+    public void onApplicationItemClick(@NonNull EventApplication application) { // <<< CHANGED
+        if (application.getApplicationId() == null || application.getEventId() == null) {
             Toast.makeText(this, "Application data is incomplete.", Toast.LENGTH_SHORT).show();
-            Log.e(TAG, "Clicked application with null ID or EventId.");
+            Log.e(TAG, "Clicked application with null Application ID or EventId.");
             return;
         }
 
-        Toast.makeText(this, "Clicked: " + application.getVolunteerName(), Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Clicked: " + (application.getVolunteerName() != null ? application.getVolunteerName() : "N/A"), Toast.LENGTH_SHORT).show();
 
-        // Navigate to a detail screen (ensure ApplicationDetailActivity can handle ApplicationModel or its IDs)
-        Intent intent = new Intent(this, ApplicationDetailActivity.class);
-        intent.putExtra("APPLICATION_ID", application.getApplicationId()); // This is the application document ID
-        intent.putExtra("EVENT_ID", application.getEventId()); // The event this application is for
-        // Pass volunteerId if ApplicationDetailActivity needs it and it's part of ApplicationModel
-        intent.putExtra("VOLUNTEER_ID", application.getVolunteerId());
+        // Navigate to a detail screen (e.g., ApplicationDetailFragment)
+        Intent intent = new Intent(this, ApplicationDetailActivity.class); // Ensure this activity/fragment can handle EventApplication details
+        intent.putExtra("APPLICATION_ID", application.getApplicationId());
+        intent.putExtra("EVENT_ID", application.getEventId());
+        // Optionally pass volunteerUid if ApplicationDetailActivity needs it
+        // intent.putExtra("VOLUNTEER_ID", application.getVolunteerUid());
         startActivity(intent);
     }
 
-
-    private void loadApplicationsForEmployer() {
+    private void loadApplicationsForOrganizer() {
         setLoadingState(true);
         applicationList.clear();
 
-        // Get all events hosted by the current user
-        db.collection(JOB_POSTINGS_COLLECTION) // Using "events" as the collection for job postings/events
-                .whereEqualTo(ORGANIZER_UID_FIELD, currentUser.getUid())
+        // 1. Get all events hosted by the current organizer
+        db.collection(EVENTS_COLLECTION)
+                .whereEqualTo(ORGANIZER_UID_FIELD_IN_EVENTS, currentUser.getUid())
                 .get()
                 .addOnCompleteListener(task -> {
-                    if (!task.isSuccessful()) {
+                    if (!task.isSuccessful() || task.getResult() == null) {
                         setLoadingState(false);
-                        Log.e(TAG, "Error fetching employer events.", task.getException());
+                        Log.e(TAG, "Error fetching organizer events.", task.getException());
                         if (textViewApplicationsStatus != null) {
                             textViewApplicationsStatus.setText("Failed to load your events.");
                             textViewApplicationsStatus.setVisibility(View.VISIBLE);
                         }
-                        updateUiBasedOnApplicationList(); // Update UI, will show "no applications"
+                        updateUiBasedOnApplicationList();
                         return;
                     }
 
-                    QuerySnapshot jobPostingsSnapshot = task.getResult();
-                    if (jobPostingsSnapshot == null || jobPostingsSnapshot.isEmpty()) {
-                        Log.d(TAG, "No events found for employer: " + currentUser.getUid());
+                    QuerySnapshot eventsSnapshot = task.getResult();
+                    if (eventsSnapshot.isEmpty()) {
+                        Log.d(TAG, "No events found for organizer: " + currentUser.getUid());
                         setLoadingState(false);
-                        updateUiBasedOnApplicationList(); // Show "no applications"
+                        updateUiBasedOnApplicationList();
                         return;
                     }
 
                     List<Task<QuerySnapshot>> applicationFetchTasks = new ArrayList<>();
-                    // final List<String> jobPostingIds = new ArrayList<>(); // To map apps to event IDs if needed later, now part of ApplicationModel
 
-                    for (QueryDocumentSnapshot eventDoc : jobPostingsSnapshot) {
+                    for (QueryDocumentSnapshot eventDoc : eventsSnapshot) {
                         String eventId = eventDoc.getId();
-                        // jobPostingIds.add(eventId);
-
-                        // For each event, get its 'applications' subcollection
-                        Task<QuerySnapshot> fetchAppsTask = db.collection(JOB_POSTINGS_COLLECTION)
+                        // 2. For each event, get its 'applications' subcollection
+                        Task<QuerySnapshot> fetchAppsTask = db.collection(EVENTS_COLLECTION)
                                 .document(eventId)
                                 .collection(APPLICATIONS_SUBCOLLECTION)
-                                // .orderBy(APPLICATION_TIMESTAMP_FIELD, Query.Direction.DESCENDING) // Done with client-side sort
+                                .orderBy(APPLICATION_TIMESTAMP_FIELD_IN_APPS, Query.Direction.DESCENDING) // Sort by timestamp
                                 .get();
                         applicationFetchTasks.add(fetchAppsTask);
                     }
@@ -189,26 +194,28 @@ public class ViewApplicationsActivity extends AppCompatActivity {
                         return;
                     }
 
+                    // 3. When all application fetches are successful
                     Tasks.whenAllSuccess(applicationFetchTasks).addOnSuccessListener(results -> {
                         applicationList.clear();
-                        for (int i = 0; i < results.size(); i++) {
-                            QuerySnapshot applicationsSnapshot = (QuerySnapshot) results.get(i);
-                            // String currentEventId = jobPostingIds.get(i); // Event ID is now in ApplicationModel
+                        for (Object result : results) {
+                            if (result instanceof QuerySnapshot) {
+                                QuerySnapshot applicationsSnapshot = (QuerySnapshot) result;
+                                if (!applicationsSnapshot.isEmpty()) {
+                                    for (QueryDocumentSnapshot appDoc : applicationsSnapshot) {
+                                        try {
+                                            // Convert to EventApplication
+                                            EventApplication application = appDoc.toObject(EventApplication.class); // <<< CHANGED
+                                            // @DocumentId in EventApplication should handle applicationId.
+                                            // eventId is implicitly known from parent or should be a field in EventApplication.
+                                            // If EventApplication model doesn't store eventId but you need it:
+                                            // String parentEventId = appDoc.getReference().getParent().getParent().getId();
+                                            // application.setEventId(parentEventId); // (Requires setter in EventApplication)
 
-                            if (applicationsSnapshot != null && !applicationsSnapshot.isEmpty()) {
-                                for (QueryDocumentSnapshot appDoc : applicationsSnapshot) {
-                                    try {
-                                        ApplicationModel application = appDoc.toObject(ApplicationModel.class);
-                                        // Ensure applicationId is set (if not a @DocumentId in model)
-                                        // and eventId is set if not mapped directly by Firestore from parent.
-                                        // ApplicationModel should have eventId populated if it's a field
-                                        // in the Firestore document for the application.
-                                        // application.setEventId(currentEventId); // Only if eventId isn't in the appDoc
-
-                                        applicationList.add(application);
-                                    } catch (Exception e) {
-                                        Log.e(TAG, "Error converting application document to ApplicationModel for event, app ID: "
-                                                + appDoc.getId(), e);
+                                            applicationList.add(application);
+                                        } catch (Exception e) {
+                                            Log.e(TAG, "Error converting application document to EventApplication, app ID: "
+                                                    + appDoc.getId(), e);
+                                        }
                                     }
                                 }
                             }
@@ -227,7 +234,6 @@ public class ViewApplicationsActivity extends AppCompatActivity {
                 });
     }
 
-
     private void setLoadingState(boolean isLoading) {
         if (progressBarApplications == null || textViewApplicationsStatus == null || recyclerViewApplications == null) return;
         if (isLoading) {
@@ -236,26 +242,24 @@ public class ViewApplicationsActivity extends AppCompatActivity {
             recyclerViewApplications.setVisibility(View.GONE);
         } else {
             progressBarApplications.setVisibility(View.GONE);
+            // Visibility of other views is handled by updateUiBasedOnApplicationList
         }
     }
 
     private void updateUiBasedOnApplicationList() {
-        if (applicationList == null) {
+        if (applicationList == null) { // Should not happen if initialized in onCreate
             applicationList = new ArrayList<>();
         }
 
-        try {
-            Collections.sort(applicationList, (app1, app2) -> {
-                Timestamp ts1 = app1.getAppliedAt(); // Use getAppliedAt from ApplicationModel
-                Timestamp ts2 = app2.getAppliedAt();
-                if (ts1 == null && ts2 == null) return 0;
-                if (ts1 == null) return 1;
-                if (ts2 == null) return -1;
-                return ts2.compareTo(ts1); // Newest first
-            });
-        } catch (Exception e) {
-            Log.e(TAG, "Error sorting applications by timestamp.", e);
-        }
+        // Sorting is already done by Firestore query, but if client-side sort is preferred:
+        // Collections.sort(applicationList, (app1, app2) -> {
+        //     Timestamp ts1 = app1.getApplicationTimestamp(); // <<< CHANGED
+        //     Timestamp ts2 = app2.getApplicationTimestamp(); // <<< CHANGED
+        //     if (ts1 == null && ts2 == null) return 0;
+        //     if (ts1 == null) return 1;
+        //     if (ts2 == null) return -1;
+        //     return ts2.compareTo(ts1); // Newest first
+        // });
 
         if (applicationAdapter != null) {
             applicationAdapter.submitList(new ArrayList<>(applicationList)); // Submit new list copy
@@ -273,37 +277,36 @@ public class ViewApplicationsActivity extends AppCompatActivity {
         }
     }
 
-    // This method updates the status in Firestore.
-    // Consider moving this logic to a ViewModel for better architecture.
-    private void updateApplicationStatusInFirestore(String applicationId, String eventId, ApplicationStatus newStatus, @Nullable String reason) {
+    private void updateApplicationStatusInFirestore(String applicationId, String eventId,
+                                                    EventApplicationStatus newStatus, @Nullable String reason) { // <<< CHANGED to EventApplicationStatus
         if (applicationId == null || eventId == null) {
             Toast.makeText(this, "Error: Missing application or event ID.", Toast.LENGTH_SHORT).show();
+            Log.e(TAG, "updateApplicationStatusInFirestore: applicationId or eventId is null.");
             return;
         }
 
-        // Path to the application document: /events/{eventId}/applications/{applicationId}
-        // OR /applications/{applicationId} if applications are a top-level collection and have eventId field.
-        // Assuming applications are a subcollection of events for this example.
         Log.d(TAG, "Updating status for app: " + applicationId + " in event: " + eventId + " to " + newStatus.name());
 
-        db.collection(JOB_POSTINGS_COLLECTION).document(eventId)
+        db.collection(EVENTS_COLLECTION).document(eventId)
                 .collection(APPLICATIONS_SUBCOLLECTION).document(applicationId)
-                .update("applicationStatus", newStatus.name(),
-                        "reasonForRejection", (newStatus == ApplicationStatus.REJECTED ? reason : null),
-                        "lastUpdatedAt", Timestamp.now()) // Update lastUpdatedAt
+                .update("status", newStatus.name(), // Ensure your Firestore field for status is "status"
+                        "reasonForRejection", (newStatus == EventApplicationStatus.REJECTED ? reason : null),
+                        "lastUpdatedAt", Timestamp.now()) // Optional: track updates
                 .addOnSuccessListener(aVoid -> {
                     Toast.makeText(ViewApplicationsActivity.this, "Application status updated to " + newStatus.name(), Toast.LENGTH_SHORT).show();
-                    // The list will auto-refresh if loadApplicationsForEmployer uses a snapshot listener.
-                    // If not using a snapshot listener, you might need to manually call loadApplicationsForEmployer() here.
-                    // For now, assuming snapshot listener handles the refresh.
                     Log.d(TAG, "Successfully updated application status for " + applicationId);
+                    // No need to manually reload if Firestore query has orderBy.
+                    // If you were not using orderBy in the query and relied on client sort,
+                    // or if the update doesn't trigger a snapshot listener refresh of the exact item,
+                    // you might need to call loadApplicationsForOrganizer() here.
+                    // However, with orderBy and snapshot listener (if used), this should be fine.
+                    // For direct .get(), a manual refresh would be needed: loadApplicationsForOrganizer();
                 })
                 .addOnFailureListener(e -> {
                     Toast.makeText(ViewApplicationsActivity.this, "Failed to update status: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                     Log.e(TAG, "Error updating application status for " + applicationId, e);
                 });
     }
-
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
@@ -314,3 +317,4 @@ public class ViewApplicationsActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 }
+

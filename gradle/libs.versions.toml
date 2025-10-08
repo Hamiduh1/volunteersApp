@@ -1,18 +1,18 @@
 [versions]
-activityVersion = "1.10.1"
+activityVersion = "1.11.0"
 agp = "8.10.1"
 annotation = "1.9.1"
 appcompatVersion = "1.7.1"
 circleimageview = "3.1.0"
 circleimageviewVersion = "2.2.0"
-coreKtx = "1.16.0"
+coreKtx = "1.17.0"
 facebookLogin = "latest_version"
-facebookLoginVersion = "18.0.3"
-firebaseBom = "34.0.0"
-firebaseDataconnect = "17.0.0"
-firebaseDataconnectVersion = "17.0.0"
-firebaseFunctions = "22.0.0"
-fragment = "1.8.8"
+facebookLoginVersion = "18.1.3"
+firebaseBom = "34.3.0"
+firebaseDataconnect = "17.0.1"
+firebaseDataconnectVersion = "17.0.1"
+firebaseFunctions = "22.0.1"
+fragment = "1.8.9"
 glide = "4.16.0"
 googlePlayServicesAuth = "21.4.0"
 googlePlayServicesAuthVersion = "21.4.0"
@@ -20,25 +20,25 @@ junit = "4.13.2"
 junitVersion = "1.3.0"
 espressoCore = "3.7.0"
 appcompat = "1.7.1"
-kotlin = "2.1.0"
+kotlin = "2.2.0"
 kotlinxCoroutinesCore = "1.10.1"
 kotlinxSerializationCore = "1.7.3"
 kotlinxSerializationCoreVersion = "1.9.22"
-lifecycleLivedataKtx = "2.9.2"
-lifecycleViewmodelKtx = "2.9.2"
-material = "1.12.0"
-activity = "1.10.1"
+lifecycleLivedataKtx = "2.9.4"
+lifecycleViewmodelKtx = "2.9.4"
+material = "1.13.0"
+activity = "1.11.0"
 constraintlayout = "2.2.1"
 googleGmsGoogleServices = "4.4.3"
-firebaseAuth = "24.0.0"
+firebaseAuth = "24.0.1"
 credentials = "1.5.0"
 credentialsPlayServicesAuth = "1.5.0"
 googleid = "1.1.1"
-firebaseDatabase = "22.0.0"
-firebaseFirestore = "26.0.0"
-firebaseStorage = "22.0.0"
-navigationFragmentKtx = "2.9.3"
-navigationUiKtx = "2.9.3"
+firebaseDatabase = "22.0.1"
+firebaseFirestore = "26.0.1"
+firebaseStorage = "22.0.1"
+navigationFragmentKtx = "2.9.5"
+navigationUiKtx = "2.9.5"
 picasso = "2.71828"
 picassoVersion = "2.71828"
 playServicesAuth = "latest_version"
@@ -47,19 +47,20 @@ playServicesIdentity = "18.1.0"
 playServicesMaps = "19.2.0"
 playServicesMapsVersion = "19.2.0"
 identityCredential = "20231002"
-firebaseMessaging = "25.0.0"
-firebaseInappmessagingDisplay = "22.0.0"
-firebaseConfig = "23.0.0"
+firebaseMessaging = "25.0.1"
+firebaseInappmessagingDisplay = "22.0.1"
+firebaseConfig = "23.0.1"
 recyclerview = "1.4.0"
-roomCompiler = "2.7.2"
+roomCompiler = "2.8.1"
 media3Common = "1.8.0"
-scenecore = "1.0.0-alpha05"
+scenecore = "1.0.0-alpha07"
 swiperefreshlayout = "1.1.0"
-navigationSafeargs = "2.9.3"
-impress = "0.0.5"
-scenecoreVersion = "1.0.0-alpha05"
+navigationSafeargs = "2.9.5"
+impress = "0.0.6"
+scenecoreVersion = "1.0.0-alpha07"
 playServicesLocation = "21.3.0"
 firebaseCrashlyticsBuildtools = "3.0.6"
+roomCompilerProcessingTesting = "2.8.1"
 
 [libraries]
 activity-v140 = { module = "androidx.activity:activity", version.ref = "activityVersion" }
@@ -73,6 +74,7 @@ firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
 firebase-dataconnect = { module = "com.google.firebase:firebase-dataconnect", version.ref = "firebaseDataconnect" }
 firebase-dataconnect-v1601beta04 = { module = "com.google.firebase:firebase-dataconnect", version.ref = "firebaseDataconnectVersion" }
+firebase-firestore-ktx = { module = "com.google.firebase:firebase-firestore-ktx" }
 firebase-functions = { module = "com.google.firebase:firebase-functions", version.ref = "firebaseFunctions" }
 fragment = { module = "androidx.fragment:fragment", version.ref = "fragment" }
 glide = { module = "com.github.bumptech.glide:glide", version.ref = "glide" }
@@ -121,11 +123,11 @@ impress = { group = "com.google.ar", name = "impress", version.ref = "impress" }
 androidx-scenecore = { group = "androidx.xr.scenecore", name = "scenecore", version.ref = "scenecoreVersion" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 firebase-crashlytics-buildtools = { group = "com.google.firebase", name = "firebase-crashlytics-buildtools", version.ref = "firebaseCrashlyticsBuildtools" }
+androidx-room-compiler-processing-testing = { group = "androidx.room", name = "room-compiler-processing-testing", version.ref = "roomCompilerProcessingTesting" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 google-gms-google-services = { id = "com.google.gms.google-services", version.ref = "googleGmsGoogleServices" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 androidx-navigation-safeargs = { id = "androidx.navigation.safeargs", version.ref = "navigationSafeargs" }
-
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

@@ -1,3 +1,6 @@
+
+//same as OrganizerApplicationsFragment.java
+/**
 package com.example.volunteersApp.fragments;
 
 import android.content.Intent;
@@ -21,15 +24,16 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.example.volunteersApp.R;
 import com.example.volunteersApp.adapters.ApplicantAdapter;
-import com.example.volunteersApp.models.Application;
+import com.example.volunteersApp.models.EventApplication;
 import com.example.volunteersApp.models.ApplicationWithUserDetails;
+//import com.example.volunteersApp.databinding.FragmentViewApplicantsBinding;
 import com.example.volunteersApp.models.User;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.QueryDocumentSnapshot;
-// Removed Firebase Timestamp as it's handled within Application model presumably
+// Removed Firebase Timestamp as it's handled within EventApplication model presumably
 
 import java.util.ArrayList;
 import java.util.List;
@@ -71,8 +75,8 @@ public class ViewApplicantsFragment extends Fragment implements ApplicantAdapter
                 Toast.makeText(getContext(), getString(R.string.error_event_id_missing_toast), Toast.LENGTH_LONG).show();
             }
             if (isAdded() && NavHostFragment.findNavController(this).getCurrentDestination() != null &&
-                    NavHostFragment.findNavController(this).getCurrentDestination().getId() == R.id.viewApplicantsFragment) {
-                NavHostFragment.findNavController(this).popBackStack();
+                    NavHostFragment.findNavController(this).getCurrentDestination().getId() == R.id.nav_view_applicants) {
+                NavHostFragment.findNavController(this).popBackStack();  //R.id.viewApplicantsFragment changed to R.id.nav_view_applicants
             }
             return;
         }
@@ -154,11 +158,11 @@ public class ViewApplicantsFragment extends Fragment implements ApplicantAdapter
                             return;
                         }
 
-                        List<Application> applicationsFromDb = new ArrayList<>();
+                        List<EventApplication> applicationsFromDb = new ArrayList<>();
                         List<Task<DocumentSnapshot>> userDetailTasks = new ArrayList<>();
 
                         for (QueryDocumentSnapshot appDoc : applicationTask.getResult()) {
-                            Application application = appDoc.toObject(Application.class);
+                            EventApplication application = appDoc.toObject(EventApplication.class);
                             // Ensure applicationId is set, useful if not automatically mapped by Firestore
                             if (application.getApplicationId() == null || application.getApplicationId().isEmpty()) {
                                 application.setApplicationId(appDoc.getId());
@@ -168,7 +172,7 @@ public class ViewApplicantsFragment extends Fragment implements ApplicantAdapter
                             if (application.getVolunteerUid() != null && !application.getVolunteerUid().isEmpty()) {
                                 userDetailTasks.add(db.collection("users").document(application.getVolunteerUid()).get());
                             } else {
-                                Log.w(TAG, "Application " + appDoc.getId() + " is missing volunteerUid.");
+                                Log.w(TAG, "EventApplication " + appDoc.getId() + " is missing volunteerUid.");
                                 userDetailTasks.add(Tasks.forResult(null)); // Add a null-resolving task to keep list sizes in sync
                             }
                         }
@@ -187,7 +191,7 @@ public class ViewApplicantsFragment extends Fragment implements ApplicantAdapter
                                     currentApplicantDetailsList.clear(); // Clear before repopulating
 
                                     for (int i = 0; i < applicationsFromDb.size(); i++) {
-                                        Application currentApplication = applicationsFromDb.get(i);
+                                        EventApplication currentApplication = applicationsFromDb.get(i);
                                         DocumentSnapshot userSnapshot = null;
                                         if (i < userSnapshotsList.size() && userSnapshotsList.get(i) instanceof DocumentSnapshot) {
                                             userSnapshot = (DocumentSnapshot) userSnapshotsList.get(i);
@@ -202,7 +206,7 @@ public class ViewApplicantsFragment extends Fragment implements ApplicantAdapter
                                         }
 
                                         ApplicationWithUserDetails combinedDetails = new ApplicationWithUserDetails(currentApplication, user);
-                                        // If ApplicationWithUserDetails needs eventId and it's not in Application model:
+                                        // If ApplicationWithUserDetails needs eventId and it's not in EventApplication model:
                                         // combinedDetails.setEventId(this.eventId); // Uncomment if needed
 
                                         currentApplicantDetailsList.add(combinedDetails);
@@ -217,7 +221,7 @@ public class ViewApplicantsFragment extends Fragment implements ApplicantAdapter
                                     Log.e(TAG, "Error fetching some user details: ", e);
                                     // Populate with applications and placeholders for users
                                     currentApplicantDetailsList.clear();
-                                    for (Application app : applicationsFromDb) {
+                                    for (EventApplication app : applicationsFromDb) {
                                         ApplicationWithUserDetails details = new ApplicationWithUserDetails(app, (User) null);
                                         // if (details.getApplication() != null) details.getApplication().setEventId(this.eventId); // if needed
                                         currentApplicantDetailsList.add(details);
@@ -384,3 +388,4 @@ public class ViewApplicantsFragment extends Fragment implements ApplicantAdapter
         currentApplicantDetailsList = null; // Clear the temporary list
     }
 }
+**/

@@ -8,8 +8,7 @@
     <color name="colorButton">#000000</color>
     <color name="colorAccentDark">#FF4081</color> <!-- Consider removing if not used by M1/M2 styles -->
     <color name="colorBlue500">#2196f3</color>
-    <color name="buttonColor">#000000</color>
-    <color name="my_chip_background_color">#2196f3</color>
+     <color name="my_chip_background_color">#2196f3</color>
     <color name="my_chip_text_color">#FFFFFF</color>
     <color name="my_chip_border_color">#2196f3</color>
 
@@ -73,6 +72,10 @@
     <color name="orange">#FFA500</color>
     <color name="orange100">#FFD740</color>
     <color name="orange200">#FFAB00</color>
+    <color name="grey_600">#757575</color>
+    <color name="grey_500">#9E9E9E</color>
+    <color name="orange_500">#FFA500</color>
+
     <color name="color_surface_variant_light">#E7E0EC</color>
 
 
@@ -174,7 +177,8 @@
         <color name="status_completed_background">#757575</color> <!-- Grey 600 -->
         <color name="status_cancelled_background">#F44336</color> <!-- Red 500 -->
     <color name="status_pending_color">#4CAF50</color>
-
+    <color name="grey_400">#BDBDBD</color>
+    <color name="buttonColor">#FF6200EE</color> <!-- Or your app's primary/accent color -->
 
 
 
@@ -200,6 +204,10 @@
     <color name="colorStatusRejected">#FFFF7043</color>  <!-- Example: Orange/Red -->
      <color name="colorStatusDefault">#FFBDBDBD</color>  <!-- Example: Grey -->
 
+    <color name="status_accepted_green">#4CAF50</color>
+    <color name="status_pending_orange">#FF9800</color>
+    <color name="status_rejected_red">#F44336</color>
+    <color name="status_unknown_grey">#9E9E9E</color>
 
 
     <!-- Optional: Text colors if you decide to set them individually per status -->

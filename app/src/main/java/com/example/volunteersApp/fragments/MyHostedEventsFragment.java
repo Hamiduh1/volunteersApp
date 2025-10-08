@@ -1,3 +1,6 @@
+//Same as HostedEventsFragment.java
+
+/**
 package com.example.volunteersApp.fragments;
 
 // Correct imports for EventModel and EventAdapter
@@ -33,6 +36,7 @@ import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.QueryDocumentSnapshot;
 import com.google.firebase.storage.FirebaseStorage;
+import com.example.volunteersApp.fragments.MyHostedEventsFragmentDirections;
 
 import java.util.ArrayList;
 import java.util.Collections; // For potential client-side sorting if needed later
@@ -411,4 +415,4 @@ public class MyHostedEventsFragment extends Fragment {
     }
 }
 
-
+**/

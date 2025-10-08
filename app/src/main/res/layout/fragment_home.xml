@@ -11,22 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar">
-
-        <!--
-        If MainActivity's Toolbar is primary and used for all fragments,
-        this AppBarLayout might not be needed in fragment_home.xml unless
-        HomeFragment requires its own specific Toolbar actions or appearance.
-        If you add a Toolbar here, ensure it's setup in HomeFragment's
-        onViewCreated (e.g., ((AppCompatActivity) requireActivity()).setSupportActionBar(binding.toolbarHome);)
-        and that it coordinates with the NavController if it's meant for navigation.
-        For simplicity, assuming MainActivity handles the main toolbar.
-        <androidx.appcompat.widget.Toolbar
-            android:id="@+id/toolbar_home"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            app:title="@string/menu_home"
-            app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
-        -->
+        <!-- Toolbar can be added here if needed -->
     </com.google.android.material.appbar.AppBarLayout>
 
     <androidx.core.widget.NestedScrollView
@@ -40,6 +25,7 @@
             android:orientation="vertical"
             android:padding="16dp">
 
+            <!-- Welcome Card -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -69,7 +55,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-
+            <!-- Upcoming Events Section -->
             <TextView
                 android:id="@+id/textViewUpcomingEventsTitle"
                 android:layout_width="wrap_content"
@@ -84,12 +70,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:minHeight="150dp"
-            app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-            android:orientation="horizontal"
-            tools:listitem="@layout/item_event_card_small"
-            tools:itemCount="3"/>
-            <!-- tools:listitem assumes you have a layout named item_event_card_small.xml in your layout folder. -->
-            <!-- If not, you can remove tools:listitem or use tools:itemCount="0" to simulate an empty state for preview. -->
+                app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+                android:orientation="horizontal"
+                tools:listitem="@layout/item_event_card_small"
+                tools:itemCount="3"/>
 
             <TextView
                 android:id="@+id/textViewNoUpcomingEvents"
@@ -103,7 +87,7 @@
                 android:visibility="gone"
                 tools:visibility="visible"/>
 
-
+            <!-- Action Buttons for Volunteers -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -113,29 +97,42 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/buttonBrowseAllEvents"
-                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    style="@style/Widget.Material3.Button.OutlinedButton.Icon"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/browse_all_events"
-                    app:icon="@drawable/ic_event_available"
-                    android:contentDescription="@string/cd_browse_all_events_button" /> <!-- ADDED contentDescription -->
-                <!-- Ensure ic_event_available drawable exists -->
+                    app:icon="@drawable/ic_event_available" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/buttonHostEvent"
+                    android:id="@+id/buttonBrowseAllJobs"
+                    style="@style/Widget.Material3.Button.OutlinedButton.Icon"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:text="@string/host_an_event"
-                    app:icon="@drawable/ic_add_circle_outline"
-                    android:visibility="gone"
-                tools:visibility="visible"
-                android:contentDescription="@string/cd_host_an_event_button" /> <!-- ADDED contentDescription -->
-                <!-- Ensure ic_add_circle_outline drawable exists -->
+                    android:text="@string/browse_all_jobs"
+                    app:icon="@drawable/ic_work_outline" />
+
+                <!-- *** THIS IS THE FIX *** -->
+                <!-- The button for "My Events" is now added with the correct ID -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonMyEvents"
+                    style="@style/Widget.Material3.Button.OutlinedButton.Icon"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/my_events"
+                    app:icon="@drawable/ic_my_events" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonMyJobs"
+                    style="@style/Widget.Material3.Button.OutlinedButton.Icon"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/my_jobs_button"
+                    app:icon="@drawable/ic_my_activity" />
 
             </LinearLayout>
-
-            <!-- You could add more sections here: Event Categories, Featured Volunteers, Search Bar, etc. -->
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
@@ -146,6 +143,6 @@
         android:layout_height="wrap_content"
         android:layout_gravity="center"
         android:visibility="gone"
-        tools:visibility="visible"/> <!-- tools:visibility makes it visible in the layout editor -->
+        tools:visibility="visible"/>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

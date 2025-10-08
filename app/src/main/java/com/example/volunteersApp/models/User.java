@@ -1,49 +1,52 @@
 package com.example.volunteersApp.models;
 
-import androidx.annotation.Keep; // For ProGuard/R8
+import androidx.annotation.Keep;
 import com.google.firebase.firestore.Exclude;
 import com.google.firebase.firestore.IgnoreExtraProperties;
+import java.util.Objects;
 
-import java.util.Objects; // For Objects.equals and Objects.hash
-
-@Keep // Keep the class and its members for ProGuard/R8
+@Keep
 @IgnoreExtraProperties
 public class User {
 
-    private String uid;             // Unique User ID (consistent with Firebase Auth UID)
-    private String name;            // User's full name
-    private String email;           // User's email address
-    private String profileImageUrl; // URL for the user's profile picture
+    private String uid;
+    private String name;
+    private String email;
+    private String profileImageUrl;
+    private String phoneNumber; // ADDED phoneNumber field
 
     @Exclude
     private String applicationStatus; // Transient field, not stored in Firestore for this User object
 
-    // Required empty public constructor for Firestore deserialization
     public User() {
+        // Required empty public constructor for Firestore deserialization
     }
 
-    // Constructor
-    public User(String uid, String name, String email, String profileImageUrl) {
+    // Constructor updated to include phoneNumber
+    public User(String uid, String name, String email, String profileImageUrl, String phoneNumber) {
         this.uid = uid;
         this.name = name;
         this.email = email;
         this.profileImageUrl = profileImageUrl;
+        this.phoneNumber = phoneNumber; // Initialize phoneNumber
     }
+
+    // Constructor without phoneNumber for backward compatibility or if phone is optional
+    public User(String uid, String name, String email, String profileImageUrl) {
+        this(uid, name, email, profileImageUrl, null); // Call main constructor with null phone
+    }
+
 
     // --- Standard Getters ---
     public String getUid() {
         return uid;
     }
 
-    // Getter for the 'name' field, which also serves as 'title' conceptually for some use cases
     public String getName() {
         return name;
     }
 
-    // Alias getter if some parts of your UI expect getTitle()
-    // Firestore will primarily look for getName() or a public 'name' field
-    // or a setName() to map to the 'name' property.
-    public String getTitle() {
+    public String getTitle() { // Alias getter
         return name;
     }
 
@@ -53,6 +56,10 @@ public class User {
 
     public String getProfileImageUrl() {
         return profileImageUrl;
+    }
+
+    public String getPhoneNumber() { // ADDED getter for phoneNumber
+        return phoneNumber;
     }
 
     @Exclude
@@ -88,6 +95,10 @@ public class User {
         this.profileImageUrl = profileImageUrl;
     }
 
+    public void setPhoneNumber(String phoneNumber) { // ADDED setter for phoneNumber
+        this.phoneNumber = phoneNumber;
+    }
+
     @Exclude
     public void setApplicationStatus(String applicationStatus) {
         this.applicationStatus = applicationStatus;
@@ -111,6 +122,7 @@ public class User {
                 ", name='" + name + '\'' +
                 ", email='" + email + '\'' +
                 ", profileImageUrl='" + (profileImageUrl != null && !profileImageUrl.isEmpty() ? "present" : "null_or_empty") + '\'' +
+                ", phoneNumber='" + (phoneNumber != null ? phoneNumber : "null") + '\'' + // ADDED to toString
                 (applicationStatus != null ? ", applicationStatus='" + applicationStatus + '\'' : "") +
                 '}';
     }
@@ -120,17 +132,26 @@ public class User {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         User user = (User) o;
-        // Primary equality based on UID
+        // For equality, primarily rely on UID if present.
+        // If UIDs are not the primary concern for a specific use case,
+        // you might need to adjust this logic.
         return Objects.equals(uid, user.uid);
+        // If UID is null for both (e.g., new objects not yet persisted),
+        // you might fall back to content comparison:
+        // if (uid == null && user.uid == null) {
+        //     return Objects.equals(name, user.name) &&
+        //            Objects.equals(email, user.email) &&
+        //            Objects.equals(profileImageUrl, user.profileImageUrl) &&
+        //            Objects.equals(phoneNumber, user.phoneNumber);
+        // }
+        // return false; // If one UID is null and the other isn't, they are different
     }
 
     @Override
     public int hashCode() {
-        // Hash code based on UID
+        // Hash code based primarily on UID for consistency with equals.
         return Objects.hash(uid);
+        // If falling back to content for null UIDs:
+        // return Objects.hash(uid, name, email, profileImageUrl, phoneNumber);
     }
 }
-
-
-
-

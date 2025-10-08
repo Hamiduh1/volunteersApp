@@ -239,7 +239,7 @@ public class JobPostDetailActivity extends AppCompatActivity {
         }
         String jobDisplayTitle = currentJobPost.getJobTitle() != null ? currentJobPost.getJobTitle() : currentJobPost.getTitle();
         new AlertDialog.Builder(this)
-                .setTitle("Confirm Application")
+                .setTitle("Confirm EventApplication")
                 .setMessage("Are you sure you want to apply for '" + jobDisplayTitle + "'?")
                 .setPositiveButton("Apply", (dialog, which) -> submitApplication())
                 .setNegativeButton("Cancel", null)
@@ -290,7 +290,7 @@ public class JobPostDetailActivity extends AppCompatActivity {
 
         applicationsCollectionRef.document(applicationId).set(applicationData)
                 .addOnSuccessListener(aVoid -> {
-                    Toast.makeText(JobPostDetailActivity.this, "Application submitted successfully!", Toast.LENGTH_LONG).show();
+                    Toast.makeText(JobPostDetailActivity.this, "EventApplication submitted successfully!", Toast.LENGTH_LONG).show();
                     if (buttonApplyNow != null) {
                         buttonApplyNow.setText("Applied");
                         buttonApplyNow.setEnabled(false);

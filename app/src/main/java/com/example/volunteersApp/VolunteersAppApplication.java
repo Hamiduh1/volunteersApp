@@ -41,7 +41,7 @@ public class VolunteersAppApplication extends Application {
 
         // Other application-wide initializations can go here.
 
-        Log.i(TAG, "Application common initializations complete.");
+        Log.i(TAG, "EventApplication common initializations complete.");
     }
 
     @Override

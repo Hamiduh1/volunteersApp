@@ -40,7 +40,7 @@
             app:layout_constraintBottom_toBottomOf="@+id/imageViewVolunteerProfileOrg"
         tools:text="Volunteer Name Here" />
 
-        <!-- Application Status -->
+        <!-- EventApplication Status -->
         <TextView
             android:id="@+id/textViewApplicationStatusOrg"
             android:layout_width="wrap_content"

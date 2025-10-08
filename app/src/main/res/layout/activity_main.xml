@@ -9,7 +9,7 @@
     tools:context=".MainActivity"
     tools:openDrawer="start">
 
-    <!-- Main content area -->
+    <!-- Main content area, using CoordinatorLayout to manage AppBar and BottomNav -->
     <androidx.coordinatorlayout.widget.CoordinatorLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent">
@@ -30,17 +30,19 @@
         </com.google.android.material.appbar.AppBarLayout>
 
         <!-- FragmentContainerView to host your navigation graph -->
-        <!-- Note: layout_behavior is important for CoordinatorLayout -->
         <androidx.fragment.app.FragmentContainerView
             android:id="@+id/nav_host_fragment_content_main"
             android:name="androidx.navigation.fragment.NavHostFragment"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            app:layout_behavior="@string/appbar_scrolling_view_behavior"
-            android:layout_marginBottom="?attr/actionBarSize"
             app:defaultNavHost="true"
+            app:layout_behavior="@string/appbar_scrolling_view_behavior"
             app:navGraph="@navigation/mobile_navigation" />
-
+        <!--
+            MODIFIED: Removed 'android:layout_marginBottom="?attr/actionBarSize"'.
+            The CoordinatorLayout and BottomNavigationView handle the overlap automatically.
+            This prevents double margins and makes the layout more robust.
+        -->
 
         <com.google.android.material.bottomnavigation.BottomNavigationView
             android:id="@+id/bottom_nav_view"
@@ -48,8 +50,12 @@
             android:layout_height="wrap_content"
             android:layout_gravity="bottom"
             android:background="?android:attr/windowBackground"
-            app:menu="@menu/bottom_nav_menu"
-            app:labelVisibilityMode="labeled" /> <!-- Or "selected" or "unlabeled" -->
+            app:labelVisibilityMode="labeled"
+            app:menu="@menu/bottom_nav_menu" />
+        <!--
+            NOTE: For the BottomNavigationView to automatically adjust fragment content,
+            it must be a direct child of the CoordinatorLayout. This structure is correct.
+        -->
 
     </androidx.coordinatorlayout.widget.CoordinatorLayout>
 
@@ -64,3 +70,4 @@
         app:menu="@menu/activity_main_drawer" />
 
 </androidx.drawerlayout.widget.DrawerLayout>
+

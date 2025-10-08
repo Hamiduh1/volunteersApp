@@ -1,38 +1,48 @@
-package com.example.volunteersApp.adapters; // Your package
+package com.example.volunteersApp.adapters;
 
 import android.view.LayoutInflater;
-import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ImageView;
-import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
+
 import com.bumptech.glide.Glide;
 import com.example.volunteersApp.R;
-import com.example.volunteersApp.databinding.ItemEventCardSmallBinding; // ViewBinding for the item
-import com.example.volunteersApp.models.EventDetails;
+import com.example.volunteersApp.databinding.ItemEventCardSmallBinding;
+import com.example.volunteersApp.models.EventModel; // CORRECTED: Use EventModel consistently
+
 import java.text.SimpleDateFormat;
 import java.util.List;
 import java.util.Locale;
 
 public class UpcomingEventsAdapter extends RecyclerView.Adapter<UpcomingEventsAdapter.EventViewHolder> {
 
-    private List<EventDetails> eventList;
-    private OnEventClickListener listener;
+    // CORRECTED: The list now holds EventModel objects
+    private List<EventModel> eventList;
+    private final OnEventClickListener listener;
 
     public interface OnEventClickListener {
-        void onEventClick(EventDetails event);
+        // CORRECTED: The listener callback now provides an EventModel
+        void onEventClick(EventModel event);
     }
 
-    public UpcomingEventsAdapter(List<EventDetails> eventList, OnEventClickListener listener) {
+    // CORRECTED: The constructor now accepts a List<EventModel>
+    public UpcomingEventsAdapter(List<EventModel> eventList, OnEventClickListener listener) {
         this.eventList = eventList;
         this.listener = listener;
+    }
+
+    // *** THIS METHOD IS NOW CORRECT ***
+    public void updateEvents(List<EventModel> newEvents) {
+        this.eventList.clear(); // Clear the old list
+        if (newEvents != null) {
+            this.eventList.addAll(newEvents); // Add all the new events
+        }
+        notifyDataSetChanged(); // Tell the adapter to refresh the view
     }
 
     @NonNull
     @Override
     public EventViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        // Use ViewBinding to inflate the item layout
         ItemEventCardSmallBinding binding = ItemEventCardSmallBinding.inflate(
                 LayoutInflater.from(parent.getContext()), parent, false);
         return new EventViewHolder(binding);
@@ -40,43 +50,46 @@ public class UpcomingEventsAdapter extends RecyclerView.Adapter<UpcomingEventsAd
 
     @Override
     public void onBindViewHolder(@NonNull EventViewHolder holder, int position) {
-        EventDetails event = eventList.get(position);
+        // CORRECTED: Get an EventModel object from the list
+        EventModel event = eventList.get(position);
         holder.bind(event, listener);
     }
 
     @Override
     public int getItemCount() {
+        // This remains correct
         return eventList.size();
     }
 
     static class EventViewHolder extends RecyclerView.ViewHolder {
-        // Use the binding class for views
-        ItemEventCardSmallBinding binding;
+        private final ItemEventCardSmallBinding binding;
 
         EventViewHolder(ItemEventCardSmallBinding binding) {
             super(binding.getRoot());
             this.binding = binding;
         }
 
-        void bind(final EventDetails event, final OnEventClickListener listener) {
-            binding.textViewEventNameSmall.setText(event.getTitle());
+        // CORRECTED: The bind method now accepts an EventModel
+        void bind(final EventModel event, final OnEventClickListener listener) {
+            binding.textViewEventTitleSmall.setText(event.getTitle());
 
-            if (event.getEventTimestamp() != null) {
+            // CORRECTED: Use the 'eventDateTime' field from EventModel
+            if (event.getEventDateTime() != null) {
                 SimpleDateFormat dateFormat = new SimpleDateFormat("EEE, MMM dd", Locale.getDefault());
-                binding.textViewEventDateSmall.setText(dateFormat.format(event.getEventTimestamp().toDate()));
+                binding.textViewEventDateSmall.setText(dateFormat.format(event.getEventDateTime().toDate()));
             } else {
                 binding.textViewEventDateSmall.setText(R.string.date_time_not_available);
             }
 
+            // CORRECTED: Use the 'imageUrl' field from EventModel
             if (event.getImageUrl() != null && !event.getImageUrl().isEmpty()) {
                 Glide.with(itemView.getContext())
                         .load(event.getImageUrl())
-                        .placeholder(R.drawable.ic_image_placeholder) // your placeholder
-                        .error(R.drawable.ic_image_error) // your error placeholder
+                        .placeholder(R.drawable.ic_image_placeholder)
+                        .error(R.drawable.ic_image_error)
                         .centerCrop()
                         .into(binding.imageViewEventSmall);
             } else {
-                // Set a default image or hide if no image URL
                 binding.imageViewEventSmall.setImageResource(R.drawable.ic_image_placeholder);
             }
 
@@ -84,4 +97,3 @@ public class UpcomingEventsAdapter extends RecyclerView.Adapter<UpcomingEventsAd
         }
     }
 }
-

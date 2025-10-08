@@ -1,36 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <menu xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <item
-        android:id="@+id/nav_home"
-        android:icon="@drawable/ic_home_selector"
-    android:title="@string/menu_home" />
+        <item
+            android:id="@+id/nav_home"
+            android:icon="@drawable/ic_home_selector"
+            android:title="@string/menu_home" />
 
-    <item
-        android:id="@+id/nav_volunteering_events"
-        android:icon="@drawable/ic_events_selector"
-    android:title="@string/menu_volunteering_events" />
 
-    <item
-        android:id="@+id/nav_my_applications"
-        android:icon="@drawable/ic_my_applications_selector"
-    android:title="@string/menu_my_applications" />
+        <!-- For opportunities from Employers -->
+        <item
+            android:id="@+id/nav_browse_jobs"
+        android:icon="@drawable/ic_browse_jobs_selector"
+        android:title="@string/menu_browse_jobs" /> <!-- e.g., "Jobs" or "Opportunities" -->
 
-<!-- Host an Event might also be in BottomNav
-    <item
-        android:id="@+id/nav_host_event"
-        android:icon="@drawable/ic_add_event_selector"
-    android:title="@string/menu_host_event" />
-    -->
 
-    <item
-        android:id="@+id/nav_my_events_activity"
-    android:icon="@drawable/ic_my_events_selector"
-    android:title="@string/menu_my_events" />
+        <!-- For opportunities from Organizers -->
+        <item
+            android:id="@+id/nav_browse_events"
+        android:icon="@drawable/ic_browse_events_selector"
+        android:title="@string/menu_browse_events" />
+        <!-- e.g., "Events" or "Volunteering" -->
 
-    <item
-        android:id="@+id/nav_profile"
-        android:icon="@drawable/ic_profile_selector"
-    android:title="@string/menu_profile" />
+        <!--
+            Option A for "My Stuff": One combined fragment with tabs
+        -->
 
-</menu>
+        <!-- Fragment with tabs for "My Job Applications" & "My Event Signups" -->
+        <item
+            android:id="@+id/nav_my_activity"
+        android:icon="@drawable/ic_my_activity_selector"
+        android:title="@string/menu_my_activity" /> <!-- e.g., "My Activity" or "My Applications" -->
+
+        <!--
+            Option B for "My Stuff": Two separate bottom nav items
+            (This might make the bottom bar too crowded with 5 items if "Home" and "Profile" are also there)
+        <item
+            android:id="@+id/nav_my_job_applications"
+            android:icon="@drawable/ic_my_job_applications_selector"
+            android:title="@string/menu_my_job_applications" />
+        <item
+            android:id="@+id/nav_my_event_signups"
+            android:icon="@drawable/ic_my_event_signups_selector"
+            android:title="@string/menu_my_event_signups" />
+        -->
+
+        <item
+            android:id="@+id/nav_profile"
+            android:icon="@drawable/ic_profile_selector"
+            android:title="@string/menu_profile" />
+
+    </menu>
+

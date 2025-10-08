@@ -1,3 +1,8 @@
+/**  You don't need AllEventsFragment.java in its current form. Its core
+purpose (showing a list of events) is already handled by the VolunteeringFragment.
+ java we just updated. The AllEventsFragment is a redundant and outdated file.
+
+
 package com.example.volunteersApp;
 
 import android.content.Intent;
@@ -12,13 +17,13 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 // EventDetailActivity, EventModel, and VolunteerEventItem are necessary
 // VolunteerEventAdapter is also necessary
+import com.example.volunteersApp.ui.eventdetails.EventDetailActivity;
 import com.google.firebase.firestore.CollectionReference;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.ListenerRegistration;
@@ -296,3 +301,4 @@ public class AllEventsFragment extends Fragment implements VolunteerEventAdapter
         Log.d(TAG, "onDestroyView: Views and adapter reference nulled.");
     }
 }
+**/

@@ -388,7 +388,7 @@ public class JobDetailsActivity extends AppCompatActivity {
             transaction.set(newApplicationRef, applicationData);
             return null;
         }).addOnSuccessListener(aVoid -> {
-            Log.i(TAG, "Transaction successful (Firestore): Application submitted and volunteersNeeded decremented.");
+            Log.i(TAG, "Transaction successful (Firestore): EventApplication submitted and volunteersNeeded decremented.");
             isSubmittingApplication = false;
             progressBarApply.setVisibility(View.GONE);
             Toast.makeText(JobDetailsActivity.this, getString(R.string.application_submitted_successfully), Toast.LENGTH_SHORT).show();

@@ -136,7 +136,7 @@ public class ViewApplicantsActivity extends AppCompatActivity implements Applica
                     }
 
                     if (applicationSnapshots == null) {
-                        Log.w(TAG, "Application snapshots are null for event: " + eventId);
+                        Log.w(TAG, "EventApplication snapshots are null for event: " + eventId);
                         showLoading(false);
                         showError(getString(R.string.error_fetching_applicants_details, "Received null data."));
                         return;
@@ -170,7 +170,7 @@ public class ViewApplicantsActivity extends AppCompatActivity implements Applica
                         // Long applicationTimestamp = appDoc.getLong("timestamp");
 
                         if (applicantUid == null || applicantUid.isEmpty()) {
-                            Log.w(TAG, "Application document " + applicationId + " missing or empty userId.");
+                            Log.w(TAG, "EventApplication document " + applicationId + " missing or empty userId.");
                             // Decrement counter if we skip this application
                             // No need for explicit synchronized block here for AtomicInteger's decrementAndGet
                             if (pendingUserDetailsFetches.decrementAndGet() == 0) {

@@ -33,7 +33,7 @@ public class MainPagerAdapter extends FragmentStateAdapter {
             case VOLUNTEER_EVENTS_FRAGMENT_POSITION:
                 return new VolunteeringFragment(); // Our new fragment for "Volunteer Events"
             // case BROWSE_EVENTS_FRAGMENT_POSITION:
-            //    return new BrowseEventsFragment(); // If you use this one
+            //    return new BrowseVolunteerEventsFragment(); // If you use this one
             default:
                 return new AvailableJobsFragment(); // Fallback
         }

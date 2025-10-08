@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+    <com.google.android.material.card.MaterialCardView
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        xmlns:app="http://schemas.android.com/apk/res-auto"
+        xmlns:tools="http://schemas.android.com/tools"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginBottom="4dp"
+        app:cardElevation="2dp"
+        app:cardCornerRadius="8dp">
+
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/textViewJobTitleApplication"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:textAppearance="?attr/textAppearanceHeadline6"
+                android:textColor="?android:attr/textColorPrimary"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toStartOf="@+id/statusIndicatorDot"
+                app:layout_constraintHorizontal_bias="0.0"
+                android:layout_marginEnd="8dp"
+                tools:text="Senior Software Engineer"/>
+
+            <ImageView
+                android:id="@+id/statusIndicatorDot"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:src="@drawable/ic_status_dot"
+                app:layout_constraintTop_toTopOf="@+id/textViewApplicationStatus"
+                app:layout_constraintBottom_toBottomOf="@+id/textViewApplicationStatus"
+                app:layout_constraintEnd_toStartOf="@+id/textViewApplicationStatus"
+                android:layout_marginEnd="4dp"
+                tools:tint="@color/status_pending_orange"
+                android:contentDescription="@string/status_indicator"/>
+
+
+            <TextView
+                android:id="@+id/textViewApplicationStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="?attr/textAppearanceBody2"
+                android:textStyle="bold"
+                app:layout_constraintTop_toTopOf="@+id/textViewJobTitleApplication"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintBaseline_toBaselineOf="@+id/textViewJobTitleApplication"
+                tools:text="Pending"
+                tools:textColor="@color/status_pending_orange"/>
+
+            <TextView
+                android:id="@+id/textViewEmployerNameApplication"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textAppearance="?attr/textAppearanceBody2"
+                android:textColor="?android:attr/textColorSecondary"
+                app:layout_constraintTop_toBottomOf="@+id/textViewJobTitleApplication"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                tools:text="Tech Solutions Inc."/>
+
+            <TextView
+                android:id="@+id/textViewApplicationDate"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textAppearance="?attr/textAppearanceCaption"
+                android:textColor="?android:attr/textColorSecondary"
+                app:layout_constraintTop_toBottomOf="@+id/textViewEmployerNameApplication"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                tools:text="Applied on: Oct 26, 2023"/>
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </com.google.android.material.card.MaterialCardView>
+

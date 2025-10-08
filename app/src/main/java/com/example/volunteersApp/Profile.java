@@ -1,3 +1,6 @@
+
+/** Kept for reference. I am using VolunteerProfileFragment instead.
+
 package com.example.volunteersApp;
 
 import android.Manifest; // For permission constant
@@ -193,7 +196,7 @@ public class Profile extends AppCompatActivity {
         binding.profilelogout1.setOnClickListener(v -> logoutUser()); // Assuming this is intentional
 
         binding.profilesettings.setOnClickListener(v ->
-                startActivity(new Intent(Profile.this, SettingsActivity.class)));
+                startActivity(new Intent(Profile.this, SettingsFragment.class)));
 
         binding.profileachievement.setOnClickListener(v ->
                 startActivity(new Intent(Profile.this, Gallery.class))); // Assuming Gallery is an Activity
@@ -508,3 +511,4 @@ public class Profile extends AppCompatActivity {
 
     // onDestroy is generally for final cleanup. Listener is best removed in onStop.
 }
+**/

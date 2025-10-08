@@ -121,6 +121,11 @@
     -dontwarn com.android.extensions.xr.splitengine.MessageGroupCallback
     -dontwarn com.android.extensions.xr.splitengine.RequestCallback
     -dontwarn com.android.extensions.xr.splitengine.SystemRendererConnection
+    -dontwarn ksp.com.fasterxml.aalto.stax.EventFactoryImpl
+    -dontwarn ksp.com.fasterxml.aalto.stax.InputFactoryImpl
+    -dontwarn ksp.com.fasterxml.aalto.stax.OutputFactoryImpl
+    -dontwarn ksp.javaslang.match.PatternsProcessor
+    -dontwarn ksp.org.jetbrains.kotlin.codegen.signature.KotlinToJvmSignatureMapperImpl
 
 # It's also often a good idea to keep the classes that *reference* these missing ones,
 # to ensure their interaction isn't broken by R8's optimizations.

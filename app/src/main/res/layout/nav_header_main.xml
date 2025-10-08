@@ -1,54 +1,64 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+    ADDED: Root <layout> tag to enable View Binding.
+    This generates the 'HeaderLayoutBinding' class used in MainActivity.
+-->
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="@dimen/nav_header_height"
-    android:background="@color/colorPrimary"
-    android:padding="@dimen/activity_horizontal_margin"
-    android:theme="@style/ThemeOverlay.AppCompat.Dark">
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Profile Picture ImageView -->
-    <de.hdodenhof.circleimageview.CircleImageView
-        android:id="@+id/pro1"
-        android:layout_width="@dimen/nav_header_profile_image_size"
-        android:layout_height="@dimen/nav_header_profile_image_size"
-        android:contentDescription="@string/nav_header_desc"
-        android:src="@drawable/default_profile_image"
-        app:civ_border_color="@android:color/white"
-        app:civ_border_width="2dp"
-        app:layout_constraintBottom_toTopOf="@+id/profilename2"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.5"
-        app:layout_constraintVertical_chainStyle="packed" />
+    <!-- tools:viewBindingIgnore="true" can be added here if you DON'T want a binding class, but we DO. -->
 
-    <!-- User Name TextView -->
-    <TextView
-        android:id="@+id/profilename2"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/nav_header_vertical_spacing_small"
-        android:text="@string/nav_header_title"
-        android:textAppearance="@style/TextAppearance.AppCompat.Body1"
-        android:textColor="@android:color/white"
-        app:layout_constraintBottom_toTopOf="@+id/profileemail2"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/pro1" />
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/nav_header_height"
+        android:background="?attr/colorPrimary"
+        android:padding="@dimen/activity_horizontal_margin"
+        android:theme="@style/ThemeOverlay.AppCompat.Dark">
 
-    <!-- User Email TextView -->
-    <TextView
-        android:id="@+id/profileemail2"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/nav_header_vertical_spacing_extra_small"
-        android:text="@string/nav_header_subtitle"
-        android:textAppearance="@style/TextAppearance.AppCompat.Caption"
-        android:textColor="@android:color/white"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/profilename2" />
+        <!-- Profile Picture ImageView -->
+        <de.hdodenhof.circleimageview.CircleImageView
+            android:id="@+id/pro1"
+            android:layout_width="@dimen/nav_header_profile_image_size"
+            android:layout_height="@dimen/nav_header_profile_image_size"
+            android:contentDescription="@string/nav_header_desc"
+            app:civ_border_color="@android:color/white"
+            app:civ_border_width="2dp"
+            app:layout_constraintBottom_toTopOf="@+id/profilename2"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintVertical_bias="0.5"
+            app:layout_constraintVertical_chainStyle="packed"
+            tools:src="@drawable/default_profile_image" /> <!-- Use tools:src for preview -->
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+        <!-- User Name TextView -->
+        <TextView
+            android:id="@+id/profilename2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/nav_header_vertical_spacing_small"
+            android:textAppearance="@style/TextAppearance.AppCompat.Body1"
+            android:textColor="@android:color/white"
+            app:layout_constraintBottom_toTopOf="@+id/profileemail2"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/pro1"
+            tools:text="Volunteer Name" /> <!-- Use tools:text for preview -->
+
+        <!-- User Email TextView -->
+        <TextView
+            android:id="@+id/profileemail2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/nav_header_vertical_spacing_extra_small"
+            android:textAppearance="@style/TextAppearance.AppCompat.Caption"
+            android:textColor="@android:color/white"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/profilename2"
+            tools:text="volunteer.email@example.com" /> <!-- Use tools:text for preview -->
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</layout>
