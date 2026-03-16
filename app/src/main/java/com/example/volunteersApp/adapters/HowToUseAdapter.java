@@ -1,3 +1,6 @@
+/**
+ * Copyright (C) 2023 The Android Open Source Project
+ *integrated to jetpack compose
 package com.example.volunteersApp.adapters;
 
 import android.content.Context;
@@ -7,7 +10,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
-import com.example.volunteersApp.HowToUseTip; // Import your HowToUseTip model
+import com.example.volunteersApp.ui.profile.HowToUseTip; // Import your HowToUseTip model
 import com.example.volunteersApp.R; // For accessing R.layout.item_how_to_use_tip
 
 import java.util.List;
@@ -37,8 +40,8 @@ public class HowToUseAdapter extends RecyclerView.Adapter<HowToUseAdapter.TipVie
         HowToUseTip currentTip = tipList.get(position);
 
         // Set item views based on your views and data model
-        holder.titleTextView.setText(currentTip.getTitle());
-        holder.contentTextView.setText(currentTip.getContent());
+        holder.titleTextView.setText(currentTip.title);
+        holder.contentTextView.setText(currentTip.content);
 
         // You could also set an OnClickListener for each item if needed
         // holder.itemView.setOnClickListener(v -> {
@@ -76,3 +79,4 @@ public class HowToUseAdapter extends RecyclerView.Adapter<HowToUseAdapter.TipVie
         }
     }
 }
+**/

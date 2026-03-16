@@ -12,8 +12,7 @@
     <fragment
         android:id="@+id/nav_home"
         android:name="com.example.volunteersApp.ui.home.HomeFragment"
-        android:label="@string/menu_home"
-        tools:layout="@layout/fragment_home">
+        android:label="@string/menu_home">
         <!-- Actions from Home to other major sections -->
         <action
             android:id="@+id/action_nav_home_to_nav_browse_jobs"
@@ -27,17 +26,21 @@
         <action
             android:id="@+id/action_nav_home_to_nav_my_jobs"
             app:destination="@id/nav_my_jobs" />
+
         <!-- Action from Home directly to a detail screen -->
         <action
             android:id="@+id/action_nav_home_to_event_detail"
             app:destination="@id/eventDetailFragment" />
+
+        <action
+            android:id="@+id/action_nav_home_to_nav_live_streams"
+            app:destination="@id/nav_live_streams" />
     </fragment>
 
     <fragment
         android:id="@+id/nav_browse_events"
-        android:name="com.example.volunteersApp.VolunteeringFragment"
-        android:label="@string/menu_browse_events"
-        tools:layout="@layout/fragment_volunteering">
+        android:name="com.example.volunteersApp.ui.volunteers.VolunteeringFragment"
+        android:label="@string/menu_browse_events">
         <action
             android:id="@+id/action_nav_browse_events_to_event_detail"
             app:destination="@id/eventDetailFragment" />
@@ -50,9 +53,8 @@
 
     <fragment
         android:id="@+id/nav_browse_jobs"
-        android:name="com.example.volunteersApp.ui.browse.BrowseJobsFragment"
-        android:label="@string/menu_browse_jobs"
-        tools:layout="@layout/fragment_browse_jobs">
+        android:name="com.example.volunteersApp.jobs.BrowseJobsFragment"
+        android:label="@string/menu_browse_jobs">
         <action
             android:id="@+id/action_nav_browse_jobs_to_job_detail"
             app:destination="@id/jobDetailFragment" />
@@ -63,12 +65,10 @@
             android:defaultValue="@null" />
     </fragment>
 
-    <!-- CORRECTED: This fragment is now properly defined and active -->
     <fragment
         android:id="@+id/myEventsFragment"
-        android:name="com.example.volunteersApp.fragments.MyEventsFragment"
-        android:label="@string/my_events"
-        tools:layout="@layout/fragment_my_events" >
+        android:name="com.example.volunteersApp.events.MyEventsFragment"
+        android:label="@string/my_events">
         <action
             android:id="@+id/action_myEventsFragment_to_eventDetailFragment"
             app:destination="@id/eventDetailFragment" />
@@ -76,47 +76,48 @@
 
     <fragment
         android:id="@+id/nav_my_jobs"
-        android:name="com.example.volunteersApp.ui.myjobs.MyJobsFragment"
-        android:label="@string/menu_my_jobs"
-        tools:layout="@layout/fragment_my_jobs">
+        android:name="com.example.volunteersApp.jobs.MyJobsFragment"
+        android:label="@string/menu_my_jobs">
         <action
             android:id="@+id/action_nav_my_jobs_to_job_detail"
             app:destination="@id/jobDetailFragment" />
     </fragment>
 
+    <!-- *** NEWLY ADDED DESTINATION FOR LIVE STREAMS *** -->
+    <fragment
+        android:id="@+id/nav_live_streams"
+        android:name="com.example.volunteersApp.streams.LiveStreamsFragment"
+        android:label="@string/title_live" />
+
     <fragment
         android:id="@+id/nav_profile"
-        android:name="com.example.volunteersApp.ui.profile.VolunteerProfileFragment"
-        android:label="@string/menu_profile"
-        tools:layout="@layout/fragment_volunteer_profile">
+        android:name="com.example.volunteersApp.ui.profile.UserProfileFragment"
+        android:label="@string/menu_profile">
         <action
             android:id="@+id/action_nav_profile_to_becomeOrganizerFragment"
             app:destination="@id/becomeOrganizerFragment"/>
         <action
             android:id="@+id/action_nav_profile_to_notificationSettingsFragment"
             app:destination="@id/notificationSettingsFragment" />
-
-        <!-- CHANGE THIS ACTION from going to SettingsActivity to SettingsFragment -->
         <action
             android:id="@+id/action_nav_profile_to_settings"
             app:destination="@id/settingsFragment" />
+    </fragment>
 
-    <!-- ADD THIS NEW FRAGMENT for the main settings menu -->
+
+    <!-- ===================================================== -->
+    <!-- ============== SECONDARY DESTINATIONS =============== -->
+    <!-- ===================================================== -->
+
     <fragment
         android:id="@+id/settingsFragment"
         android:name="com.example.volunteersApp.ui.profile.SettingsFragment"
-        android:label="SettingsFragment"
-        tools:layout="@layout/fragment_settings" />
-
-
+        android:label="SettingsFragment" />
 
     <fragment
-            android:id="@+id/notificationSettingsFragment"
-            android:name="com.example.volunteersApp.ui.profile.NotificationSettingsFragment"
-            android:label="fragment_notification_settings"
-            tools:layout="@layout/fragment_notification_settings" />
-
-    </fragment>
+        android:id="@+id/notificationSettingsFragment"
+        android:name="com.example.volunteersApp.ui.profile.NotificationSettingsFragment"
+        android:label="fragment_notification_settings" />
 
 
     <!-- ===================================================== -->
@@ -125,9 +126,8 @@
 
     <fragment
         android:id="@+id/jobDetailFragment"
-        android:name="com.example.volunteersApp.ui.jobdetail.JobDetailFragment"
-        android:label="@string/title_job_details"
-        tools:layout="@layout/fragment_job_detail">
+        android:name="com.example.volunteersApp.jobs.JobDetailFragment"
+        android:label="@string/title_job_details">
         <argument
             android:name="jobId"
             app:argType="string" />
@@ -135,9 +135,8 @@
 
     <fragment
         android:id="@+id/eventDetailFragment"
-        android:name="com.example.volunteersApp.ui.eventdetails.EventDetailFragment"
-        android:label="@string/title_event_details"
-        tools:layout="@layout/fragment_event_detail">
+        android:name="com.example.volunteersApp.events.EventDetailFragment"
+        android:label="@string/title_event_details">
         <argument
             android:name="eventId"
             app:argType="string" />
@@ -150,9 +149,8 @@
 
     <fragment
         android:id="@+id/becomeOrganizerFragment"
-        android:name="com.example.volunteersApp.ui.auth.BecomeOrganizerFragment"
-        android:label="@string/title_become_an_organizer"
-        tools:layout="@layout/fragment_become_organizer">
+        android:name="com.example.volunteersApp.organizer.BecomeOrganizerFragment"
+        android:label="@string/title_become_an_organizer">
         <action
             android:id="@+id/action_becomeOrganizer_finish_and_restart_to_organizer"
             app:destination="@id/nav_home"
@@ -160,8 +158,210 @@
             app:popUpToInclusive="true" />
     </fragment>
 
-    <!-- NOTE: The old 'nav_my_activity' fragment is removed as it's been replaced by -->
-    <!-- the more specific 'myEventsFragment' and 'nav_my_jobs' fragments. -->
+
+    <!-- 1. CHANGE the destination of the Community button to be the NEW CommunityHomeFragment -->
+    <!-- This fragment is the new entry point for the community section. -->
+    <fragment
+        android:id="@+id/nav_community"
+        android:name="com.example.volunteersApp.chat.CommunityHomeFragment"
+        android:label="@string/title_community">
+
+        <!-- Action to go from the community home menu to the chat inbox (ViewPager) -->
+        <action
+            android:id="@+id/action_communityHomeFragment_to_chatInboxFragment"
+            app:destination="@id/chatInboxFragment" /> <!-- Note the new destination ID -->
+
+        <!-- Action to go from the community home menu to the user list to start a NEW chat -->
+        <action
+            android:id="@+id/action_communityHomeFragment_to_userDirectoryFragment"
+            app:destination="@id/userDirectoryFragment" />
+
+
+        <action
+            android:id="@+id/action_communityHomeFragment_to_jokesFragment"
+            app:destination="@id/jokesFragment" />
+
+        <!-- ADD THIS ACTION for Date Eva -->
+        <action
+            android:id="@+id/action_communityHomeFragment_to_dateEvaFragment"
+            app:destination="@id/dateEvaFragment" />
+
+        <!-- ADD THIS NEW ACTION -->
+        <action
+            android:id="@+id/action_communityHomeFragment_to_communityAlertsFragment"
+            app:destination="@id/communityAlertsFragment" />
+        <!-- *** ADD THE ACTION FOR MARKETPLACE  *** -->
+        <action
+            android:id="@+id/action_communityHomeFragment_to_marketplaceFragment"
+            app:destination="@id/marketplaceFragment" />
+
+        <action
+            android:id="@+id/action_communityHomeFragment_to_advertisementFragment"
+            app:destination="@id/advertisementFragment" />
+
+
+    </fragment>
+
+    <!-- ADD THIS NEW FRAGMENT DEFINITION -->
+    <fragment
+        android:id="@+id/communityAlertsFragment"
+        android:name="com.example.volunteersApp.alerts.CommunityAlertsFragment"
+        android:label="Community Alerts" />
+
+
+
+    <fragment
+        android:id="@+id/jokesFragment"
+        android:name="com.example.volunteersApp.jokes.JokesFragment"
+        android:label="Jokes Corner">
+        <action
+            android:id="@+id/action_jokesFragment_to_chatActivity"
+            app:destination="@id/chatActivity" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/dateEvaFragment"
+        android:name="com.example.volunteersApp.date.DateFragment"
+        android:label="Date Eva">
+        <action
+            android:id="@+id/action_dateEvaFragment_to_chatActivity"
+            app:destination="@id/chatActivity" />
+    </fragment>
+    <!-- 2. UPDATE your existing ChatInboxFragment. It is NO LONGER the main destination. -->
+    <!-- Give it a new ID, "chatInboxFragment" -->
+    <fragment
+        android:id="@+id/chatInboxFragment"
+    android:name="com.example.volunteersApp.chat.ChatInboxFragment"
+    android:label="My Chats">
+
+
+    <!-- These actions to navigate from the inbox to a specific chat remain the same  -->
+    <action
+        android:id="@+id/action_chatInboxFragment_to_chatActivity"
+        app:destination="@id/chatActivity" />
+
+        <action
+            android:id="@+id/action_chatInboxFragment_to_invitationsListFragment"
+            app:destination="@id/invitationsListFragment" />
+
+    </fragment>
+
+    <!-- 3. ADD the new UserDirectoryFragment to the graph -->
+    <fragment
+        android:id="@+id/userDirectoryFragment"
+        android:name="com.example.volunteersApp.chat.UserDirectoryFragment"
+        android:label="New Chat">
+        <!-- In the future, this fragment will also have an action to navigate to chatActivity -->
+
+        <!-- ADD THIS ACTION -->
+        <action
+            android:id="@+id/action_userDirectoryFragment_to_chatActivity"
+            app:destination="@id/chatActivity" />
+    </fragment>
+
+
+    <fragment
+        android:id="@+id/invitationsListFragment"
+        android:name="com.example.volunteersApp.chat.InvitationsFragment"
+        android:label="Chat Invitations">
+
+        <!-- This action allows navigating to a chat after accepting an invitation. -->
+        <action
+            android:id="@+id/action_open_chat_from_invitation"
+            app:destination="@id/chatActivity" />
+
+    </fragment>
+
+
+
+    <!-- This action is the ONLY one needed for this fragment's logic -->
+        <!-- This action allows the InvitationsFragment to navigate directly to
+             the ChatActivity after a user accepts an invitation. It passes the
+             newly created CHAT_ID and the OTHER_USER_ID.
+             android:id="@+id/chatInvitationsFragment"
+             -->
+
+
+    <activity
+        android:id="@+id/chatActivity"
+        android:name="com.example.volunteersApp.chat.ChatActivity"
+        android:label="Chat">
+        <argument
+            android:name="chatId"
+            app:argType="string" />
+        <argument
+            android:name="otherUserId"
+            app:argType="string" />
+    </activity>
+
+
+    <!-- ============================================================= -->
+
+
+
+    <fragment
+        android:id="@+id/myActivityFragment"
+        android:name="com.example.volunteersApp.events.MyActivityFragment"
+        android:label="@string/menu_my_activity">
+
+        <action
+            android:id="@+id/action_myActivityFragment_to_eventDetailFragment"
+            app:destination="@id/eventDetailFragment" />
+
+        <action
+            android:id="@+id/action_myActivityFragment_to_jobDetailFragment"
+            app:destination="@id/jobDetailFragment" />
+    </fragment>
+
+
+    <fragment
+        android:id="@+id/marketplaceFragment"
+        android:name="com.example.volunteersApp.marketplace.MarketplaceFragment"
+        android:label="Marketplace">
+    <action
+        android:id="@+id/action_marketplaceFragment_to_chatActivity"
+        app:destination="@id/chatActivity" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/walletFragment"
+        android:name="com.example.volunteersApp.wallet.Wallet"
+        android:label="Wallet" />
+
+
+    <fragment
+        android:id="@+id/advertisementFragment"
+        android:name="com.example.volunteersApp.advertisement.AdvertisementFragment"
+        android.label="Advertisements" >
+        <action
+            android:id="@+id/action_advertisementFragment_to_chatActivity"
+            app:destination="@id/chatActivity" />
+    </fragment>
+       <!-- tools:layout="@layout/fragment_advertisement" />   since we using compose now -->
+
+    <!-- Inside mobile_navigation.xml -->
+    <fragment
+        android:id="@+id/nav_available_jobs"
+        android:name="com.example.volunteersApp.jobs.AvailableJobsFragment"
+        android:label="Available Opportunities">
+        <action
+            android:id="@+id/action_availableJobs_to_jobDetail"
+            app:destination="@id/jobDetailFragment" />
+    </fragment>
+    <!-- ============================================================= -->
+    <fragment
+        android:id="@+id/nav_my_applied_jobs"
+        android:name="com.example.volunteersApp.jobs.MyAppliedJobsFragment"
+        android:label="My Applied Jobs">
+
+        <!-- Action to Job Detail -->
+        <action
+            android:id="@+id/action_myAppliedJobs_to_jobDetail"
+            app:destination="@id/jobDetailFragment" />
+    </fragment>
+
+
+
+
 
 </navigation>
-

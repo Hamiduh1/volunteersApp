@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:layout_marginTop="8dp"
+    android:layout_marginEnd="8dp"
+    app:cardCornerRadius="8dp"
+    app:cardElevation="4dp">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <!-- Optional Image for the alert -->
+        <ImageView
+            android:id="@+id/alertImageView"
+            android:layout_width="0dp"
+            android:layout_height="180dp"
+            android:scaleType="centerCrop"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            tools:srcCompat="@tools:sample/backgrounds/scenic"
+            android:contentDescription="@string/image_for_the_community_alert" />
+
+        <!-- Title of the Alert -->
+        <TextView
+            android:id="@+id/alertTitleTextView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginEnd="16dp"
+            android:textAppearance="?attr/textAppearanceTitleMedium"
+            android:textStyle="bold"
+            app:layout_constraintTop_toBottomOf="@id/alertImageView"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            tools:text="Lost Dog: Golden Retriever named 'Buddy'" />
+
+        <!-- Description of the Alert -->
+        <TextView
+            android:id="@+id/alertDescriptionTextView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:maxLines="4"
+            android:ellipsize="end"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            app:layout_constraintTop_toBottomOf="@id/alertTitleTextView"
+            app:layout_constraintStart_toStartOf="@id/alertTitleTextView"
+            app:layout_constraintEnd_toEndOf="@id/alertTitleTextView"
+            tools:text="Buddy went missing near Central Park on Tuesday afternoon. He is very friendly and has a blue collar. If you have any information, please contact us." />
+
+        <!-- Timestamp of when the alert was posted -->
+        <TextView
+            android:id="@+id/alertTimestampTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="16dp"
+            android:textAppearance="?attr/textAppearanceCaption"
+            app:layout_constraintTop_toBottomOf="@id/alertDescriptionTextView"
+            app:layout_constraintEnd_toEndOf="@id/alertTitleTextView"
+            app:layout_constraintBottom_toBottomOf="parent"
+            tools:text="Posted 2 hours ago" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</com.google.android.material.card.MaterialCardView>
+<!-- MaterialCardView: This is the root element. It provides a standard Material
+Design card appearance with a shadow and rounded corners, making each item in the
+list look distinct and clean.•ImageView (alertImageView): This will display an
+image associated with the alert. It's constrained to the top of the card.
+In the adapter, you can hide this view if an alert has no
+image.•TextView (alertTitleTextView): A bold, larger text view for the
+ alert's title.•TextView (alertDescriptionTextView): For the main content
+ of the alert. maxLines="4" and ellipsize="end" ensure that very
+ long descriptions are truncated neatly.•TextView (alertTimestampTextView):
+  A smaller text view for metadata, like when the alert was posted.
+  It's aligned to the bottom right for a clean look.•tools:text and tools:srcCompat:
+  These attributes are used to show sample data directly in the Android Studio layout
+   preview, which is incredibly helpful for designing the UI without
+   running the app. They have no effect on the actual running application.  -->

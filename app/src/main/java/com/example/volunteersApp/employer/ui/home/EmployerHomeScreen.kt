@@ -1,0 +1,218 @@
+package com.example.volunteersApp.employer.ui.home
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+
+/**
+ * Modernized Employer Home Screen using Jetpack Compose.
+ * Provides a clean dashboard interface for organization management.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EmployerHomeScreen(
+    viewModel: EmployerHomeViewModel,
+    onPostJob: () -> Unit,
+    onViewJobs: () -> Unit,
+    onViewApplications: () -> Unit,
+    onManageProfile: () -> Unit,
+    onGoLive: () -> Unit
+) {
+    val uiState by viewModel.uiState.collectAsState()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Employer Hub", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Welcome Section
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text(
+                            text = uiState.welcomeMessage,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Manage your organization and opportunities efficiently.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
+
+            // Metrics Section
+            item {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    MetricCard(title = "Jobs Posted", value = uiState.jobCount.toString(), modifier = Modifier.weight(1f))
+                    MetricCard(title = "Applications", value = uiState.applicationCount.toString(), modifier = Modifier.weight(1f))
+                }
+            }
+
+            // Section Label
+            item {
+                Text(
+                    text = "Quick Management",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+
+            // Dashboard Actions
+            item {
+                DashboardActionItem(
+                    title = "Post New Opportunity",
+                    subtitle = "Create a job or event for volunteers",
+                    icon = Icons.Default.AddCircle,
+                    accentColor = MaterialTheme.colorScheme.primary,
+                    onClick = onPostJob
+                )
+            }
+
+            item {
+                DashboardActionItem(
+                    title = "Manage Posted Jobs",
+                    subtitle = "Edit or close your active listings",
+                    icon = Icons.Default.Assignment,
+                    accentColor = MaterialTheme.colorScheme.secondary,
+                    onClick = onViewJobs
+                )
+            }
+
+            item {
+                DashboardActionItem(
+                    title = "Review Applications",
+                    subtitle = "Check and approve volunteer requests",
+                    icon = Icons.Default.People,
+                    accentColor = Color(0xFF4CAF50),
+                    onClick = onViewApplications
+                )
+            }
+
+            item {
+                DashboardActionItem(
+                    title = "Go Live Now",
+                    subtitle = "Engage with your community in real-time",
+                    icon = Icons.Default.LiveTv,
+                    accentColor = Color(0xFFFF5252),
+                    onClick = onGoLive
+                )
+            }
+
+            item {
+                DashboardActionItem(
+                    title = "Organization Profile",
+                    subtitle = "Update details and contact info",
+                    icon = Icons.Default.Business,
+                    accentColor = Color(0xFF2196F3),
+                    onClick = onManageProfile
+                )
+            }
+
+            item { Spacer(modifier = Modifier.height(32.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun MetricCard(title: String, value: String, modifier: Modifier = Modifier) {
+    Card(modifier = modifier) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(text = title, style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+            Text(text = value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun DashboardActionItem(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accentColor: Color,
+    onClick: () -> Unit
+) {
+    ElevatedCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                color = accentColor.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            }
+
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = Color.LightGray
+            )
+        }
+    }
+}

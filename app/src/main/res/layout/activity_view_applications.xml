@@ -4,7 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".ViewApplicationsActivity">
+    tools:context=".ui.volunteers.ViewApplicationsActivity">
     <!-- Assuming this is the context Activity -->
 
     <!-- Optional: Title TextView -->

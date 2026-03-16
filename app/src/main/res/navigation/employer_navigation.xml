@@ -1,103 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-    <navigation xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:app="http://schemas.android.com/apk/res-auto"
-        xmlns:tools="http://schemas.android.com/tools"
-        android:id="@+id/employer_navigation"
-        app:startDestination="@id/nav_employer_home">
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/employer_navigation"
+    app:startDestination="@id/startStreamActivity_employer">
 
-        <!-- Employer Home Screen -->
-        <fragment
-            android:id="@+id/nav_employer_home"
-            android:name="com.example.volunteersApp.employer.ui.home.EmployerHomeFragment"
-            android:label="@string/title_employer_home"
-            tools:layout="@layout/fragment_employer_home">
-            <action
-                android:id="@+id/action_nav_employer_home_to_nav_employer_post_job"
-                app:destination="@id/nav_employer_post_job" />
-            <action
-                android:id="@+id/action_nav_employer_home_to_nav_employer_posted_jobs"
-                app:destination="@id/nav_employer_posted_jobs" />
-            <action
-                android:id="@+id/action_nav_employer_home_to_nav_employer_applications"
-                app:destination="@id/nav_employer_applications" />
-            <action
-                android:id="@+id/action_nav_employer_home_to_nav_employer_profile_management"
-                app:destination="@id/nav_employer_profile_management" />
-        </fragment>
+    <!--
+    The <fragment> destinations that were previously defined in this file have been
+    removed. Their functionality has been migrated to Jetpack Compose screens,
+    and the navigation is now handled within a Compose NavHost.
 
-        <!-- Post New Job / Edit Job Fragment -->
-        <fragment
-            android:id="@+id/nav_employer_post_job"
-            android:name="com.example.volunteersApp.employer.ui.postjob.EmployerPostJobFragment"
-            android:label="{title_label_post_edit_job}"
-            tools:layout="@layout/fragment_employer_post_job">
-            <argument
-                android:name="event_id_to_edit"
-                app:argType="string"
-                app:nullable="true"
-                android:defaultValue="@null" />
-            <!-- title_label_post_edit_job will be set dynamically in the fragment
-                 based on whether event_id_to_edit is present -->
-        </fragment>
+    This file is kept to define <activity> destinations that can be launched from
+    the employer workflow.
+    -->
 
-        <!-- My Posted Jobs/Events List Fragment -->
-        <fragment
-            android:id="@+id/nav_employer_posted_jobs"
-            android:name="com.example.volunteersApp.employer.ui.postedjobs.EmployerPostedJobsFragment"
-            android:label="@string/title_employer_posted_jobs"
-            tools:layout="@layout/fragment_employer_posted_jobs">
-            <action
-                android:id="@+id/action_nav_employer_posted_jobs_to_nav_employer_post_job_for_edit"
-                app:destination="@id/nav_employer_post_job" />
-            <action
-                android:id="@+id/action_nav_employer_posted_jobs_to_nav_employer_applications"
-                app:destination="@id/nav_employer_applications" />
-        </fragment>
+    <!-- =============================================================== -->
+    <!-- LIVE STREAMING ACTIVITY DEFINITIONS                           -->
+    <!-- =============================================================== -->
+    <activity
+        android:id="@+id/startStreamActivity_employer"
+        android:name="com.example.volunteersApp.streams.StartStreamActivity"
+        android:label="@string/title_start_stream" />
 
-        <!-- Applications List for a Specific Job/Event Fragment -->
-        <fragment
-            android:id="@+id/nav_employer_applications"
-            android:name="com.example.volunteersApp.employer.ui.applications.EmployerApplicationsFragment"
-            android:label="@string/title_employer_applications"
-            tools:layout="@layout/fragment_employer_applications">
-            <argument
-                android:name="event_id"
-                app:argType="string"
-                app:nullable="true"
-                android:defaultValue="@null" />
-            <argument
-                android:name="event_title"
-                app:argType="string"
-                app:nullable="true"
-                android:defaultValue="@null" />
-            <action
-                android:id="@+id/action_employerApplicationsFragment_to_employerApplicationDetailFragment"
-                app:destination="@id/nav_employer_application_detail" />
-        </fragment>
+    <activity
+        android:id="@+id/liveStreamActivity_employer"
+        android:name="com.example.volunteersApp.streams.LiveStreamActivity"
+        android:label="@string/title_live_stream">
+        <argument
+            android:name="CHANNEL_NAME"
+            app:argType="string" />
+        <argument
+            android:name="IS_HOST"
+            app:argType="boolean"
+            android:defaultValue="false" />
+    </activity>
+    <!-- =============================================================== -->
 
-        <!-- EventApplication Detail Fragment -->
-        <fragment
-            android:id="@+id/nav_employer_application_detail"
-            android:name="com.example.volunteersApp.employer.ui.applications.EmployerApplicationDetailFragment"
-            android:label="@string/title_application_detail"
-            tools:layout="@layout/fragment_employer_application_detail">
-            <argument
-                android:name="application_doc_id"
-                app:argType="string" />
-            <argument
-                android:name="event_id"
-                app:argType="string" />
-            <argument
-                android:name="volunteer_id"
-                app:argType="string" />
-        </fragment>
-
-        <!-- Employer Profile Management Fragment -->
-        <fragment
-            android:id="@+id/nav_employer_profile_management"
-            android:name="com.example.volunteersApp.employer.ui.profile.EmployerProfileFragment"
-            android:label="@string/title_employer_profile"
-            tools:layout="@layout/fragment_employer_profile" />
-
-    </navigation>
-
+</navigation>

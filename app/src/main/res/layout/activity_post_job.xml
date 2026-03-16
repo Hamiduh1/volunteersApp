@@ -11,7 +11,7 @@
         android:id="@+id/outer_container_post_job"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-    tools:context=".employer.PostJobActivity">
+    tools:context=".jobs.PostJobActivity">
 
     <!-- This inner LinearLayout now holds all your form elements and will be centered -->
     <LinearLayout

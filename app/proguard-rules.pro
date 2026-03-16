@@ -1,3 +1,19 @@
+# --- Ktor Client (Required for Firebase Vertex AI) ---
+# The Vertex AI SDK uses Ktor for networking. These rules are essential to prevent crashes.
+-keep class io.ktor.** { *; }
+-dontwarn io.ktor.**
+
+# --- Firebase Vertex AI (Gemini) & Dependencies ---
+# These rules are ESSENTIAL to prevent crashes when using the Vertex AI SDK.
+# They prevent R8 from removing classes that the SDK uses via reflection.
+-keep,allowobfuscation,allowshrinking class com.google.firebase.vertexai.** { *; }
+-keep class com.google.android.datatransport.** { *; }
+
+# Keep rules for kotlinx.serialization, a core dependency for the AI SDK.
+-keep class kotlinx.serialization.** { *; }
+-keep class *$$serializer { *; }
+
+
 # Add project specific ProGuard rules here.
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.example.volunteersApp">
+
 
     <!-- ===================================================================================== -->
     <!-- PERMISSIONS: Grouped for clarity                                                      -->
@@ -20,10 +22,14 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"
         tools:ignore="ScopedStorage" />
+    <!-- Permissions for Agora SDK -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
 
 
     <application
-        android:name=".VolunteersAppApplication"
+        android:name=".VolunteersApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -47,27 +53,41 @@
         <!-- CORE & MAIN ACTIVITIES                                                                -->
         <!-- ===================================================================================== -->
         <activity
-            android:name=".LoginActivity"
+            android:name=".general.LoginActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- =============================================================== -->
+            <!--           ANDROID APP LINKS INTENT FILTER (NEW)                 -->
+            <!-- =============================================================== -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- Your domain -->
+                <data android:scheme="https" />
+                <data android:host="lvcaapp.com" />
+                <!-- The path pattern for your live streams -->
+                <data android:pathPattern="/stream/.*" />
+
+
+            </intent-filter>
+            <!-- =============================================================== -->
+
         </activity>
 
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.main.MainActivity"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.VolunteersApp" />
 
         <activity
-            android:name=".EmployerMainActivity"
-            android:label="Employer Dashboard"
-            android:exported="false" />
-
-        <activity
-            android:name="com.example.volunteersApp.organizer.OrganizerMainActivity"
+            android:name=".organizer.OrganizerMainActivity"
             android:label="Organizer Dashboard"
             android:exported="false" />
 
@@ -76,69 +96,67 @@
         <!-- AUTHENTICATION ACTIVITIES                                                             -->
         <!-- ===================================================================================== -->
         <activity
-            android:name=".SignUpActivity"
+            android:name=".general.SignUpActivity"
             android:exported="false" />
         <activity
-            android:name=".auth.ForgotPasswordActivity"
+            android:name=".general.ForgotPasswordActivity"
             android:exported="false" />
 
 
         <!-- ===================================================================================== -->
         <!-- SETTINGS-RELATED ACTIVITIES (These are launched from the SettingsFragment)            -->
         <!-- ===================================================================================== -->
-        <activity android:name=".accountSettings" android:label="Account" android:parentActivityName=".MainActivity" android:exported="false"/>
-        <activity android:name=".ProfileSupportActivity" android:label="Support" android:parentActivityName=".MainActivity" android:exported="false"/>
-        <activity android:name=".PrivacySecurityActivity" android:label="Privacy &amp; Security" android:parentActivityName=".MainActivity" android:exported="false"/>
-        <activity android:name=".HowToUseActivity" android:label="How to Use" android:parentActivityName=".MainActivity" android:exported="false"/>
-        <activity android:name=".TermsConditionsActivity" android:label="Terms and Conditions" android:parentActivityName=".MainActivity" android:exported="false"/>
+        <activity android:name=".ui.profile.AccountSettingsActivity" android:label="Account" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
+        <activity android:name=".ui.profile.ProfileSupportActivity" android:label="Support" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
+        <activity android:name=".general.PrivacySecurityActivity" android:label="Privacy &amp; Security" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
+        <activity android:name=".ui.profile.HowToUseActivity" android:label="How to Use" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
+        <activity android:name=".ui.profile.TermsConditionsActivity" android:label="Terms and Conditions" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
 
 
         <!-- ===================================================================================== -->
         <!-- JOB & EVENT ACTIVITIES                                                                -->
         <!-- ===================================================================================== -->
-        <activity
-            android:name=".organizer.CreateEventActivity"
-            android:label="Create Event"
-            android:exported="false"
-            android:parentActivityName=".EmployerMainActivity" />
 
         <activity
-            android:name=".employer.PostJobActivity"
-            android:label="Post New Job"
-            android:exported="false"
-            android:parentActivityName=".EmployerMainActivity"
-            android:theme="@style/Theme.VolunteersApp.WithActionBar"/>
-
-        <activity
-            android:name=".JobDetailsActivity"
+            android:name=".jobs.JobPostDetailActivity"
             android:exported="false"
             android:label="Job Details"/>
+
+
+
+        <activity
+            android:name=".employer.ui.profile.ManageProfileActivity"
+            android:exported="false"
+            android:label="@string/manage_organization_profile_title" />
 
 
         <!-- ===================================================================================== -->
         <!-- OTHER FEATURE ACTIVITIES                                                              -->
         <!-- ===================================================================================== -->
         <activity
-            android:name=".MapsActivity"
+            android:name=".general.MapsActivity"
             android:label="Map"
             android:exported="false" />
 
         <activity
-            android:name=".CalenderActivity"
+            android:name=".general.CalenderActivity"
             android:label="Select Date"
             android:exported="false" />
 
-        <activity
-            android:name=".Wallet"
-            android:label="Wallet"
-            android:parentActivityName=".MainActivity"
-            android:exported="false"/>
+
+        <activity android:name=".wallet.TransactionActivity"
+            android:exported="false" />
 
         <activity
-            android:name=".Gallery"
-            android:label="Achievements"
-            android:parentActivityName=".MainActivity"
-            android:exported="false"/>
+            android:name=".wallet.PaymentsActivity"
+            android:exported="false"
+            android:screenOrientation="fullSensor" />
+
+        <activity
+            android:name=".wallet.TransactActivity"
+            android:exported="false"
+            android:label="Transfer" />
+
 
         <!-- ===================================================================================== -->
         <!-- PROVIDERS AND SERVICES                                                                -->
@@ -152,6 +170,24 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+
+        <activity
+            android:name=".streams.StartStreamActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".streams.LiveStreamActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|keyboardHidden|screenSize"/>
+
+        <!-- Chat Activity Registration -->
+        <activity
+            android:name=".chat.ChatActivity"
+            android:label="Chat"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
 
     </application>
 

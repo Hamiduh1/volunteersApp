@@ -8,8 +8,8 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="com.LVCA.volunteersApp" />
-                  <option name="mobileSdkAppId" value="1:6677623239:android:6cd7798d751d891bd829e2" />
+                  <option name="appId" value="com.example.volunteersApp" />
+                  <option name="mobileSdkAppId" value="1:6677623239:android:3dbf0710603b553bd829e2" />
                   <option name="projectId" value="volunteersapp-968b2" />
                   <option name="projectNumber" value="6677623239" />
                 </ConnectionSetting>

@@ -231,6 +231,17 @@
     <item name="eventNameTextView" type="id" />
     <item name="eventDateTextView" type="id" />
     <item name="action_settingsFragment_to_notificationSettingsFragment" type="id" />
+    <item name="action_communityHomeFragment_to_chatInboxFragment" type="id" />
+    <item name="action_communityHomeFragment_to_userDirectoryFragment" type="id" />
+    <item name="nav_host_fragment_activity_main" type="id" />
+    <item name="action_communityHomeFragment_to_marketplaceFragment" type="id" />
+    <item name="action_communityHomeFragment_to_advertisementFragment" type="id" />
+    <item name="textViewNoEvents" type="id" />
+    <item name="action_nav_profile_to_walletFragment" type="id" />
+    <item name="nav_host_event_form" type="id" />
+    <item name="action_organizerDashboard_to_createEvent" type="id" />
+    <item name="action_organizerDashboardFragment_to_organizerWalletScreen" type="id" />
+    <item name="action_host_final_to_dashboard" type="id" />
 
 
 </resources>

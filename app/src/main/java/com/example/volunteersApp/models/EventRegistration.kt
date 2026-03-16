@@ -1,69 +1,83 @@
 package com.example.volunteersApp.models
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
+import com.google.firebase.firestore.Exclude
+import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 /**
- * Represents a volunteer's registration or application for a specific event.
- * This would typically be stored in a Firestore collection like "event_registrations"
- * or as a subcollection under "events" (e.g., "events/{eventId}/registrations/{registrationId}")
- * and/or under "users" (e.g., "users/{volunteerId}/eventRegistrations/{registrationId_or_eventId}").
+ * Modern Data Class representing a volunteer's registration for an event.
+ * Optimized for Jetpack Compose with immutable fields and UI-aware properties.
  */
+@IgnoreExtraProperties
 data class EventRegistration(
     @DocumentId
-    var registrationId: String? = null, // Firestore document ID for this registration
+    val registrationId: String = "",
 
-    var eventId: String? = null,
-    var eventTitle: String? = null, // Denormalized for quick display
-    var eventLocation: String? = null, // Denormalized event location
-    var eventDateTime: Timestamp? = null, // Denormalized actual start date and time of the event
+    // Event Context
+    val eventId: String = "",
+    val eventTitle: String = "",
+    val eventLocation: String = "",
+    val eventTimestamp: Timestamp? = null, // Renamed for consistency with EventModel
 
-    var volunteerUid: String? = null,
-    var volunteerName: String? = null, // Denormalized for display
-    var volunteerEmail: String? = null, // Denormalized for communication
+    // Volunteer Identity
+    val volunteerUid: String = "",
+    val volunteerName: String = "",
+    val volunteerEmail: String = "",
 
-    var organizerUid: String? = null, // UID of the event organizer
-    var organizerName: String? = null, // Denormalized organizer name
+    // Organizer Context
+    val organizerUid: String = "",
+    val organizerName: String = "",
 
-    var status: String? = REGISTRATION_STATUS_PENDING, // Default status
+    // Application State
+    val status: String = "PENDING",
 
-    @ServerTimestamp // Automatically set by Firestore on creation
-    var registrationTimestamp: Timestamp? = null,
-    var lastUpdatedTimestamp: Timestamp? = null, // For tracking updates to the registration
+    //payment
+    val transactionAmount: Double = 0.0,
 
-    var notesFromVolunteer: String? = null, // Optional notes from volunteer during registration
-    var roleAppliedFor: String? = null // Optional if events have specific roles
+    // Metadata
+    @ServerTimestamp
+    val registrationTimestamp: Timestamp? = null,
+    val lastUpdatedTimestamp: Timestamp? = null,
+
+    // Submission Details
+    val notesFromVolunteer: String? = null,
+    val roleAppliedFor: String? = null
 ) {
-    // No-argument constructor for Firestore deserialization
-    constructor() : this(
-        registrationId = null,
-        eventId = null,
-        eventTitle = null,
-        eventLocation = null,
-        eventDateTime = null,
-        volunteerUid = null,
-        volunteerName = null,
-        volunteerEmail = null,
-        organizerUid = null,
-        organizerName = null,
-        status = REGISTRATION_STATUS_PENDING,
-        registrationTimestamp = null,
-        lastUpdatedTimestamp = null,
-        notesFromVolunteer = null,
-        roleAppliedFor = null
-    )
+    // --- Compose UI Helper Properties ---
 
-    companion object {
-        // Define common status strings as constants for consistency
-        const val REGISTRATION_STATUS_PENDING = "pending"
-        const val REGISTRATION_STATUS_CONFIRMED = "confirmed"
-        const val REGISTRATION_STATUS_WAITLISTED = "waitlisted"
-        const val REGISTRATION_STATUS_REJECTED = "rejected"
-        const val REGISTRATION_STATUS_CANCELLED_VOLUNTEER = "cancelled_by_volunteer"
-        const val REGISTRATION_STATUS_CANCELLED_ORGANIZER = "cancelled_by_organizer"
-        const val REGISTRATION_STATUS_ATTENDED = "attended"
-        const val REGISTRATION_STATUS_NO_SHOW = "no_show"
+    @get:Exclude
+    val statusEnum: ApplicationStatus
+        get() = ApplicationStatus.fromString(status)
+
+    /**
+     * Directly provides the Material 3 color for this registration's status.
+     * Usage in Compose: color = registration.statusColor
+     */
+    @get:Exclude
+    val statusColor: Color
+        @Composable
+        get() = statusEnum.color
+
+    /**
+     * Formats the event date for the registration card.
+     */
+    @get:Exclude
+    val formattedEventDate: String
+        get() = eventTimestamp?.toDate()?.let {
+            SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(it)
+        } ?: "Date TBD"
+
+    /**
+     * Returns true if the registration is in a state that allows withdrawal.
+     */
+    fun canWithdraw(): Boolean {
+        return statusEnum == ApplicationStatus.PENDING ||
+                statusEnum == ApplicationStatus.WAITLISTED
     }
 }
-

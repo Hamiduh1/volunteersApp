@@ -1459,7 +1459,7 @@
          <string name="event_data_incomplete">Event data is incomplete. Cannot apply.</string>
 
         <!-- From EventAdapter, ensure these are present if your adapter uses them -->
-          <string name="slots_info_volunteer">Slots Left: %1$d / %2$d</string> <!-- Example for volunteer view in adapter -->
+          <string name="slots_info_volunteer">Slots Left: %1$d / %2$d</string> <!-- Example for profile_image view in adapter -->
         <string name="event_not_available">Not Available</string>
 
     <string name="error_user_not_logged_in_applied">User not logged in. Cannot display applied events.</string>
@@ -2142,6 +2142,11 @@
     <string name="terms_and_conditions">Terms and Conditions</string>
     <string name="my_jobs">My Jobs</string>
     <string name="completed">Completed</string>
+    <!--<string name="agora_app_id">agora_app_id</string>
+    <string name="agora_channel_name">agora_channel_name</string>
+    <string name="agora_token">agora_token</string>
+-->
+"
 
 
 
@@ -2149,6 +2154,84 @@
         <string name="withdraw_application">Withdraw Application</string>
         <string name="withdraw_confirmation_message">Are you sure you want to withdraw your application for \'%1$s\'?</string>
            <string name="withdrawing_application_toast">Withdrawing application…</string>
+    <string name="leave_stream">Leave Stream</string>
+    <string name="cd_manage_streams_icon">Manage Streams</string>
+    <string name="profile_option_manage_streams">Manage Streams</string>
+    <string name="cd_navigate_to_manage_streams">navigate to manage streams</string>
+    <string name="profile_option_start_live">Start Live</string>
+    <string name="cd_live_stream_icon">Live Stream</string>
+    <string name="title_live">Live</string>
+    <string name="switch_camera">Switch Camera</string>
+    <string name="leave_channel">Leave Channel</string>
+    <string name="send_a_message">Send a message...</string>
+    <string name="this_is_a_test_message">This is a test message</string>
+    <string name="user123">User123:</string>
+    <string name="go_live">Go Live</string>
+    <string name="title_start_stream">Start Stream</string>
+    <string name="title_live_stream">Live Stream</string>
+    <string name="leave">Leave</string>
+    <string name="toggle_audio">Audio</string>
+    <string name="toggle_video">Video</string>
+    <string name="send_message">Send Message</string>
+    <string name="share_stream_link">Share Stream Link</string>
+    <string name="invite">invite</string>
+    <string name="title_community">Community</string>
+    <string name="decline">Decline</string>
+    <string name="no_pending_invitations">No pending invitations.</string>
+    <string name="this_is_an_outgoing_message">This is an outgoing message.</string>
+    <string name="this_is_an_incoming_message">This is an incoming message.</string>
+    <string name="chats_tab_title">Chats\n</string>
+    <string name="invitations_tab_title">Invitations</string>
+    <string name="no_active_chats">No Active Chats</string>
+    <string name="browse_users_to_start_a_new_conversation">Browse users to start a new conversation.</string>
+    <string name="new_chat">New Chat</string>
+    <string name="view_your_ongoing_conversations_and_invitations">View your ongoing conversations and invitations.</string>
+    <string name="my_chats">My Chats</string>
+    <string name="user_directory_screen_placeholder">User Directory Screen (Placeholder)</string>
+    <string name="start_chat">Start Chat</string>
+    <string name="john_doe_wants_to_chat">John Doe wants to chat</string>
+    <string name="voice_call">Voice Call</string>
+    <string name="video_call">Video Call</string>
+    <string name="this_is_a_received_message">This is a received message</string>
+    <string name="this_is_a_sent_message">This is a sent message</string>
+    <string name="no_community_alerts_yet_be_the_first_to_post">No community alerts yet. Be the first to post!</string>
+    <string name="post_a_new_alert">Post a new alert</string>
+    <string name="image_for_the_community_alert" />
+    <string name="date_eva">Date Eva</string>
+    <string name="find_and_connect_with_your_perfect_match">Find and connect with your perfect match.</string>
+    <string name="share_and_discover_jokes_with_the_community_ai">Share and discover jokes with the community AI.</string>
+    <string name="jokes_corner">Jokes Corner</string>
+        <!-- Add these strings to your existing strings.xml -->
+        <string name="community_hub_title">Community Hub</string>
+
+        <string name="feature_my_chats_title">My Chats</string>
+        <string name="feature_my_chats_description">View your conversations</string>
+
+        <string name="feature_browse_users_title">Browse Users</string>
+        <string name="feature_browse_users_description">Start a new chat</string>
+
+        <string name="feature_jokes_title">Fun Time</string>
+        <string name="feature_jokes_description">Share a laugh</string>
+
+        <string name="feature_date_eva_title">Date Eva</string>
+        <string name="feature_date_eva_description">Find a connection</string>
+
+        <string name="feature_marketplace_title">Marketplace</string>
+        <string name="feature_marketplace_description">Buy and sell items</string>
+
+        <string name="feature_advertisements_title">Sponsored</string>
+        <string name="feature_advertisements_description">View promotions</string>
+    <string name="tab_applied">Applied</string>
+    <string name="tab_upcoming">Upcoming</string>
+    <string name="tab_attended">Attended</string>
+    <string name="no_events_to_display">No event to display</string>
+
+    <!-- Get this from Stripe Dashboard -> Developers -> API Keys -->
+    <!--<string name="stripe_publishable_key">pk_test_51SlW3WFxChnehknK8hc83la3ithe42AkHCvan9RTJWc3JShzj1JxZPDb0HqV7MsXtTUyR0N8t3rCOxurHDOj3oKE00VI5zXdWf</string>
+   -->
+     <!-- Get this from https://www.exchangerate-api.com/
+    <string name="exchange_rate_api_key">7b54cea2790a54fd488db54a</string>
+-->
 
 
 </resources>

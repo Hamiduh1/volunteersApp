@@ -1,14 +1,9 @@
 pluginManagement {
     repositories {
-        google {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
-                includeGroupByRegex("androidx.*")
-            }
-        }
-        mavenCentral()
         gradlePluginPortal()
+        google()
+        mavenCentral()
+        maven("https://download.agora.io/maven")
     }
 
     resolutionStrategy {
@@ -18,11 +13,10 @@ pluginManagement {
             }
         }
     }
-
 }
+
 plugins {
-    // ... other plugins like com.android.application apply false
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0" apply false // Check for latest version
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0" apply false
 }
 
 dependencyResolutionManagement {
@@ -30,9 +24,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+        maven { url = uri("https://download.agora.io/maven") }
     }
 }
 
 rootProject.name = "VolunteersApp"
 include(":app")
- 

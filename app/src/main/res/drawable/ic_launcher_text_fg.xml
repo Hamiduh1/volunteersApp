@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Modern circular base for the text -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54m-38,0a38,38 0,1 1,76 0a38,38 0,1 1,-76 0" />
+
+    <!-- Stylized "LVCA" Text - Corrected and Perfectly Centered -->
+    <group
+        android:translateX="27"
+        android:translateY="44">
+        
+        <!-- L -->
+        <path
+            android:fillColor="#FF6200EE"
+            android:pathData="M0,0 h3 v18 h7 v3 h-10 Z" />
+        
+        <!-- V -->
+        <path
+            android:fillColor="#FF6200EE"
+            android:pathData="M14,0 h3.5 l3,15 l3,-15 h3.5 l-5,21 h-3.5 Z" />
+        
+        <!-- C -->
+        <path
+            android:fillColor="#FF6200EE"
+            android:pathData="M38,10.5 a6,6 0 1 0 0,10.5 a6,6 0 0 0 4.5,-2.5 l2,2 a9,9 0 1 1 -6.5,-13 a9,9 0 0 1 6.5,3 l-2,2 a6,6 0 0 0 -4.5,-2.5 Z" />
+        
+        <!-- A -->
+        <path
+            android:fillColor="#FF6200EE"
+            android:pathData="M49,21 l4,-21 h3 l4,21 h-3.5 l-1,-5 h-5 l-1,5 Z M52.5,13 h4 l-2,-7 Z" />
+            
+    </group>
+
+    <!-- Subtitle "app" in smaller, centered below -->
+    <group
+        android:translateX="43"
+        android:translateY="72">
+        <path
+            android:fillColor="#FF3700B3"
+            android:pathData="M0,6 h2 v-4 h2 v4 h2 v2 h-6 Z M8,2 h4 v2 h-4 v2 h4 v2 h-4 v2 h4 v2 h-6 Z M16,2 h4 v2 h-4 v2 h4 v2 h-4 v2 h-6 Z" />
+    </group>
+        
+</vector>

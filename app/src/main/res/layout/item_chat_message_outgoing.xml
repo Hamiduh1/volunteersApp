@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="end"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp"
+    android:paddingStart="64dp"
+    android:paddingEnd="8dp"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/message_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/chat_bubble_outgoing"
+        android:padding="12dp"
+        android:textColor="@android:color/white"
+        android:text="@string/this_is_an_outgoing_message" />
+</LinearLayout>

@@ -1,3 +1,6 @@
+/**
+  integrated to jetpack compose
+
 package com.example.volunteersApp.adapters;
 
 import android.content.Context;
@@ -14,7 +17,7 @@ import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.volunteersApp.R;
-import com.example.volunteersApp.SupportItem; // Ensure this has equals() and a unique ID getter
+import com.example.volunteersApp.ui.profile.SupportItem; // Ensure this has equals() and a unique ID getter
 
 import java.util.Objects;
 
@@ -49,7 +52,7 @@ public class SupportItemsAdapter extends ListAdapter<SupportItem, SupportItemsAd
                 public boolean areItemsTheSame(@NonNull SupportItem oldItem, @NonNull SupportItem newItem) {
                     // Assuming SupportItem.getText() can serve as a unique ID.
                     // If you have a dedicated ID (e.g., oldItem.getId()), use that instead.
-                    return Objects.equals(oldItem.getText(), newItem.getText());
+                    return Objects.equals(oldItem.text, newItem.text);
                 }
 
                 @Override
@@ -94,10 +97,10 @@ public class SupportItemsAdapter extends ListAdapter<SupportItem, SupportItemsAd
         }
 
         public void bind(@NonNull final SupportItem item) {
-            textViewSupportText.setText(item.getText());
+            textViewSupportText.setText(item.text);
 
-            if (item.getImageResourceId() != 0) {
-                imageViewSupportIcon.setImageResource(item.getImageResourceId());
+            if (item.imageResourceId != 0) {
+                imageViewSupportIcon.setImageResource(item.imageResourceId);
             } else {
                 imageViewSupportIcon.setImageResource(R.drawable.ic_default_placeholder);
             }
@@ -112,7 +115,7 @@ public class SupportItemsAdapter extends ListAdapter<SupportItem, SupportItemsAd
                         currentListener.onItemClick(item);
                     } else {
                         // Default click action if no specific listener is set
-                        Toast.makeText(context, "Clicked: " + item.getText(), Toast.LENGTH_SHORT).show();
+                        Toast.makeText(context, "Clicked: " + item.text, Toast.LENGTH_SHORT).show();
                         // Example navigation (ensure FeedbackActivity exists and is set up)
                         // if ("Feedback".equals(item.getText())) {
                         //     Intent intent = new Intent(context, FeedbackActivity.class);
@@ -124,3 +127,4 @@ public class SupportItemsAdapter extends ListAdapter<SupportItem, SupportItemsAd
         }
     }
 }
+ **/

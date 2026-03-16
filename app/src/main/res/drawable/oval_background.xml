@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+
+    <!--
+        This sets the background color of the circle.
+        It uses the "colorPrimary" attribute from your app's theme,
+        ensuring it matches your app's branding.
+    -->
+    <solid
+        android:color="?attr/colorPrimary" />
+
+</shape>
