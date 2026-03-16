@@ -2,9 +2,23 @@ import SwiftUI
 
 struct EmployerJobComposerView: View {
     let user: AppSessionUser
-    let onCreated: () -> Void
+    let existingJob: JobRecord?
+    let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel = EmployerJobComposerViewModel()
+    @StateObject private var viewModel: EmployerJobComposerViewModel
+
+    init(
+        user: AppSessionUser,
+        existingJob: JobRecord? = nil,
+        onSaved: @escaping () -> Void
+    ) {
+        self.user = user
+        self.existingJob = existingJob
+        self.onSaved = onSaved
+        _viewModel = StateObject(
+            wrappedValue: EmployerJobComposerViewModel(existingJob: existingJob)
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -33,7 +47,7 @@ struct EmployerJobComposerView: View {
                         Task {
                             let created = await viewModel.create(uid: user.uid)
                             if created {
-                                onCreated()
+                                onSaved()
                                 dismiss()
                             }
                         }
@@ -41,14 +55,14 @@ struct EmployerJobComposerView: View {
                         if viewModel.isSubmitting {
                             ProgressView()
                         } else {
-                            Text("Post Job")
+                            Text(viewModel.isEditMode ? "Save Changes" : "Post Job")
                         }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.isSubmitting)
                 }
             }
-            .navigationTitle("New Job")
+            .navigationTitle(viewModel.isEditMode ? "Edit Job" : "New Job")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

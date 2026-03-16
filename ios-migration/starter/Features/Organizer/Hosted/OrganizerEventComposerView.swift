@@ -2,9 +2,23 @@ import SwiftUI
 
 struct OrganizerEventComposerView: View {
     let user: AppSessionUser
-    let onCreated: () -> Void
+    let existingEvent: EventRecord?
+    let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel = OrganizerEventComposerViewModel()
+    @StateObject private var viewModel: OrganizerEventComposerViewModel
+
+    init(
+        user: AppSessionUser,
+        existingEvent: EventRecord? = nil,
+        onSaved: @escaping () -> Void
+    ) {
+        self.user = user
+        self.existingEvent = existingEvent
+        self.onSaved = onSaved
+        _viewModel = StateObject(
+            wrappedValue: OrganizerEventComposerViewModel(existingEvent: existingEvent)
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -42,7 +56,7 @@ struct OrganizerEventComposerView: View {
                         Task {
                             let created = await viewModel.create(uid: user.uid)
                             if created {
-                                onCreated()
+                                onSaved()
                                 dismiss()
                             }
                         }
@@ -50,14 +64,14 @@ struct OrganizerEventComposerView: View {
                         if viewModel.isSubmitting {
                             ProgressView()
                         } else {
-                            Text("Create Event")
+                            Text(viewModel.isEditMode ? "Save Changes" : "Create Event")
                         }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.isSubmitting)
                 }
             }
-            .navigationTitle("New Event")
+            .navigationTitle(viewModel.isEditMode ? "Edit Event" : "New Event")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

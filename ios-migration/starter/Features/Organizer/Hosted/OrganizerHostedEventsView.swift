@@ -4,6 +4,7 @@ struct OrganizerHostedEventsView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = OrganizerHostedEventsViewModel()
     @State private var showingComposer = false
+    @State private var editingEvent: EventRecord?
 
     var body: some View {
         NavigationStack {
@@ -23,6 +24,25 @@ struct OrganizerHostedEventsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 4)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if let eventId = event.id, !eventId.isEmpty {
+                                Button(role: .destructive) {
+                                    Task { await viewModel.deleteEvent(eventId: eventId, uid: user.uid) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            if event.id != nil {
+                                Button {
+                                    editingEvent = event
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                .tint(.blue)
+                            }
+                        }
                     }
                 }
             }
@@ -40,6 +60,11 @@ struct OrganizerHostedEventsView: View {
             .refreshable { await viewModel.refresh(uid: user.uid) }
             .sheet(isPresented: $showingComposer) {
                 OrganizerEventComposerView(user: user) {
+                    Task { await viewModel.refresh(uid: user.uid) }
+                }
+            }
+            .sheet(item: $editingEvent) { event in
+                OrganizerEventComposerView(user: user, existingEvent: event) {
                     Task { await viewModel.refresh(uid: user.uid) }
                 }
             }

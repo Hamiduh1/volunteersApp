@@ -20,4 +20,14 @@ final class EmployerPostedJobsViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
     }
+
+    func deleteJob(jobId: String, uid: String) async {
+        errorMessage = nil
+        do {
+            try await repository.deleteJobPosting(jobId: jobId)
+            await refresh(uid: uid)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 }

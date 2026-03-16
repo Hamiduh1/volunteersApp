@@ -4,6 +4,7 @@ struct EmployerPostedJobsView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = EmployerPostedJobsViewModel()
     @State private var showingComposer = false
+    @State private var editingJob: JobRecord?
 
     var body: some View {
         NavigationStack {
@@ -23,6 +24,25 @@ struct EmployerPostedJobsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 4)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if let jobId = job.id, !jobId.isEmpty {
+                                Button(role: .destructive) {
+                                    Task { await viewModel.deleteJob(jobId: jobId, uid: user.uid) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            if job.id != nil {
+                                Button {
+                                    editingJob = job
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                .tint(.blue)
+                            }
+                        }
                     }
                 }
             }
@@ -40,6 +60,11 @@ struct EmployerPostedJobsView: View {
             .refreshable { await viewModel.refresh(uid: user.uid) }
             .sheet(isPresented: $showingComposer) {
                 EmployerJobComposerView(user: user) {
+                    Task { await viewModel.refresh(uid: user.uid) }
+                }
+            }
+            .sheet(item: $editingJob) { job in
+                EmployerJobComposerView(user: user, existingJob: job) {
                     Task { await viewModel.refresh(uid: user.uid) }
                 }
             }

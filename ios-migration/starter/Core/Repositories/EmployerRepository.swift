@@ -31,6 +31,7 @@ final class EmployerRepository {
         var merged: [String: JobRecord] = [:]
         for snap in snapshots {
             for doc in snap.documents {
+                if (doc.data()["isDeleted"] as? Bool) == true { continue }
                 if let job = try? doc.data(as: JobRecord.self) {
                     merged[doc.documentID] = job
                 }
@@ -143,6 +144,49 @@ final class EmployerRepository {
         ], merge: true)
 
         return ref.documentID
+    }
+
+    func updateJobPosting(
+        jobId: String,
+        uid: String,
+        title: String,
+        description: String,
+        locationString: String,
+        category: String,
+        jobType: String,
+        salaryOrCompensation: String,
+        applicationDeadline: Date
+    ) async throws {
+        let employerName = try await fetchUserDisplayName(uid: uid)
+        let ref = db.collection(FirestoreCollection.jobs.rawValue).document(jobId)
+
+        try await ref.setData([
+            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
+            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+            "locationString": locationString.trimmingCharacters(in: .whitespacesAndNewlines),
+            "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
+            "jobType": jobType.trimmingCharacters(in: .whitespacesAndNewlines),
+            "salaryOrCompensation": salaryOrCompensation.trimmingCharacters(in: .whitespacesAndNewlines),
+            "applicationDeadline": Timestamp(date: applicationDeadline),
+            "employerUid": uid,
+            "employerId": uid,
+            "employerName": employerName,
+            "lastUpdatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+    }
+
+    func deleteJobPosting(jobId: String) async throws {
+        let ref = db.collection(FirestoreCollection.jobs.rawValue).document(jobId)
+        do {
+            try await ref.delete()
+        } catch {
+            // Fallback to soft-delete if full delete is blocked by rules/linked subcollections.
+            try await ref.setData([
+                "isDeleted": true,
+                "status": "CLOSED",
+                "lastUpdatedAt": FieldValue.serverTimestamp()
+            ], merge: true)
+        }
     }
 
     private func fetchUserDisplayName(uid: String) async throws -> String {

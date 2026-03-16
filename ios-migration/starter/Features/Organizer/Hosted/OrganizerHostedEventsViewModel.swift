@@ -20,4 +20,14 @@ final class OrganizerHostedEventsViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
     }
+
+    func deleteEvent(eventId: String, uid: String) async {
+        errorMessage = nil
+        do {
+            try await repository.deleteHostedEvent(eventId: eventId)
+            await refresh(uid: uid)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 }

@@ -32,6 +32,7 @@ final class OrganizerRepository {
         var merged: [String: EventRecord] = [:]
         for snap in snapshots {
             for doc in snap.documents {
+                if (doc.data()["isDeleted"] as? Bool) == true { continue }
                 if let event = try? doc.data(as: EventRecord.self) {
                     merged[doc.documentID] = event
                 }
@@ -154,6 +155,53 @@ final class OrganizerRepository {
         ], merge: true)
 
         return ref.documentID
+    }
+
+    func updateHostedEvent(
+        eventId: String,
+        uid: String,
+        title: String,
+        description: String,
+        category: String,
+        locationName: String,
+        locationAddress: String,
+        eventDate: Date,
+        volunteerLimit: Int,
+        payment: Double
+    ) async throws {
+        let organizerName = try await fetchUserDisplayName(uid: uid)
+        let ref = db.collection(FirestoreCollection.events.rawValue).document(eventId)
+
+        try await ref.setData([
+            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
+            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+            "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
+            "locationName": locationName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "locationAddress": locationAddress.trimmingCharacters(in: .whitespacesAndNewlines),
+            "eventDateTime": Timestamp(date: eventDate),
+            "eventTimestamp": Timestamp(date: eventDate),
+            "volunteerLimit": volunteerLimit,
+            "payment": payment,
+            "eventFee": payment,
+            "organizerId": uid,
+            "organizerUid": uid,
+            "organizerName": organizerName,
+            "lastUpdatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+    }
+
+    func deleteHostedEvent(eventId: String) async throws {
+        let ref = db.collection(FirestoreCollection.events.rawValue).document(eventId)
+        do {
+            try await ref.delete()
+        } catch {
+            // Fallback to soft-delete if full delete is blocked by rules/linked subcollections.
+            try await ref.setData([
+                "isDeleted": true,
+                "status": "CANCELLED",
+                "lastUpdatedAt": FieldValue.serverTimestamp()
+            ], merge: true)
+        }
     }
 
     private func fetchEventTitles(ids: [String]) async throws -> [String: String] {
