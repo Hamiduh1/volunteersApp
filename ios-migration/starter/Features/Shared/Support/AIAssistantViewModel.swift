@@ -13,6 +13,7 @@ final class AIAssistantViewModel: ObservableObject {
     @Published private(set) var faqItems: [FAQItemRecord] = []
     @Published private(set) var messages: [AIAssistantMessage] = []
     @Published var query = ""
+    @Published var noticeMessage: String?
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -21,10 +22,15 @@ final class AIAssistantViewModel: ObservableObject {
     func loadFaq() async {
         isLoading = true
         errorMessage = nil
+        noticeMessage = nil
         defer { isLoading = false }
 
         do {
-            faqItems = try await repository.fetchFaq()
+            let fetched = try await repository.fetchFaq()
+            faqItems = fetched.isEmpty ? Self.defaultFaqItems() : fetched
+            if fetched.isEmpty {
+                noticeMessage = "Using in-app FAQ defaults until cloud FAQ content is available."
+            }
             if messages.isEmpty {
                 messages.append(
                     AIAssistantMessage(
@@ -35,7 +41,9 @@ final class AIAssistantViewModel: ObservableObject {
                 )
             }
         } catch {
-            errorMessage = error.localizedDescription
+            faqItems = Self.defaultFaqItems()
+            noticeMessage = "Cloud FAQ is unavailable. Using in-app FAQ defaults."
+            errorMessage = nil
         }
     }
 
@@ -78,5 +86,28 @@ final class AIAssistantViewModel: ObservableObject {
         }
 
         return "I do not have a direct in-app answer yet. Try Privacy, Terms, or Support Center from Tools."
+    }
+
+    private static func defaultFaqItems() -> [FAQItemRecord] {
+        [
+            FAQItemRecord(
+                id: nil,
+                question: "How do I apply to an event or job?",
+                answer: "Open Events or Jobs, select an item, and tap Apply once. You can track status updates in My Activity.",
+                tags: ["events", "jobs", "apply", "activity"]
+            ),
+            FAQItemRecord(
+                id: nil,
+                question: "How do I send money from wallet?",
+                answer: "Open Wallet, choose Send Money, select destination type, enter amount, get quote for currency conversion, then submit.",
+                tags: ["wallet", "transfer", "quote", "payments"]
+            ),
+            FAQItemRecord(
+                id: nil,
+                question: "Where can I see call and live features?",
+                answer: "Open Tools for Call History and Live Sessions. You can also use Support Center for help if something fails to load.",
+                tags: ["calls", "video", "live", "tools"]
+            )
+        ]
     }
 }

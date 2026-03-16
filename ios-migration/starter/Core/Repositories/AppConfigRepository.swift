@@ -44,9 +44,12 @@ final class AppConfigRepository {
 
         let data = snapshot.data() ?? [:]
         return AppConfigTextRecord(
-            title: data["title"] as? String,
-            content: (data["content"] as? String) ?? (data["text"] as? String),
-            updatedAt: data["updatedAt"] as? Timestamp
+            title: (data["title"] as? String) ?? (data["name"] as? String),
+            content: (data["content"] as? String)
+                ?? (data["text"] as? String)
+                ?? (data["body"] as? String)
+                ?? (data["markdown"] as? String),
+            updatedAt: (data["updatedAt"] as? Timestamp) ?? (data["lastUpdatedAt"] as? Timestamp)
         )
     }
 }

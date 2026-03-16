@@ -10,6 +10,12 @@ struct TermsAndConditionsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        if let notice = viewModel.noticeMessage, !notice.isEmpty {
+                            Text(notice)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
                         Text(viewModel.record?.title ?? "Terms and Conditions")
                             .font(.title3.bold())
 
