@@ -6,20 +6,55 @@ struct ConversationsListView: View {
 
     var body: some View {
         List {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if !viewModel.invitations.isEmpty {
                 Section("Invitations") {
                     ForEach(viewModel.invitations) { invite in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(invite.senderName ?? "Unknown Sender")
+                        let invitationId = invite.id ?? (invite.senderId ?? "")
+                        let isUpdating = viewModel.updatingInvitationIds.contains(invitationId)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(invite.senderName ?? invite.inviterName ?? "Unknown Sender")
                                 .font(.headline)
+
                             if let email = invite.senderEmail, !email.isEmpty {
                                 Text(email)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            Text(invite.status ?? "pending")
+
+                            let source = (invite.source ?? "chat").replacingOccurrences(of: "_", with: " ")
+                            let statusText = (invite.status ?? "pending").capitalized
+                            Text("\(source.capitalized) • \(statusText)")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+
+                            if (invite.status ?? "pending").lowercased() == "pending" {
+                                HStack(spacing: 8) {
+                                    Button("Accept") {
+                                        Task { await viewModel.acceptInvitation(invite, user: user) }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(isUpdating)
+
+                                    Button("Decline") {
+                                        Task { await viewModel.declineInvitation(invite, user: user) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(isUpdating)
+
+                                    if isUpdating {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+                                }
+                            }
                         }
                         .padding(.vertical, 4)
                     }
@@ -39,7 +74,7 @@ struct ConversationsListView: View {
                             ConversationDetailView(user: user, conversationId: conversationId)
                         } label: {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(conversation.lastMessage ?? "No messages yet")
+                                Text(conversation.lastMessage ?? conversation.lastMessageText ?? "No messages yet")
                                     .lineLimit(2)
                                     .font(.subheadline)
 
@@ -59,6 +94,9 @@ struct ConversationsListView: View {
         .navigationTitle("Chat")
         .task { await viewModel.refresh(user: user) }
         .refreshable { await viewModel.refresh(user: user) }
+        .navigationDestination(item: $viewModel.routeToConversation) { route in
+            ConversationDetailView(user: user, conversationId: route.id)
+        }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }

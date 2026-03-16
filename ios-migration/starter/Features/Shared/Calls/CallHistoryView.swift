@@ -6,13 +6,22 @@ struct CallHistoryView: View {
 
     var body: some View {
         List {
-            if viewModel.isLoading && viewModel.callLogs.isEmpty {
+            Section {
+                Picker("Filter", selection: $viewModel.selectedFilter) {
+                    ForEach(CallHistoryFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            if viewModel.isLoading && viewModel.filteredCallLogs.isEmpty {
                 ProgressView("Loading call history...")
-            } else if viewModel.callLogs.isEmpty {
+            } else if viewModel.filteredCallLogs.isEmpty {
                 Text("No call records yet.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewModel.callLogs) { call in
+                ForEach(viewModel.filteredCallLogs) { call in
                     HStack(spacing: 10) {
                         Image(systemName: iconName(for: call))
                             .foregroundStyle(.secondary)
@@ -49,13 +58,18 @@ struct CallHistoryView: View {
 
     private func iconName(for call: CallLogRecord) -> String {
         let isVideo = (call.type ?? "").lowercased() == "video"
-        if isVideo { return "video" }
-        return "phone"
+        let isMissed = (call.status ?? "").lowercased() == "missed"
+        if isVideo { return isMissed ? "video.slash" : "video" }
+        return isMissed ? "phone.down.fill" : "phone"
     }
 
     private func summary(for call: CallLogRecord) -> String {
-        let direction = call.direction ?? "unknown"
-        let status = call.status ?? "unknown"
-        return "\(direction.capitalized) • \(status.capitalized)"
+        let direction = (call.direction ?? "unknown")
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+        let status = (call.status ?? "unknown")
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+        return "\(direction) - \(status)"
     }
 }

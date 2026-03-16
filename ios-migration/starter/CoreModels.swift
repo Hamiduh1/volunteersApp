@@ -192,6 +192,7 @@ struct ChatConversationRecord: Codable, Identifiable {
     @DocumentID var id: String?
     var participants: [String]?
     var lastMessage: String?
+    var lastMessageText: String?
     var lastMessageTimestamp: Timestamp?
 }
 
@@ -206,8 +207,12 @@ struct UserInvitationRecord: Codable, Identifiable {
     @DocumentID var id: String?
     var senderId: String?
     var senderName: String?
+    var inviterName: String?
     var senderEmail: String?
+    var senderProfileImageUrl: String?
     var status: String?
+    var source: String?
+    var context: String?
     var timestamp: Timestamp?
 }
 
@@ -239,14 +244,19 @@ struct PayoutSetupStatusRecord {
 
 struct CallLogRecord: Codable, Identifiable {
     @DocumentID var id: String?
+    var chatId: String?
+    var callerId: String?
+    var receiverId: String?
     var peerUid: String?
     var peerName: String?
     var type: String? // audio | video
+    var callType: String?
     var direction: String? // incoming | outgoing
     var status: String? // dialed | received | missed | rejected
     var startedAt: Timestamp?
     var endedAt: Timestamp?
     var durationSec: Int?
+    var durationSeconds: Int?
 }
 
 struct AppConfigTextRecord: Codable {
