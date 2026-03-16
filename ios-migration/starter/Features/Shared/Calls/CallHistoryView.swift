@@ -6,13 +6,33 @@ struct CallHistoryView: View {
 
     var body: some View {
         List {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section {
+                TextField("Search name, status, type", text: $viewModel.query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                 Picker("Filter", selection: $viewModel.selectedFilter) {
                     ForEach(CallHistoryFilter.allCases) { filter in
                         Text(filter.title).tag(filter)
                     }
                 }
                 .pickerStyle(.segmented)
+                Picker("Direction", selection: $viewModel.directionFilter) {
+                    ForEach(CallDirectionFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("Showing \(viewModel.filteredCallLogs.count) of \(viewModel.callLogs.count) calls")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             if viewModel.isLoading && viewModel.filteredCallLogs.isEmpty {

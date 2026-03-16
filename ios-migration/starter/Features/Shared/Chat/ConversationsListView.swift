@@ -14,9 +14,25 @@ struct ConversationsListView: View {
                 }
             }
 
-            if !viewModel.invitations.isEmpty {
+            Section("Filters") {
+                TextField("Search invitations or conversations", text: $viewModel.query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                Picker("Invitation Status", selection: $viewModel.invitationFilter) {
+                    ForEach(InvitationStatusFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Showing \(viewModel.filteredInvitations.count) invitation(s) - \(viewModel.filteredConversations.count) conversation(s)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !viewModel.filteredInvitations.isEmpty {
                 Section("Invitations") {
-                    ForEach(viewModel.invitations) { invite in
+                    ForEach(viewModel.filteredInvitations) { invite in
                         let invitationId = invite.id ?? (invite.senderId ?? "")
                         let isUpdating = viewModel.updatingInvitationIds.contains(invitationId)
                         VStack(alignment: .leading, spacing: 8) {
@@ -31,7 +47,7 @@ struct ConversationsListView: View {
 
                             let source = (invite.source ?? "chat").replacingOccurrences(of: "_", with: " ")
                             let statusText = (invite.status ?? "pending").capitalized
-                            Text("\(source.capitalized) • \(statusText)")
+                            Text("\(source.capitalized) - \(statusText)")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
 
@@ -62,13 +78,13 @@ struct ConversationsListView: View {
             }
 
             Section("Conversations") {
-                if viewModel.isLoading && viewModel.conversations.isEmpty {
+                if viewModel.isLoading && viewModel.filteredConversations.isEmpty {
                     ProgressView("Loading conversations...")
-                } else if viewModel.conversations.isEmpty {
+                } else if viewModel.filteredConversations.isEmpty {
                     Text("No conversations yet.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(viewModel.conversations) { conversation in
+                    ForEach(viewModel.filteredConversations) { conversation in
                         let conversationId = conversation.id ?? ""
                         NavigationLink {
                             ConversationDetailView(user: user, conversationId: conversationId)
