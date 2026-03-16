@@ -19,14 +19,17 @@ final class JobsRepository {
     }
 
     func hasApplied(jobId: String, uid: String) async throws -> Bool {
-        let rootId = "\(uid)_\(jobId)"
+        let normalizedJobId = normalizeDocumentId(jobId)
+        guard !normalizedJobId.isEmpty else { return false }
+
+        let rootId = "\(uid)_\(normalizedJobId)"
         let rootSnap = try await db.collection(FirestoreCollection.applications.rawValue)
             .document(rootId)
             .getDocument()
         if rootSnap.exists { return true }
 
         let subSnap = try await db.collection(FirestoreCollection.jobs.rawValue)
-            .document(jobId)
+            .document(normalizedJobId)
             .collection(FirestoreSubcollection.applications.rawValue)
             .document(uid)
             .getDocument()
@@ -34,14 +37,19 @@ final class JobsRepository {
     }
 
     func fetchJob(jobId: String) async throws -> JobRecord? {
+        let normalizedJobId = normalizeDocumentId(jobId)
+        guard !normalizedJobId.isEmpty else { return nil }
         let snapshot = try await db.collection(FirestoreCollection.jobs.rawValue)
-            .document(jobId)
+            .document(normalizedJobId)
             .getDocument()
         return try? snapshot.data(as: JobRecord.self)
     }
 
     func applyToJob(jobId: String, user: AppSessionUser, userName: String? = nil) async throws {
-        let jobRef = db.collection(FirestoreCollection.jobs.rawValue).document(jobId)
+        let normalizedJobId = normalizeDocumentId(jobId)
+        guard !normalizedJobId.isEmpty else { return }
+
+        let jobRef = db.collection(FirestoreCollection.jobs.rawValue).document(normalizedJobId)
         let jobDoc = try await jobRef.getDocument()
         let jobData = jobDoc.data() ?? [:]
 
@@ -50,10 +58,10 @@ final class JobsRepository {
         let jobTitle = (jobData["title"] as? String) ?? ""
         let orgName = (jobData["employerName"] as? String) ?? ""
 
-        let rootId = "\(user.uid)_\(jobId)"
+        let rootId = "\(user.uid)_\(normalizedJobId)"
         let payload: [String: Any] = [
             "applicationId": rootId,
-            "jobId": jobId,
+            "jobId": normalizedJobId,
             "jobTitle": jobTitle,
             "organizationName": orgName,
             "userId": user.uid,
@@ -78,7 +86,10 @@ final class JobsRepository {
     }
 
     func fetchJobApplication(jobId: String, uid: String) async throws -> JobApplicationRecord? {
-        let rootId = "\(uid)_\(jobId)"
+        let normalizedJobId = normalizeDocumentId(jobId)
+        guard !normalizedJobId.isEmpty else { return nil }
+
+        let rootId = "\(uid)_\(normalizedJobId)"
         let rootSnap = try await db.collection(FirestoreCollection.applications.rawValue)
             .document(rootId)
             .getDocument()
@@ -87,11 +98,75 @@ final class JobsRepository {
         }
 
         let subSnap = try await db.collection(FirestoreCollection.jobs.rawValue)
-            .document(jobId)
+            .document(normalizedJobId)
             .collection(FirestoreSubcollection.applications.rawValue)
             .document(uid)
             .getDocument()
         guard subSnap.exists else { return nil }
-        return try? subSnap.data(as: JobApplicationRecord.self)
+        if let decoded = try? subSnap.data(as: JobApplicationRecord.self) {
+            return decoded
+        }
+
+        let data = subSnap.data() ?? [:]
+        return JobApplicationRecord(
+            id: subSnap.documentID,
+            applicationId: data.firstNonEmptyString(keys: ["applicationId", "id"]) ?? subSnap.documentID,
+            jobId: data.firstNonEmptyString(keys: ["jobId"]) ?? normalizedJobId,
+            jobTitle: data.firstNonEmptyString(keys: ["jobTitle", "title"]),
+            userId: data.firstNonEmptyString(keys: ["userId", "volunteerUid", "volunteerId"]),
+            volunteerUid: data.firstNonEmptyString(keys: ["volunteerUid", "userId", "volunteerId"]),
+            volunteerName: data.firstNonEmptyString(keys: ["volunteerName", "name"]),
+            volunteerEmail: data.firstNonEmptyString(keys: ["volunteerEmail", "email"]),
+            employerUid: data.firstNonEmptyString(keys: ["employerUid", "employerId"]),
+            employerId: data.firstNonEmptyString(keys: ["employerId", "employerUid"]),
+            status: ApplicationStatus(rawValue: (data.firstNonEmptyString(keys: ["status"]) ?? "UNKNOWN").uppercased()) ?? .unknown,
+            appliedAt: data.firstTimestamp(keys: ["appliedAt", "appliedDate", "createdAt", "timestamp"]),
+            appliedDate: data.firstTimestamp(keys: ["appliedDate", "appliedAt", "createdAt", "timestamp"]),
+            lastUpdatedAt: data.firstTimestamp(keys: ["lastUpdatedAt", "updatedAt"])
+        )
+    }
+
+    private func normalizeDocumentId(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let segments = trimmed.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+        guard !segments.isEmpty else { return "" }
+        if let index = segments.firstIndex(of: FirestoreCollection.jobs.rawValue), segments.count > index + 1 {
+            return segments[index + 1]
+        }
+        return segments.last ?? trimmed
+    }
+}
+
+private extension Dictionary where Key == String, Value == Any {
+    func firstNonEmptyString(keys: [String]) -> String? {
+        for key in keys {
+            if let value = self[key] as? String {
+                let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !clean.isEmpty { return clean }
+            }
+        }
+        return nil
+    }
+
+    func firstTimestamp(keys: [String]) -> Timestamp? {
+        for key in keys {
+            if let timestamp = self[key] as? Timestamp {
+                return timestamp
+            }
+            if let date = self[key] as? Date {
+                return Timestamp(date: date)
+            }
+            if let number = self[key] as? NSNumber {
+                let raw = number.doubleValue
+                if raw > 1_000_000_000_000 {
+                    return Timestamp(date: Date(timeIntervalSince1970: raw / 1000.0))
+                }
+                if raw > 0 {
+                    return Timestamp(date: Date(timeIntervalSince1970: raw))
+                }
+            }
+        }
+        return nil
     }
 }

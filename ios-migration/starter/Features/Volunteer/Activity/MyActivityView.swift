@@ -7,12 +7,38 @@ struct MyActivityView: View {
     var body: some View {
         NavigationStack {
             VStack {
-                Picker("Type", selection: $viewModel.selectedType) {
-                    ForEach(VolunteerActivityType.allCases) { type in
-                        Text(type.title).tag(type)
+                VStack(spacing: 10) {
+                    TextField("Search activity", text: $viewModel.query)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+
+                    Picker("Type", selection: $viewModel.selectedType) {
+                        ForEach(VolunteerActivityType.allCases) { type in
+                            Text(type.title).tag(type)
+                        }
                     }
+                    .pickerStyle(.segmented)
+
+                    Picker("Status", selection: $viewModel.statusFilter) {
+                        ForEach(VolunteerActivityStatusFilter.allCases) { status in
+                            Text(status.title).tag(status)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    if let statusMessage = viewModel.statusMessage, !statusMessage.isEmpty {
+                        Text(statusMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Text("Showing \(viewModel.filteredItems.count) of \(viewModel.items.count) items")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .pickerStyle(.segmented)
                 .padding([.horizontal, .top])
 
                 if viewModel.isLoading {

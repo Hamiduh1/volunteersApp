@@ -20,8 +20,10 @@ final class EventsRepository {
     }
 
     func hasApplied(eventId: String, uid: String) async throws -> Bool {
+        let normalizedEventId = normalizeDocumentId(eventId)
+        guard !normalizedEventId.isEmpty else { return false }
         let snap = try await db.collection(FirestoreCollection.events.rawValue)
-            .document(eventId)
+            .document(normalizedEventId)
             .collection(FirestoreSubcollection.applications.rawValue)
             .document(uid)
             .getDocument()
@@ -29,20 +31,25 @@ final class EventsRepository {
     }
 
     func fetchEvent(eventId: String) async throws -> EventRecord? {
+        let normalizedEventId = normalizeDocumentId(eventId)
+        guard !normalizedEventId.isEmpty else { return nil }
         let snapshot = try await db.collection(FirestoreCollection.events.rawValue)
-            .document(eventId)
+            .document(normalizedEventId)
             .getDocument()
         return try? snapshot.data(as: EventRecord.self)
     }
 
     func applyToEvent(eventId: String, user: AppSessionUser, userName: String? = nil) async throws {
-        let eventRef = db.collection(FirestoreCollection.events.rawValue).document(eventId)
+        let normalizedEventId = normalizeDocumentId(eventId)
+        guard !normalizedEventId.isEmpty else { return }
+
+        let eventRef = db.collection(FirestoreCollection.events.rawValue).document(normalizedEventId)
         let eventDoc = try await eventRef.getDocument()
         let eventData = eventDoc.data() ?? [:]
 
         let payload: [String: Any] = [
             "applicationId": user.uid,
-            "eventId": eventId,
+            "eventId": normalizedEventId,
             "userId": user.uid,
             "volunteerUid": user.uid,
             "volunteerId": user.uid,
@@ -63,12 +70,78 @@ final class EventsRepository {
     }
 
     func fetchEventApplication(eventId: String, uid: String) async throws -> EventApplicationRecord? {
+        let normalizedEventId = normalizeDocumentId(eventId)
+        guard !normalizedEventId.isEmpty else { return nil }
         let snap = try await db.collection(FirestoreCollection.events.rawValue)
-            .document(eventId)
+            .document(normalizedEventId)
             .collection(FirestoreSubcollection.applications.rawValue)
             .document(uid)
             .getDocument()
         guard snap.exists else { return nil }
-        return try? snap.data(as: EventApplicationRecord.self)
+        if let decoded = try? snap.data(as: EventApplicationRecord.self) {
+            return decoded
+        }
+
+        let data = snap.data() ?? [:]
+        return EventApplicationRecord(
+            id: snap.documentID,
+            applicationId: data.firstNonEmptyString(keys: ["applicationId", "id"]) ?? snap.documentID,
+            eventId: data.firstNonEmptyString(keys: ["eventId"]) ?? normalizedEventId,
+            volunteerId: data.firstNonEmptyString(keys: ["volunteerId", "userId", "volunteerUid"]),
+            volunteerUid: data.firstNonEmptyString(keys: ["volunteerUid", "userId", "volunteerId"]),
+            userId: data.firstNonEmptyString(keys: ["userId", "volunteerUid", "volunteerId"]),
+            volunteerName: data.firstNonEmptyString(keys: ["volunteerName", "name"]),
+            volunteerEmail: data.firstNonEmptyString(keys: ["volunteerEmail", "email"]),
+            organizerId: data.firstNonEmptyString(keys: ["organizerId"]),
+            organizerUid: data.firstNonEmptyString(keys: ["organizerUid", "organizerId"]),
+            status: ApplicationStatus(rawValue: (data.firstNonEmptyString(keys: ["status"]) ?? "UNKNOWN").uppercased()) ?? .unknown,
+            appliedAt: data.firstTimestamp(keys: ["appliedAt", "appliedDate", "createdAt", "timestamp"]),
+            appliedDate: data.firstTimestamp(keys: ["appliedDate", "appliedAt", "createdAt", "timestamp"]),
+            lastUpdatedAt: data.firstTimestamp(keys: ["lastUpdatedAt", "updatedAt"])
+        )
+    }
+
+    private func normalizeDocumentId(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let segments = trimmed.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+        guard !segments.isEmpty else { return "" }
+        if let index = segments.firstIndex(of: FirestoreCollection.events.rawValue), segments.count > index + 1 {
+            return segments[index + 1]
+        }
+        return segments.last ?? trimmed
+    }
+}
+
+private extension Dictionary where Key == String, Value == Any {
+    func firstNonEmptyString(keys: [String]) -> String? {
+        for key in keys {
+            if let value = self[key] as? String {
+                let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !clean.isEmpty { return clean }
+            }
+        }
+        return nil
+    }
+
+    func firstTimestamp(keys: [String]) -> Timestamp? {
+        for key in keys {
+            if let timestamp = self[key] as? Timestamp {
+                return timestamp
+            }
+            if let date = self[key] as? Date {
+                return Timestamp(date: date)
+            }
+            if let number = self[key] as? NSNumber {
+                let raw = number.doubleValue
+                if raw > 1_000_000_000_000 {
+                    return Timestamp(date: Date(timeIntervalSince1970: raw / 1000.0))
+                }
+                if raw > 0 {
+                    return Timestamp(date: Date(timeIntervalSince1970: raw))
+                }
+            }
+        }
+        return nil
     }
 }
