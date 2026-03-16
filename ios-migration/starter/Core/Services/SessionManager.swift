@@ -47,12 +47,18 @@ final class SessionManager: ObservableObject {
 
         state = .loading
         do {
+            try await user.reload()
+            if !user.isEmailVerified {
+                try? AuthService.shared.signOut()
+                state = .signedOut
+                return
+            }
             let role = try await resolveRole(uid: user.uid)
             state = .signedIn(
                 AppSessionUser(uid: user.uid, email: user.email, role: role)
             )
         } catch {
-            state = .error(error.localizedDescription)
+            state = .error(AppErrorMapper.message(from: error))
         }
     }
 

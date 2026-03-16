@@ -3,6 +3,13 @@ import SwiftUI
 struct LoginView: View {
     @StateObject private var viewModel = LoginViewModel()
 
+    private var roleSelectionBinding: Binding<String> {
+        Binding(
+            get: { viewModel.selectedRole },
+            set: { viewModel.setSelectedRole($0) }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -13,19 +20,58 @@ struct LoginView: View {
                     SecureField("Password", text: $viewModel.password)
                 }
 
+                Section(viewModel.showStaffRoles ? "Staff login" : "Log in as") {
+                    Picker("Account type", selection: roleSelectionBinding) {
+                        ForEach(viewModel.activeRoleOptions) { option in
+                            Text(option.label).tag(option.value)
+                        }
+                    }
+
+                    Button(viewModel.showStaffRoles ? "Switch to user login" : "Staff login") {
+                        viewModel.toggleRoleGroup()
+                    }
+                    .font(.subheadline)
+                }
+
                 Section {
                     Button(viewModel.isLoading ? "Signing in..." : "Sign In") {
                         Task { await viewModel.signIn() }
                     }
-                    .disabled(viewModel.isLoading)
+                    .disabled(viewModel.isLoading || viewModel.isResendingVerification)
+                }
+
+                Section {
+                    Button(
+                        viewModel.resendCooldownSeconds > 0
+                            ? "Resend verification email (\(viewModel.resendCooldownSeconds)s)"
+                            : (viewModel.isResendingVerification ? "Sending..." : "Resend verification email")
+                    ) {
+                        Task { await viewModel.resendVerificationEmail() }
+                    }
+                    .disabled(
+                        viewModel.isLoading ||
+                            viewModel.isResendingVerification ||
+                            viewModel.resendCooldownSeconds > 0
+                    )
+                } footer: {
+                    Text("If login says not verified, request a new code here and enter the latest 6-digit code from email.")
                 }
 
                 Section("Account") {
+                    NavigationLink("Enter verification code") {
+                        EmailVerificationView()
+                    }
                     NavigationLink("Create Account") {
                         SignUpView()
                     }
                     NavigationLink("Forgot Password") {
                         ForgotPasswordView()
+                    }
+                }
+
+                if let infoMessage = viewModel.infoMessage {
+                    Section("Info") {
+                        Text(infoMessage).foregroundStyle(.secondary)
                     }
                 }
 

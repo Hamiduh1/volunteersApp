@@ -31,6 +31,8 @@ Copy these files into your iOS target:
 - `Features/Auth/SignUpViewModel.swift`
 - `Features/Auth/ForgotPasswordView.swift`
 - `Features/Auth/ForgotPasswordViewModel.swift`
+- `Features/Auth/EmailVerificationView.swift`
+- `Features/Auth/EmailVerificationViewModel.swift`
 - `Features/Root/AppRouterView.swift`
 - `Features/Volunteer/VolunteerHomeTabView.swift`
 - `Features/Volunteer/Events/EventsListView.swift`
