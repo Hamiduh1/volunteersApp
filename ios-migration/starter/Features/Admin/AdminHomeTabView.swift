@@ -20,6 +20,9 @@ struct AdminHomeTabView: View {
             SupportConsoleView(user: user)
                 .tabItem { Label("Support", systemImage: "person.2.badge.gearshape") }
 
+            GlobalWalletHomeView(user: user)
+                .tabItem { Label("Wallet", systemImage: "wallet.pass") }
+
             CommunityHubView(user: user)
                 .tabItem { Label("Community", systemImage: "person.3.sequence") }
 

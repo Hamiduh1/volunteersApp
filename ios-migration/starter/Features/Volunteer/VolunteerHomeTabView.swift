@@ -20,6 +20,11 @@ struct VolunteerHomeTabView: View {
                     Label("Activity", systemImage: "clock")
                 }
 
+            GlobalWalletHomeView(user: user)
+                .tabItem {
+                    Label("Wallet", systemImage: "wallet.pass")
+                }
+
             CommunityHubView(user: user)
                 .tabItem {
                     Label("Community", systemImage: "person.3.sequence")

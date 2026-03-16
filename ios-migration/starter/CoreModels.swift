@@ -453,6 +453,25 @@ struct GarageSaleRecord: Codable, Identifiable {
     var timestamp: Timestamp?
 }
 
+struct BeneficiaryRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var name: String?
+    var country: String?
+    var network: String?
+    var phone: String?
+    var accountLast4: String?
+    var type: String?
+    var verificationStatus: String?
+}
+
+struct WalletQuoteRecord {
+    let rate: Double
+    let recipientAmount: Double
+    let sourceAmount: Double
+    let sourceCurrency: String
+    let targetCurrency: String
+}
+
 // Firestore dictionaries with mixed values (wallet/settings style documents).
 struct AnyCodable: Codable {
     let value: Any
