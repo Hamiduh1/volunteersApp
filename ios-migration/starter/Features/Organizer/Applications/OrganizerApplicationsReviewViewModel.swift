@@ -38,10 +38,12 @@ final class OrganizerApplicationsReviewViewModel: ObservableObject {
     func refresh(uid: String) async {
         isLoading = true
         errorMessage = nil
+        statusMessage = nil
         defer { isLoading = false }
 
         do {
             items = try await repository.fetchManagedApplications(uid: uid)
+            statusMessage = items.isEmpty ? "No applications found." : "Loaded \(items.count) applications."
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -38,9 +38,11 @@ final class EmployerApplicationsReviewViewModel: ObservableObject {
     func refresh(uid: String) async {
         isLoading = true
         errorMessage = nil
+        statusMessage = nil
         defer { isLoading = false }
         do {
             items = try await repository.fetchManagedApplications(uid: uid)
+            statusMessage = items.isEmpty ? "No applications found." : "Loaded \(items.count) applications."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -64,7 +66,7 @@ final class EmployerApplicationsReviewViewModel: ObservableObject {
         updatingIds.insert(item.id)
         defer { updatingIds.remove(item.id) }
         do {
-            try await repository.updateApplicationStatus(applicationId: item.applicationId, status: status)
+            try await repository.updateApplicationStatus(item: item, status: status)
             statusMessage = "Application marked as \(status.displayTitle)."
             await refresh(uid: uid)
         } catch {
