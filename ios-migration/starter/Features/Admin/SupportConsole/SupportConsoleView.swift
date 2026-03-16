@@ -29,6 +29,21 @@ struct SupportConsoleView: View {
                         .buttonStyle(.bordered)
                         .disabled(viewModel.isLoadingUsers)
                     }
+
+                    TextField("Filter loaded users", text: $viewModel.userFilterQuery)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    Picker("Role", selection: $viewModel.userRoleFilter) {
+                        ForEach(SupportUserRoleFilter.allCases) { filter in
+                            Text(filter.title).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text("Showing \(viewModel.filteredUsers.count) of \(viewModel.users.count) users")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
 
                 if isAdmin {
@@ -36,22 +51,29 @@ struct SupportConsoleView: View {
                         TextField("Associate email", text: $viewModel.associateEmail)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                        if !viewModel.associateEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           let validation = viewModel.associateEmailValidationMessage,
+                           !validation.isEmpty {
+                            Text(validation)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
                         Button("Grant Access") {
                             Task { await viewModel.addAssociate() }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.isAddingAssociate)
+                        .disabled(!viewModel.canAddAssociate)
                     }
                 }
 
                 Section("Users") {
-                    if viewModel.isLoadingUsers && viewModel.users.isEmpty {
+                    if viewModel.isLoadingUsers && viewModel.filteredUsers.isEmpty {
                         ProgressView("Loading users...")
-                    } else if viewModel.users.isEmpty {
+                    } else if viewModel.filteredUsers.isEmpty {
                         Text("No support users found.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(viewModel.users) { user in
+                        ForEach(viewModel.filteredUsers) { user in
                             Button {
                                 viewModel.selectUser(user)
                             } label: {
@@ -63,8 +85,13 @@ struct SupportConsoleView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 2)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .listRowBackground(
+                                viewModel.selectedUser?.id == user.id ? Color.blue.opacity(0.08) : Color.clear
+                            )
                         }
                     }
                 }
@@ -82,11 +109,18 @@ struct SupportConsoleView: View {
                                 .keyboardType(.phonePad)
                         }
 
-                        Button(isAdmin ? "Open Account Detail" : "Verify & Open Account") {
-                            Task { await viewModel.loadDetails(canBypassVerification: isAdmin) }
+                        HStack {
+                            Button(isAdmin ? "Open Account Detail" : "Verify & Open Account") {
+                                Task { await viewModel.loadDetails(canBypassVerification: isAdmin) }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(viewModel.isLoadingDetails)
+
+                            Button("Clear") {
+                                viewModel.clearSelection()
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.isLoadingDetails)
                     }
                 }
 
@@ -103,16 +137,25 @@ struct SupportConsoleView: View {
                     }
 
                     Section("Complaints") {
-                        if details.complaints.isEmpty {
+                        TextField("Filter complaints", text: $viewModel.complaintsQuery)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        if viewModel.filteredComplaints.isEmpty {
                             Text("No complaints found.")
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(details.complaints.prefix(20)) { complaint in
+                            ForEach(viewModel.filteredComplaints.prefix(40)) { complaint in
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(complaint.reason).font(.subheadline)
                                     Text("Reporter: \(complaint.reporterDisplayName ?? "Unknown")")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if let eventName = complaint.eventName, !eventName.isEmpty {
+                                        Text("Event: \(eventName)")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                     if let at = complaint.timestamp {
                                         Text(at.formatted(date: .abbreviated, time: .shortened))
                                             .font(.caption2)
@@ -125,17 +168,32 @@ struct SupportConsoleView: View {
                     }
 
                     Section("Recent Transactions") {
-                        if details.transactions.isEmpty {
+                        Picker("Status", selection: $viewModel.transactionFilter) {
+                            ForEach(SupportTransactionFilter.allCases) { filter in
+                                Text(filter.title).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        TextField("Filter transactions", text: $viewModel.transactionsQuery)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        if viewModel.filteredTransactions.isEmpty {
                             Text("No transactions found.")
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(details.transactions.prefix(30)) { tx in
+                            ForEach(viewModel.filteredTransactions.prefix(60)) { tx in
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(tx.title).font(.subheadline)
                                         Text("\(tx.type) - \(tx.status)")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
+                                        if let time = tx.timestamp {
+                                            Text(time.formatted(date: .abbreviated, time: .shortened))
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                     Spacer()
                                     Text(String(format: "%.2f", tx.amount))

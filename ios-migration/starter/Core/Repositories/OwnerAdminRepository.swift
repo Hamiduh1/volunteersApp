@@ -124,7 +124,7 @@ final class OwnerAdminRepository {
         let data = (map["data"] as? [String: Any]) ?? map
         let rawItems = (data["items"] as? [Any]) ?? []
 
-        return rawItems.compactMap { raw in
+        let parsed = rawItems.compactMap { raw in
             guard let row = coerceStringMap(raw) else { return nil }
             guard let userId = row.string("userId") else { return nil }
             return SupportUserSummaryRecord(
@@ -136,6 +136,19 @@ final class OwnerAdminRepository {
                 walletBalance: row.double("walletBalance"),
                 walletCurrency: row.string("walletCurrency") ?? "USD"
             )
+        }
+        var deduped: [String: SupportUserSummaryRecord] = [:]
+        for user in parsed {
+            deduped[user.id] = user
+        }
+
+        return deduped.values.sorted { lhs, rhs in
+            let l = lhs.username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let r = rhs.username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if l == r {
+                return lhs.id.lowercased() < rhs.id.lowercased()
+            }
+            return l < r
         }
     }
 
@@ -160,30 +173,46 @@ final class OwnerAdminRepository {
 
         let complaints = complaintsRaw.compactMap { raw -> SupportComplaintRecord? in
             guard let row = coerceStringMap(raw) else { return nil }
-            guard let id = row.string("reportId") else { return nil }
+            guard let id = row.string("reportId") ?? row.string("id") else { return nil }
             return SupportComplaintRecord(
                 id: id,
-                reason: row.string("reasonForReport") ?? row.string("reason") ?? "No reason provided.",
+                reason: row.string("reasonForReport") ?? row.string("reason") ?? row.string("message") ?? "No reason provided.",
                 eventName: row.string("eventName"),
-                reportedEmail: row.string("reportedUserEmail"),
-                reporterDisplayName: row.string("reportingUserDisplayName"),
-                timestamp: row.dateFromMillis("timestampMs")
+                reportedEmail: row.string("reportedUserEmail") ?? row.string("reportedEmail"),
+                reporterDisplayName: row.string("reportingUserDisplayName") ?? row.string("reporterName"),
+                timestamp: row.dateFromEpochGuess("timestampMs")
+                    ?? row.dateFromEpochGuess("createdAtMs")
+                    ?? row.dateFromEpochGuess("timestamp")
+                    ?? row.dateFromEpochGuess("createdAt")
             )
+        }
+        .sorted {
+            let l = $0.timestamp ?? .distantPast
+            let r = $1.timestamp ?? .distantPast
+            return l > r
         }
 
         let transactions = txRaw.compactMap { raw -> SupportAccountTransactionRecord? in
             guard let row = coerceStringMap(raw) else { return nil }
-            guard let id = row.string("transactionId") else { return nil }
+            guard let id = row.string("transactionId") ?? row.string("id") else { return nil }
             return SupportAccountTransactionRecord(
                 id: id,
-                title: row.string("title") ?? "Transaction",
+                title: row.string("title") ?? row.string("description") ?? "Transaction",
                 amount: row.double("amount"),
                 type: row.string("type") ?? "UNKNOWN",
                 status: row.string("status") ?? "UNKNOWN",
                 source: row.string("source"),
                 note: row.string("note"),
-                timestamp: row.dateFromMillis("timestampMs")
+                timestamp: row.dateFromEpochGuess("timestampMs")
+                    ?? row.dateFromEpochGuess("createdAtMs")
+                    ?? row.dateFromEpochGuess("timestamp")
+                    ?? row.dateFromEpochGuess("createdAt")
             )
+        }
+        .sorted {
+            let l = $0.timestamp ?? .distantPast
+            let r = $1.timestamp ?? .distantPast
+            return l > r
         }
 
         return SupportAccountDetailsRecord(
