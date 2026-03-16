@@ -36,6 +36,9 @@ struct OwnerDashboardView: View {
                         Text("Balance: \(currency(viewModel.summary.balance))")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        Text("\(viewModel.activeWindow.label) net revenue: \(currency(viewModel.filteredNetRevenue))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
@@ -74,14 +77,31 @@ struct OwnerDashboardView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
+                    GroupBox("Transaction Window") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Picker("Range", selection: $viewModel.activeWindow) {
+                                ForEach(OwnerRevenueWindow.allCases) { window in
+                                    Text(window.label).tag(window)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            Text("Showing \(viewModel.filteredTransactions.count) transaction(s)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     GroupBox("Recent Revenue Transactions") {
-                        if viewModel.transactions.isEmpty {
+                        if viewModel.isLoading && viewModel.filteredTransactions.isEmpty {
+                            ProgressView("Loading revenue transactions...")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if viewModel.filteredTransactions.isEmpty {
                             Text("No revenue transactions yet.")
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
                             VStack(spacing: 8) {
-                                ForEach(viewModel.transactions.prefix(12)) { tx in
+                                ForEach(viewModel.filteredTransactions.prefix(12)) { tx in
                                     HStack {
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(tx.source.capitalized)

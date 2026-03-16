@@ -13,6 +13,14 @@ struct OwnerFeeSettingsView: View {
                 }
             }
 
+            if let validation = viewModel.validationMessage, !validation.isEmpty {
+                Section {
+                    Text(validation)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             Section("Fees") {
                 TextField("Blind Date Fee (USD)", text: $viewModel.blindDateFeeUsd)
                     .keyboardType(.decimalPad)
@@ -26,7 +34,7 @@ struct OwnerFeeSettingsView: View {
                     .keyboardType(.decimalPad)
             }
 
-            Section {
+            Section("Actions") {
                 Button {
                     Task { await viewModel.save() }
                 } label: {
@@ -36,7 +44,25 @@ struct OwnerFeeSettingsView: View {
                         Text("Save Fee Settings")
                     }
                 }
-                .disabled(viewModel.isSaving)
+                .disabled(!viewModel.canSave)
+
+                Button("Restore Last Loaded Values") {
+                    viewModel.restoreLastLoaded()
+                }
+                .disabled(!viewModel.hasUnsavedChanges || viewModel.isSaving || viewModel.isLoading)
+
+                Button("Apply Recommended Defaults") {
+                    viewModel.applyDefaults()
+                }
+                .disabled(viewModel.isSaving || viewModel.isLoading)
+            }
+
+            if viewModel.hasUnsavedChanges {
+                Section {
+                    Text("You have unsaved changes.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .navigationTitle("Fee Settings")

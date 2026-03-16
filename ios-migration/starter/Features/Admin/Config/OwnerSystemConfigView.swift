@@ -13,6 +13,14 @@ struct OwnerSystemConfigView: View {
                 }
             }
 
+            if let validation = viewModel.validationMessage, !validation.isEmpty {
+                Section {
+                    Text(validation)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             Section("Flags") {
                 Toggle("Maintenance Mode", isOn: $viewModel.maintenanceMode)
                 Toggle("Allow New Signups", isOn: $viewModel.allowNewSignups)
@@ -23,9 +31,18 @@ struct OwnerSystemConfigView: View {
             Section("Limits") {
                 TextField("Max Upload (MB)", text: $viewModel.maxUploadMb)
                     .keyboardType(.numberPad)
+                HStack {
+                    Text("Quick Presets")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("10") { viewModel.setUploadPreset(10) }
+                    Button("25") { viewModel.setUploadPreset(25) }
+                    Button("100") { viewModel.setUploadPreset(100) }
+                }
             }
 
-            Section {
+            Section("Actions") {
                 Button {
                     Task { await viewModel.save() }
                 } label: {
@@ -35,7 +52,33 @@ struct OwnerSystemConfigView: View {
                         Text("Save System Config")
                     }
                 }
-                .disabled(viewModel.isSaving)
+                .disabled(!viewModel.canSave)
+
+                Button("Restore Last Loaded Values") {
+                    viewModel.restoreLastLoaded()
+                }
+                .disabled(!viewModel.hasUnsavedChanges || viewModel.isSaving || viewModel.isLoading)
+
+                Button("Apply Recommended Defaults") {
+                    viewModel.applyDefaults()
+                }
+                .disabled(viewModel.isSaving || viewModel.isLoading)
+            }
+
+            if viewModel.maintenanceMode {
+                Section {
+                    Text("Maintenance mode is ON. Non-owner users may be blocked from key actions.")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            if viewModel.hasUnsavedChanges {
+                Section {
+                    Text("You have unsaved changes.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .navigationTitle("System Config")

@@ -1,6 +1,22 @@
 import Foundation
 import Combine
 
+enum OwnerRevenueWindow: String, CaseIterable, Identifiable {
+    case last7Days
+    case last30Days
+    case all
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .last7Days: return "7D"
+        case .last30Days: return "30D"
+        case .all: return "All"
+        }
+    }
+}
+
 @MainActor
 final class OwnerDashboardViewModel: ObservableObject {
     @Published private(set) var summary = OwnerRevenueSummaryRecord(
@@ -16,12 +32,28 @@ final class OwnerDashboardViewModel: ObservableObject {
         lastUpdate: nil
     )
     @Published private(set) var transactions: [OwnerRevenueTransactionRecord] = []
+    @Published var activeWindow: OwnerRevenueWindow = .last30Days
     @Published var isLoading = false
     @Published var isCashingOut = false
     @Published var statusMessage: String?
     @Published var errorMessage: String?
 
     private let repository = OwnerAdminRepository()
+
+    var filteredTransactions: [OwnerRevenueTransactionRecord] {
+        switch activeWindow {
+        case .all:
+            return transactions
+        case .last7Days:
+            return filterTransactions(days: 7)
+        case .last30Days:
+            return filterTransactions(days: 30)
+        }
+    }
+
+    var filteredNetRevenue: Double {
+        filteredTransactions.reduce(0) { $0 + $1.amount }
+    }
 
     func refresh() async {
         isLoading = true
@@ -48,6 +80,16 @@ final class OwnerDashboardViewModel: ObservableObject {
             await refresh()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func filterTransactions(days: Int) -> [OwnerRevenueTransactionRecord] {
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else {
+            return transactions
+        }
+        return transactions.filter { tx in
+            guard let createdAt = tx.createdAt else { return false }
+            return createdAt >= cutoff
         }
     }
 }

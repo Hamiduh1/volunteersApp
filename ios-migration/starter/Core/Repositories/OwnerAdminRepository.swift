@@ -34,12 +34,16 @@ final class OwnerAdminRepository {
 
         return snapshot.documents.map { doc in
             let data = doc.data()
+            let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
+                ?? (data["timestamp"] as? Timestamp)?.dateValue()
+                ?? data.dateFromMillis("createdAtMs")
+                ?? data.dateFromMillis("timestampMs")
             return OwnerRevenueTransactionRecord(
                 id: doc.documentID,
                 source: (data["source"] as? String) ?? "unknown",
                 amount: data.double("amount"),
                 note: data["note"] as? String,
-                createdAt: (data["createdAt"] as? Timestamp)?.dateValue()
+                createdAt: createdAt
             )
         }
         .sorted {
