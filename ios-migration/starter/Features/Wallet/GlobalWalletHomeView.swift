@@ -7,6 +7,14 @@ struct GlobalWalletHomeView: View {
     var body: some View {
         NavigationStack {
             List {
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Section {
+                        Text(status)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Available Balance")

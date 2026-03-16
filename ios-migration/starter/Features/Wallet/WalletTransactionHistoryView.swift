@@ -6,6 +6,14 @@ struct WalletTransactionHistoryView: View {
 
     var body: some View {
         List {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section {
                 Picker("Filter", selection: $viewModel.filter) {
                     ForEach(WalletTransactionFilter.allCases) { option in

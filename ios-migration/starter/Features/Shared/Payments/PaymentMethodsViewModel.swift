@@ -16,6 +16,7 @@ final class PaymentMethodsViewModel: ObservableObject {
     func refresh(user: AppSessionUser) async {
         isLoading = true
         errorMessage = nil
+        statusMessage = nil
         defer { isLoading = false }
 
         do {
@@ -23,6 +24,7 @@ final class PaymentMethodsViewModel: ObservableObject {
             async let payoutTask = repository.fetchPayoutStatus()
             methods = try await methodsTask
             payoutStatus = try await payoutTask
+            statusMessage = "Loaded \(methods.count) payment methods."
         } catch {
             errorMessage = error.localizedDescription
         }

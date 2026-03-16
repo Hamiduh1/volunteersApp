@@ -7,6 +7,14 @@ struct OrganizerWalletView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Text(status)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Available Balance")
                         .font(.caption)

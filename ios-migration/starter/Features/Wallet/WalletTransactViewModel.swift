@@ -19,6 +19,10 @@ enum WalletDestinationType: String, CaseIterable, Identifiable {
 
 @MainActor
 final class WalletTransactViewModel: ObservableObject {
+    private enum Constants {
+        static let minCurrencyLength = 3
+    }
+
     @Published var destinationType: WalletDestinationType = .appUser {
         didSet {
             statusMessage = nil
@@ -56,6 +60,7 @@ final class WalletTransactViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     private let repository = GlobalWalletRepository()
+    private var currentUserId = ""
 
     var canFetchQuote: Bool {
         amountValue > 0 && !normalizedFromCurrency.isEmpty && !normalizedToCurrency.isEmpty && !isFetchingQuote
@@ -66,7 +71,10 @@ final class WalletTransactViewModel: ObservableObject {
     }
 
     private var amountValue: Double {
-        Double(amountText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        let cleaned = amountText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: "")
+        return Double(cleaned) ?? 0
     }
 
     private var normalizedFromCurrency: String {
@@ -84,15 +92,25 @@ final class WalletTransactViewModel: ObservableObject {
                 ? "Recipient user ID is required."
                 : nil
         case .beneficiary:
-            return selectedBeneficiaryId.isEmpty ? "Select a beneficiary." : nil
+            guard !selectedBeneficiaryId.isEmpty else { return "Select a beneficiary." }
+            guard selectedBeneficiary != nil else { return "Selected beneficiary is no longer available." }
+            return nil
         case .paymentMethod:
-            return selectedPaymentMethodId.isEmpty ? "Select a payment method." : nil
+            guard !selectedPaymentMethodId.isEmpty else { return "Select a payment method." }
+            guard let method = selectedPaymentMethod else { return "Selected method is no longer available." }
+            let normalizedType = (method.type ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if normalizedType.contains("MOBILE_MONEY") {
+                return "Select a bank account or card for this destination."
+            }
+            return nil
         }
     }
 
     func refresh(uid: String) async {
+        currentUserId = uid
         isLoading = true
         errorMessage = nil
+        statusMessage = nil
         defer { isLoading = false }
 
         do {
@@ -101,12 +119,13 @@ final class WalletTransactViewModel: ObservableObject {
             beneficiaries = try await beneficiariesTask
             paymentMethods = try await methodsTask
 
-            if selectedBeneficiaryId.isEmpty {
+            if selectedBeneficiaryId.isEmpty || selectedBeneficiary == nil {
                 selectedBeneficiaryId = beneficiaries.first?.id ?? ""
             }
-            if selectedPaymentMethodId.isEmpty {
+            if selectedPaymentMethodId.isEmpty || selectedPaymentMethod == nil {
                 selectedPaymentMethodId = paymentMethods.first?.id ?? ""
             }
+            statusMessage = "Ready to send. \(beneficiaries.count) beneficiaries and \(paymentMethods.count) payment methods loaded."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -118,8 +137,9 @@ final class WalletTransactViewModel: ObservableObject {
             errorMessage = "Enter a valid amount."
             return
         }
-        guard !normalizedFromCurrency.isEmpty, !normalizedToCurrency.isEmpty else {
-            errorMessage = "Enter both currencies."
+        guard normalizedFromCurrency.count >= Constants.minCurrencyLength,
+              normalizedToCurrency.count >= Constants.minCurrencyLength else {
+            errorMessage = "Enter valid 3-letter currency codes."
             return
         }
 
@@ -153,6 +173,10 @@ final class WalletTransactViewModel: ObservableObject {
             errorMessage = "Get quote before sending across currencies."
             return
         }
+        guard !currentUserId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = "User session is unavailable. Refresh and try again."
+            return
+        }
 
         isSubmitting = true
         errorMessage = nil
@@ -171,15 +195,24 @@ final class WalletTransactViewModel: ObservableObject {
                     note: note
                 )
             case .beneficiary:
+                guard let beneficiary = selectedBeneficiary else {
+                    errorMessage = "Selected beneficiary is unavailable."
+                    return
+                }
                 message = try await repository.sendToBeneficiary(
-                    beneficiaryId: selectedBeneficiaryId,
+                    beneficiary: beneficiary,
                     amount: amount,
                     currency: normalizedFromCurrency,
                     note: note
                 )
             case .paymentMethod:
+                guard let method = selectedPaymentMethod else {
+                    errorMessage = "Selected payment method is unavailable."
+                    return
+                }
                 message = try await repository.sendToPaymentMethod(
-                    paymentMethodId: selectedPaymentMethodId,
+                    senderUserId: currentUserId,
+                    paymentMethod: method,
                     amount: amount,
                     currency: normalizedFromCurrency,
                     note: note
@@ -193,5 +226,13 @@ final class WalletTransactViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private var selectedBeneficiary: BeneficiaryRecord? {
+        beneficiaries.first { $0.id == selectedBeneficiaryId }
+    }
+
+    private var selectedPaymentMethod: PaymentMethodRecord? {
+        paymentMethods.first { $0.id == selectedPaymentMethodId }
     }
 }
