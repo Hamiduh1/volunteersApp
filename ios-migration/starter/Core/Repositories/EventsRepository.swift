@@ -22,6 +22,13 @@ final class EventsRepository {
         return snap.exists
     }
 
+    func fetchEvent(eventId: String) async throws -> EventRecord? {
+        let snapshot = try await db.collection(FirestoreCollection.events.rawValue)
+            .document(eventId)
+            .getDocument()
+        return try? snapshot.data(as: EventRecord.self)
+    }
+
     func applyToEvent(eventId: String, user: AppSessionUser, userName: String? = nil) async throws {
         let eventRef = db.collection(FirestoreCollection.events.rawValue).document(eventId)
         let eventDoc = try await eventRef.getDocument()
@@ -47,5 +54,15 @@ final class EventsRepository {
             .collection(FirestoreSubcollection.applications.rawValue)
             .document(user.uid)
             .setData(payload, merge: true)
+    }
+
+    func fetchEventApplication(eventId: String, uid: String) async throws -> EventApplicationRecord? {
+        let snap = try await db.collection(FirestoreCollection.events.rawValue)
+            .document(eventId)
+            .collection(FirestoreSubcollection.applications.rawValue)
+            .document(uid)
+            .getDocument()
+        guard snap.exists else { return nil }
+        return try? snap.data(as: EventApplicationRecord.self)
     }
 }

@@ -15,6 +15,11 @@ struct VolunteerHomeTabView: View {
                     Label("Jobs", systemImage: "briefcase")
                 }
 
+            MyActivityView(user: user)
+                .tabItem {
+                    Label("Activity", systemImage: "clock")
+                }
+
             VStack(spacing: 16) {
                 Text("Signed in as \(user.email ?? user.uid)")
                     .font(.footnote)

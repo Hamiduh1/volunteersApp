@@ -9,6 +9,7 @@ Copy these files into your iOS target:
 - `Core/Services/FunctionsService.swift`
 - `Core/Repositories/EventsRepository.swift`
 - `Core/Repositories/JobsRepository.swift`
+- `Core/Repositories/MyActivityRepository.swift`
 - `App/ContentViewTemplate.swift` (rename to `ContentView.swift`)
 - `App/VolunteersAppiOSAppTemplate.swift` (merge into your app entry file)
 - `Features/Auth/LoginView.swift`
@@ -17,8 +18,15 @@ Copy these files into your iOS target:
 - `Features/Volunteer/VolunteerHomeTabView.swift`
 - `Features/Volunteer/Events/EventsListView.swift`
 - `Features/Volunteer/Events/EventsListViewModel.swift`
+- `Features/Volunteer/Events/EventDetailView.swift`
+- `Features/Volunteer/Events/EventDetailViewModel.swift`
 - `Features/Volunteer/Jobs/JobsListView.swift`
 - `Features/Volunteer/Jobs/JobsListViewModel.swift`
+- `Features/Volunteer/Jobs/JobDetailView.swift`
+- `Features/Volunteer/Jobs/JobDetailViewModel.swift`
+- `Features/Volunteer/Activity/VolunteerActivityItem.swift`
+- `Features/Volunteer/Activity/MyActivityView.swift`
+- `Features/Volunteer/Activity/MyActivityViewModel.swift`
 
 Recommended destination in Xcode:
 - `VolunteersAppIOS/Core/Contracts/`

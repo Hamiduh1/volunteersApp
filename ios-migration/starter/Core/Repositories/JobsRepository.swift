@@ -27,6 +27,13 @@ final class JobsRepository {
         return subSnap.exists
     }
 
+    func fetchJob(jobId: String) async throws -> JobRecord? {
+        let snapshot = try await db.collection(FirestoreCollection.jobs.rawValue)
+            .document(jobId)
+            .getDocument()
+        return try? snapshot.data(as: JobRecord.self)
+    }
+
     func applyToJob(jobId: String, user: AppSessionUser, userName: String? = nil) async throws {
         let jobRef = db.collection(FirestoreCollection.jobs.rawValue).document(jobId)
         let jobDoc = try await jobRef.getDocument()
@@ -62,5 +69,23 @@ final class JobsRepository {
         batch.setData(payload, forDocument: rootRef, merge: true)
         batch.setData(payload, forDocument: subRef, merge: true)
         try await batch.commit()
+    }
+
+    func fetchJobApplication(jobId: String, uid: String) async throws -> JobApplicationRecord? {
+        let rootId = "\(uid)_\(jobId)"
+        let rootSnap = try await db.collection(FirestoreCollection.applications.rawValue)
+            .document(rootId)
+            .getDocument()
+        if rootSnap.exists, let app = try? rootSnap.data(as: JobApplicationRecord.self) {
+            return app
+        }
+
+        let subSnap = try await db.collection(FirestoreCollection.jobs.rawValue)
+            .document(jobId)
+            .collection(FirestoreSubcollection.applications.rawValue)
+            .document(uid)
+            .getDocument()
+        guard subSnap.exists else { return nil }
+        return try? subSnap.data(as: JobApplicationRecord.self)
     }
 }

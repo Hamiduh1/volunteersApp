@@ -12,26 +12,30 @@ struct JobsListView: View {
                 } else {
                     List(viewModel.jobs) { job in
                         let jobId = job.id ?? ""
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(job.title ?? "Untitled Job")
-                                .font(.headline)
-                            Text(job.employerName ?? "Unknown Employer")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Text(job.locationString ?? "Location TBD")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            if viewModel.appliedJobIds.contains(jobId) {
-                                Text("Applied")
+                        NavigationLink {
+                            JobDetailView(jobId: jobId, user: user)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(job.title ?? "Untitled Job")
+                                    .font(.headline)
+                                Text(job.employerName ?? "Unknown Employer")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Text(job.locationString ?? "Location TBD")
                                     .font(.caption)
-                                    .foregroundStyle(.green)
-                            } else {
-                                Button("Apply") {
-                                    Task { await viewModel.apply(jobId: jobId, user: user) }
+                                    .foregroundStyle(.secondary)
+
+                                if viewModel.appliedJobIds.contains(jobId) {
+                                    Text("Applied")
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                } else {
+                                    Button("Apply") {
+                                        Task { await viewModel.apply(jobId: jobId, user: user) }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(jobId.isEmpty)
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(jobId.isEmpty)
                             }
                         }
                         .padding(.vertical, 4)

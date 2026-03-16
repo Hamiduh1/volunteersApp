@@ -12,23 +12,27 @@ struct EventsListView: View {
                 } else {
                     List(viewModel.events) { event in
                         let eventId = event.id ?? ""
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(event.title ?? "Untitled Event")
-                                .font(.headline)
-                            Text(event.locationName ?? event.locationAddress ?? "Location TBD")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            HStack {
-                                if viewModel.appliedEventIds.contains(eventId) {
-                                    Text("Applied")
-                                        .font(.caption)
-                                        .foregroundStyle(.green)
-                                } else {
-                                    Button("Apply") {
-                                        Task { await viewModel.apply(eventId: eventId, user: user) }
+                        NavigationLink {
+                            EventDetailView(eventId: eventId, user: user)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(event.title ?? "Untitled Event")
+                                    .font(.headline)
+                                Text(event.locationName ?? event.locationAddress ?? "Location TBD")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                HStack {
+                                    if viewModel.appliedEventIds.contains(eventId) {
+                                        Text("Applied")
+                                            .font(.caption)
+                                            .foregroundStyle(.green)
+                                    } else {
+                                        Button("Apply") {
+                                            Task { await viewModel.apply(eventId: eventId, user: user) }
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .disabled(eventId.isEmpty)
                                     }
-                                    .buttonStyle(.borderedProminent)
-                                    .disabled(eventId.isEmpty)
                                 }
                             }
                         }
