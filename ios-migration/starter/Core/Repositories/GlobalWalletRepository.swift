@@ -12,8 +12,11 @@ final class GlobalWalletRepository {
 
         let balance = (wallet["balance"] as? NSNumber)?.doubleValue
             ?? (wallet["availableBalance"] as? NSNumber)?.doubleValue
+            ?? (data["walletBalance"] as? NSNumber)?.doubleValue
             ?? 0.0
-        let currency = (wallet["currency"] as? String) ?? "USD"
+        let currency = (wallet["currency"] as? String)
+            ?? (data["walletCurrency"] as? String)
+            ?? "USD"
         return WalletSummary(balance: balance, currency: currency)
     }
 
@@ -33,13 +36,18 @@ final class GlobalWalletRepository {
             let title = (data["title"] as? String) ?? (data["label"] as? String) ?? type
             let timestamp = data["timestamp"] as? Timestamp
             let createdAt = data["createdAt"] as? Timestamp
+            let lastUpdatedAt = data["lastUpdatedAt"] as? Timestamp
+            let processedAt = data["processedAt"] as? Timestamp
             return WalletTransactionRecord(
                 id: doc.documentID,
                 title: title,
                 type: type,
                 amount: amount,
                 status: status,
-                createdAt: timestamp?.dateValue() ?? createdAt?.dateValue(),
+                createdAt: timestamp?.dateValue()
+                    ?? createdAt?.dateValue()
+                    ?? lastUpdatedAt?.dateValue()
+                    ?? processedAt?.dateValue(),
                 note: note
             )
         }

@@ -6,6 +6,14 @@ struct PaymentMethodsView: View {
 
     var body: some View {
         List {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.subheadline)
+                        .foregroundStyle(.green)
+                }
+            }
+
             Section("Payout Setup") {
                 if let payout = viewModel.payoutStatus {
                     statusRow("Has account", payout.hasAccount)
@@ -23,11 +31,18 @@ struct PaymentMethodsView: View {
                     Task { await viewModel.createConnectAccount() }
                 }
                 .buttonStyle(.bordered)
+                .disabled(viewModel.isWorking)
 
                 Button("Create Onboarding Link") {
                     Task { await viewModel.createOnboardingLink() }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isWorking)
+
+                if viewModel.isWorking {
+                    ProgressView()
+                        .controlSize(.small)
+                }
 
                 if !viewModel.onboardingUrl.isEmpty,
                    let url = URL(string: viewModel.onboardingUrl) {
@@ -45,7 +60,7 @@ struct PaymentMethodsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text((method.brand ?? method.type ?? "Method").capitalized)
                                 .font(.headline)
-                            Text("•••• \(method.last4 ?? "0000")")
+                            Text("**** \(method.last4 ?? "0000")")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             if let holder = method.holderName, !holder.isEmpty {

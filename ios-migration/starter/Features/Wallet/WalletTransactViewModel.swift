@@ -19,24 +19,76 @@ enum WalletDestinationType: String, CaseIterable, Identifiable {
 
 @MainActor
 final class WalletTransactViewModel: ObservableObject {
-    @Published var destinationType: WalletDestinationType = .appUser
-    @Published var recipientUserId = ""
-    @Published var selectedBeneficiaryId = ""
-    @Published var selectedPaymentMethodId = ""
-    @Published var amountText = ""
-    @Published var fromCurrency = "USD"
-    @Published var toCurrency = "USD"
+    @Published var destinationType: WalletDestinationType = .appUser {
+        didSet {
+            statusMessage = nil
+            quote = nil
+            errorMessage = nil
+        }
+    }
+    @Published var recipientUserId = "" {
+        didSet { quote = nil }
+    }
+    @Published var selectedBeneficiaryId = "" {
+        didSet { quote = nil }
+    }
+    @Published var selectedPaymentMethodId = "" {
+        didSet { quote = nil }
+    }
+    @Published var amountText = "" {
+        didSet { quote = nil }
+    }
+    @Published var fromCurrency = "USD" {
+        didSet { quote = nil }
+    }
+    @Published var toCurrency = "USD" {
+        didSet { quote = nil }
+    }
     @Published var note = ""
 
     @Published private(set) var beneficiaries: [BeneficiaryRecord] = []
     @Published private(set) var paymentMethods: [PaymentMethodRecord] = []
     @Published private(set) var quote: WalletQuoteRecord?
     @Published var isLoading = false
+    @Published var isFetchingQuote = false
     @Published var isSubmitting = false
     @Published var statusMessage: String?
     @Published var errorMessage: String?
 
     private let repository = GlobalWalletRepository()
+
+    var canFetchQuote: Bool {
+        amountValue > 0 && !normalizedFromCurrency.isEmpty && !normalizedToCurrency.isEmpty && !isFetchingQuote
+    }
+
+    var canSubmit: Bool {
+        amountValue > 0 && destinationValidationError == nil && !isSubmitting
+    }
+
+    private var amountValue: Double {
+        Double(amountText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+    }
+
+    private var normalizedFromCurrency: String {
+        fromCurrency.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private var normalizedToCurrency: String {
+        toCurrency.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private var destinationValidationError: String? {
+        switch destinationType {
+        case .appUser:
+            return recipientUserId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Recipient user ID is required."
+                : nil
+        case .beneficiary:
+            return selectedBeneficiaryId.isEmpty ? "Select a beneficiary." : nil
+        case .paymentMethod:
+            return selectedPaymentMethodId.isEmpty ? "Select a payment method." : nil
+        }
+    }
 
     func refresh(uid: String) async {
         isLoading = true
@@ -61,30 +113,50 @@ final class WalletTransactViewModel: ObservableObject {
     }
 
     func fetchQuote() async {
-        guard let amount = Double(amountText), amount > 0 else {
+        let amount = amountValue
+        guard amount > 0 else {
             errorMessage = "Enter a valid amount."
             return
         }
+        guard !normalizedFromCurrency.isEmpty, !normalizedToCurrency.isEmpty else {
+            errorMessage = "Enter both currencies."
+            return
+        }
+
+        isFetchingQuote = true
+        errorMessage = nil
+        defer { isFetchingQuote = false }
 
         do {
             quote = try await repository.getQuote(
                 amount: amount,
-                fromCurrency: fromCurrency,
-                toCurrency: toCurrency
+                fromCurrency: normalizedFromCurrency,
+                toCurrency: normalizedToCurrency
             )
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func submit(user: AppSessionUser) async {
-        guard let amount = Double(amountText), amount > 0 else {
+    func submit() async {
+        let amount = amountValue
+        guard amount > 0 else {
             errorMessage = "Enter a valid amount."
+            return
+        }
+        if let destinationValidationError {
+            errorMessage = destinationValidationError
+            return
+        }
+
+        if normalizedFromCurrency != normalizedToCurrency && quote == nil {
+            errorMessage = "Get quote before sending across currencies."
             return
         }
 
         isSubmitting = true
         errorMessage = nil
+        statusMessage = nil
         defer { isSubmitting = false }
 
         do {
@@ -92,36 +164,24 @@ final class WalletTransactViewModel: ObservableObject {
             switch destinationType {
             case .appUser:
                 let recipient = recipientUserId.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !recipient.isEmpty else {
-                    errorMessage = "Recipient user ID is required."
-                    return
-                }
                 message = try await repository.sendToAppUser(
                     recipientUserId: recipient,
                     amount: amount,
-                    currency: fromCurrency,
+                    currency: normalizedFromCurrency,
                     note: note
                 )
             case .beneficiary:
-                guard !selectedBeneficiaryId.isEmpty else {
-                    errorMessage = "Select a beneficiary."
-                    return
-                }
                 message = try await repository.sendToBeneficiary(
                     beneficiaryId: selectedBeneficiaryId,
                     amount: amount,
-                    currency: fromCurrency,
+                    currency: normalizedFromCurrency,
                     note: note
                 )
             case .paymentMethod:
-                guard !selectedPaymentMethodId.isEmpty else {
-                    errorMessage = "Select a payment method."
-                    return
-                }
                 message = try await repository.sendToPaymentMethod(
                     paymentMethodId: selectedPaymentMethodId,
                     amount: amount,
-                    currency: fromCurrency,
+                    currency: normalizedFromCurrency,
                     note: note
                 )
             }

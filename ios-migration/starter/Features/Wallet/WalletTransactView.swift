@@ -66,6 +66,12 @@ struct WalletTransactView: View {
                     Task { await viewModel.fetchQuote() }
                 }
                 .buttonStyle(.bordered)
+                .disabled(!viewModel.canFetchQuote)
+
+                if viewModel.isFetchingQuote {
+                    ProgressView()
+                        .controlSize(.small)
+                }
 
                 if let quote = viewModel.quote {
                     VStack(alignment: .leading, spacing: 4) {
@@ -80,7 +86,7 @@ struct WalletTransactView: View {
 
             Section {
                 Button {
-                    Task { await viewModel.submit(user: user) }
+                    Task { await viewModel.submit() }
                 } label: {
                     if viewModel.isSubmitting {
                         ProgressView()
@@ -89,7 +95,7 @@ struct WalletTransactView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isSubmitting)
+                .disabled(!viewModel.canSubmit)
             }
         }
         .navigationTitle("Send Money")
@@ -106,13 +112,13 @@ struct WalletTransactView: View {
 
     private func itemLabel(_ item: BeneficiaryRecord) -> String {
         let name = item.name ?? "Beneficiary"
-        let suffix = [item.network, item.phone].compactMap { $0 }.joined(separator: " • ")
-        return suffix.isEmpty ? name : "\(name) • \(suffix)"
+        let suffix = [item.network, item.phone].compactMap { $0 }.joined(separator: " - ")
+        return suffix.isEmpty ? name : "\(name) - \(suffix)"
     }
 
     private func methodLabel(_ method: PaymentMethodRecord) -> String {
         let brand = (method.brand ?? method.type ?? "Method").capitalized
         let last4 = method.last4 ?? "0000"
-        return "\(brand) •••• \(last4)"
+        return "\(brand) **** \(last4)"
     }
 }

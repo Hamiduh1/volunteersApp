@@ -41,11 +41,11 @@ struct GlobalWalletHomeView: View {
                                     Text(tx.title)
                                         .font(.headline)
                                     Spacer()
-                                    Text(String(format: "%.2f", tx.amount))
+                                    Text(formattedAmount(tx.amount))
                                         .fontWeight(.semibold)
                                         .foregroundStyle(tx.amount >= 0 ? .green : .red)
                                 }
-                                Text("\(tx.type.uppercased()) • \(tx.status)")
+                                Text("\(tx.type.uppercased()) - \(tx.status)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 if let date = tx.createdAt {
@@ -79,5 +79,10 @@ struct GlobalWalletHomeView: View {
         formatter.currencyCode = viewModel.summary.currency
         return formatter.string(from: NSNumber(value: viewModel.summary.balance))
             ?? "\(viewModel.summary.currency) \(String(format: "%.2f", viewModel.summary.balance))"
+    }
+
+    private func formattedAmount(_ amount: Double) -> String {
+        let sign = amount >= 0 ? "+" : "-"
+        return "\(sign)\(String(format: "%.2f", abs(amount)))"
     }
 }

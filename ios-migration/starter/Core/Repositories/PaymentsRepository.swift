@@ -22,7 +22,7 @@ final class PaymentsRepository {
         let data = (map["data"] as? [String: Any]) ?? map
 
         return PayoutSetupStatusRecord(
-            hasAccount: (data["hasAccount"] as? Bool) ?? false,
+            hasAccount: (data["hasAccount"] as? Bool) ?? ((data["hasStripeAccount"] as? Bool) ?? false),
             detailsSubmitted: (data["detailsSubmitted"] as? Bool) ?? false,
             payoutsEnabled: (data["payoutsEnabled"] as? Bool) ?? false,
             chargesEnabled: (data["chargesEnabled"] as? Bool) ?? false
@@ -36,6 +36,8 @@ final class PaymentsRepository {
     func createOnboardingLink() async throws -> String {
         let map = try await FunctionsService.shared.callMap(function: .createConnectOnboardingLink)
         let data = (map["data"] as? [String: Any]) ?? map
-        return (data["url"] as? String) ?? ""
+        return (data["url"] as? String)
+            ?? (data["onboardingUrl"] as? String)
+            ?? ""
     }
 }
