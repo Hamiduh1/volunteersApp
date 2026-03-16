@@ -19,6 +19,7 @@ Copy these files into your iOS target:
 - `Core/Repositories/LiveRepository.swift`
 - `Core/Repositories/PaymentsRepository.swift`
 - `Core/Repositories/AppConfigRepository.swift`
+- `Core/Repositories/AlertsRepository.swift`
 - `Core/Repositories/OwnerAdminRepository.swift`
 - `Core/Repositories/CommunityRepository.swift`
 - `Core/Repositories/GlobalWalletRepository.swift`
@@ -75,6 +76,10 @@ Copy these files into your iOS target:
 - `Features/Shared/Payments/PaymentMethodsViewModel.swift`
 - `Features/Shared/Support/AIAssistantView.swift`
 - `Features/Shared/Support/AIAssistantViewModel.swift`
+- `Features/Shared/Support/NotificationSettingsView.swift`
+- `Features/Shared/Support/NotificationSettingsViewModel.swift`
+- `Features/Shared/Support/CommunityAlertsView.swift`
+- `Features/Shared/Support/CommunityAlertsViewModel.swift`
 - `Features/Shared/Support/PrivacyPolicyView.swift`
 - `Features/Shared/Support/PrivacyPolicyViewModel.swift`
 - `Features/Shared/Support/TermsAndConditionsView.swift`

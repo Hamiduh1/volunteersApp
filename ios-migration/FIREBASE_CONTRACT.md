@@ -21,7 +21,9 @@ Top-level collections currently in active use:
 - `employers`
 - `events`
 - `jobs`
+- `jobPosts` (legacy alias)
 - `applications` (root-level job applications)
+- `event_applications` (legacy event applications collection)
 - `live_sessions`
 - `join_requests`
 - `chats`
@@ -35,12 +37,17 @@ Top-level collections currently in active use:
 - `garage_sale_payments`
 - `app_config`
 - `system`
+- `settings` (legacy/config docs)
 - `howToUseTips`
+- `galleryUploads`
 - `general_support_items`
 - `aml_cft_content`
 - `user_reports`
 - `userReports`
 - `blindDateProfiles`
+- `blindDateInvitations` (legacy top-level)
+- `blindDateSentInvitations` (legacy top-level)
+- `dating_profiles`
 
 Key subcollections:
 - `users/{uid}/transactions`
@@ -49,11 +56,13 @@ Key subcollections:
 - `users/{uid}/invitations`
 - `users/{uid}/chat_invitations` (legacy alias)
 - `users/{uid}/blindDateInvitations`
+- `users/{uid}/blindDateSentInvitations`
 - `users/{uid}/hostedEvents`
 - `users/{uid}/jokes`
 - `users/{uid}/followers`
 - `users/{uid}/following`
 - `events/{eventId}/applications`
+- `events/{eventId}/event_applications` (legacy)
 - `jobs/{jobId}/applications`
 - `chats/{chatId}/messages`
 - `chats/{chatId}/call_logs`
@@ -67,6 +76,7 @@ Collection group queries used:
 - `event_images/{userId}/{eventId}/{fileName}`
 - `blind_date_media/{userId}/{fileName}`
 - `dating_images/{userId}/{fileName}`
+- `gallery_uploads/{fileName}`
 - `joke_images/{userId}/{fileName}`
 - `joke_videos/{userId}/{fileName}`
 - `joke_docs/{userId}/{fileName}`

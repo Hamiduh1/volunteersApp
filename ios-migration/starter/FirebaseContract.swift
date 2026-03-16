@@ -6,7 +6,9 @@ enum FirestoreCollection: String, CaseIterable {
     case employers
     case events
     case jobs
+    case jobPosts
     case applications
+    case eventApplications = "event_applications"
     case liveSessions = "live_sessions"
     case joinRequests = "join_requests"
     case chats
@@ -20,10 +22,17 @@ enum FirestoreCollection: String, CaseIterable {
     case garageSalePayments = "garage_sale_payments"
     case appConfig = "app_config"
     case system
+    case settings
     case howToUseTips
+    case galleryUploads
     case generalSupportItems = "general_support_items"
     case amlCftContent = "aml_cft_content"
     case userReports = "user_reports"
+    case userReportsLegacy = "userReports"
+    case blindDateProfiles
+    case blindDateInvitations
+    case blindDateSentInvitations
+    case datingProfiles = "dating_profiles"
 }
 
 enum FirestoreSubcollection: String {
@@ -33,11 +42,13 @@ enum FirestoreSubcollection: String {
     case invitations
     case chatInvitations = "chat_invitations"
     case blindDateInvitations
+    case blindDateSentInvitations
     case hostedEvents
     case jokes
     case followers
     case following
     case applications
+    case eventApplications = "event_applications"
     case messages
     case callLogs = "call_logs"
     case comments
@@ -84,6 +95,7 @@ enum StorageFolder: String {
     case eventImages = "event_images"
     case blindDateMedia = "blind_date_media"
     case datingImages = "dating_images"
+    case galleryUploads = "gallery_uploads"
     case jokeImages = "joke_images"
     case jokeVideos = "joke_videos"
     case jokeDocs = "joke_docs"

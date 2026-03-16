@@ -294,6 +294,93 @@ struct SupportItemRecord: Codable, Identifiable {
     }
 }
 
+enum NotificationSettingField: String, CaseIterable, Identifiable {
+    case newFollowers
+    case jokesPosts
+    case liveStreams
+    case eventReminders
+    case appUpdates
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .newFollowers:
+            return "New Followers"
+        case .jokesPosts:
+            return "New MindLoom Posts"
+        case .liveStreams:
+            return "Live Streams"
+        case .eventReminders:
+            return "Event Reminders"
+        case .appUpdates:
+            return "App Updates"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .newFollowers:
+            return "Be notified when someone starts following your profile."
+        case .jokesPosts:
+            return "Get alerts when creators you follow post new MindLoom content."
+        case .liveStreams:
+            return "Get notified when users you follow go live."
+        case .eventReminders:
+            return "Stay updated on upcoming events you joined."
+        case .appUpdates:
+            return "Receive app improvement and feature release announcements."
+        }
+    }
+}
+
+struct NotificationSettingsRecord {
+    var newFollowers: Bool = true
+    var jokesPosts: Bool = true
+    var liveStreams: Bool = true
+    var eventReminders: Bool = true
+    var appUpdates: Bool = false
+
+    func value(for field: NotificationSettingField) -> Bool {
+        switch field {
+        case .newFollowers:
+            return newFollowers
+        case .jokesPosts:
+            return jokesPosts
+        case .liveStreams:
+            return liveStreams
+        case .eventReminders:
+            return eventReminders
+        case .appUpdates:
+            return appUpdates
+        }
+    }
+
+    mutating func set(_ field: NotificationSettingField, enabled: Bool) {
+        switch field {
+        case .newFollowers:
+            newFollowers = enabled
+        case .jokesPosts:
+            jokesPosts = enabled
+        case .liveStreams:
+            liveStreams = enabled
+        case .eventReminders:
+            eventReminders = enabled
+        case .appUpdates:
+            appUpdates = enabled
+        }
+    }
+}
+
+struct CommunityAlertRecord: Identifiable {
+    let id: String
+    let title: String
+    let description: String
+    let source: String
+    let imageUrl: String?
+    let timestamp: Date
+}
+
 struct OwnerRevenueSummaryRecord {
     let totalCollected: Double
     let balance: Double

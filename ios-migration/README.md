@@ -33,6 +33,8 @@ This folder starts iOS migration without changing your current Android structure
   Starter Firestore models with status normalization for iOS.
 - `ios-migration/scripts/check_target_coverage.ps1`:
   Verifies that all files listed in `starter/README.md` are present in your iOS source tree.
+- `ios-migration/scripts/android_ios_contract_diff.ps1`:
+  Diffs Android collection/function/storage references against iOS `FirebaseContract.swift`.
 
 ## Immediate Next Steps
 1. Create iOS project target in Xcode (SwiftUI, iOS 16+ recommended).

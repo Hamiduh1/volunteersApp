@@ -77,6 +77,12 @@ struct ProfileHomeView: View {
                     NavigationLink("AI Assistant") {
                         AIAssistantView()
                     }
+                    NavigationLink("Notification Settings") {
+                        NotificationSettingsView(user: user)
+                    }
+                    NavigationLink("Community Alerts") {
+                        CommunityAlertsView(user: user)
+                    }
                     NavigationLink("Privacy Policy") {
                         PrivacyPolicyView()
                     }
