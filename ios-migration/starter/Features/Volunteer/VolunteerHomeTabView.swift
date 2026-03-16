@@ -35,20 +35,7 @@ struct VolunteerHomeTabView: View {
                     Label("Tools", systemImage: "sparkles")
                 }
 
-            VStack(spacing: 16) {
-                Text("Signed in as \(user.email ?? user.uid)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Button("Sign Out") {
-                    do {
-                        try AuthService.shared.signOut()
-                    } catch {
-                        // Keep this minimal in starter templates.
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding()
+            ProfileHomeView(user: user)
             .tabItem {
                 Label("Profile", systemImage: "person")
             }

@@ -29,19 +29,7 @@ struct AdminHomeTabView: View {
             AdvancedToolsHomeView(user: user)
                 .tabItem { Label("Tools", systemImage: "sparkles") }
 
-            VStack(spacing: 16) {
-                Text("Role: \((user.role.rawValue).uppercased())")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Text(user.email ?? user.uid)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Sign Out") {
-                    try? AuthService.shared.signOut()
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding()
+            ProfileHomeView(user: user)
             .tabItem { Label("Profile", systemImage: "person") }
         }
     }

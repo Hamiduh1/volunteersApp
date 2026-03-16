@@ -27,4 +27,16 @@ final class AuthService {
     func signOut() throws {
         try Auth.auth().signOut()
     }
+
+    func sendPasswordReset(email: String) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            Auth.auth().sendPasswordReset(withEmail: email) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
 }

@@ -21,6 +21,7 @@ Copy these files into your iOS target:
 - `Core/Repositories/OwnerAdminRepository.swift`
 - `Core/Repositories/CommunityRepository.swift`
 - `Core/Repositories/GlobalWalletRepository.swift`
+- `Core/Repositories/ProfileRepository.swift`
 - `App/ContentViewTemplate.swift` (rename to `ContentView.swift`)
 - `App/VolunteersAppiOSAppTemplate.swift` (merge into your app entry file)
 - `Features/Auth/LoginView.swift`
@@ -97,6 +98,10 @@ Copy these files into your iOS target:
 - `Features/Wallet/WalletTransactViewModel.swift`
 - `Features/Wallet/WalletTransactionHistoryView.swift`
 - `Features/Wallet/WalletTransactionHistoryViewModel.swift`
+- `Features/Profile/ProfileHomeView.swift`
+- `Features/Profile/ProfileHomeViewModel.swift`
+- `Features/Profile/AccountSecurityView.swift`
+- `Features/Profile/AccountSecurityViewModel.swift`
 - `Features/Shared/Support/SupportCenterView.swift`
 - `Features/Shared/Support/SupportCenterViewModel.swift`
 

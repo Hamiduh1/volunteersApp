@@ -472,6 +472,17 @@ struct WalletQuoteRecord {
     let targetCurrency: String
 }
 
+struct UserProfileRecord {
+    let uid: String
+    let email: String
+    let name: String
+    let username: String
+    let phoneNumber: String
+    let profileImageUrl: String?
+    let role: String
+    let isEmailVerified: Bool
+}
+
 // Firestore dictionaries with mixed values (wallet/settings style documents).
 struct AnyCodable: Codable {
     let value: Any

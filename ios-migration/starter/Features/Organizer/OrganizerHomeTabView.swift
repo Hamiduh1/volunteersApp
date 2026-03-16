@@ -20,16 +20,7 @@ struct OrganizerHomeTabView: View {
             AdvancedToolsHomeView(user: user)
                 .tabItem { Label("Tools", systemImage: "sparkles") }
 
-            VStack(spacing: 16) {
-                Text("Organizer: \(user.email ?? user.uid)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Button("Sign Out") {
-                    try? AuthService.shared.signOut()
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding()
+            ProfileHomeView(user: user)
             .tabItem { Label("Profile", systemImage: "person") }
         }
     }
