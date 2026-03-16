@@ -18,8 +18,7 @@ struct AppRouterView: View {
             case .employer:
                 EmployerHomeTabView(user: user)
             case .owner, .admin, .associate, .support, .supportAssociate:
-                Text("Admin iOS screens are next migration phase.")
-                    .padding()
+                AdminHomeTabView(user: user)
             case .unknown:
                 Text("Role is unknown. Please contact support.")
                     .padding()

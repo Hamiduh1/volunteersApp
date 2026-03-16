@@ -261,6 +261,121 @@ struct SupportItemRecord: Codable, Identifiable {
     }
 }
 
+struct OwnerRevenueSummaryRecord {
+    let totalCollected: Double
+    let balance: Double
+    let stripeForexEarnings: Double
+    let mobileMoneyHiddenFee: Double
+    let blindDateFees: Double
+    let agentAuthorizationFees: Double
+    let agentCashoutOwnerShare: Double
+    let otherIncome: Double
+    let transactionCount: Int
+    let lastUpdate: Date?
+}
+
+struct OwnerRevenueTransactionRecord: Identifiable {
+    let id: String
+    let source: String
+    let amount: Double
+    let note: String?
+    let createdAt: Date?
+}
+
+struct AdminPayoutRequestRecord: Identifiable {
+    let id: String
+    let requesterId: String
+    let requesterName: String
+    let amount: Double
+    let currency: String
+    let status: String
+    let destinationLabel: String?
+    let createdAt: Date?
+}
+
+struct SupportUserSummaryRecord: Identifiable {
+    let id: String
+    let username: String
+    let email: String
+    let phone: String
+    let role: String
+    let walletBalance: Double
+    let walletCurrency: String
+}
+
+struct SupportComplaintRecord: Identifiable {
+    let id: String
+    let reason: String
+    let eventName: String?
+    let reportedEmail: String?
+    let reporterDisplayName: String?
+    let timestamp: Date?
+}
+
+struct SupportAccountTransactionRecord: Identifiable {
+    let id: String
+    let title: String
+    let amount: Double
+    let type: String
+    let status: String
+    let source: String?
+    let note: String?
+    let timestamp: Date?
+}
+
+struct SupportAccountDetailsRecord {
+    let userId: String
+    let username: String
+    let email: String
+    let phone: String
+    let role: String
+    let walletBalance: Double
+    let walletCurrency: String
+    let payoutsEnabled: Bool
+    let chargesEnabled: Bool
+    let detailsSubmitted: Bool
+    let complaints: [SupportComplaintRecord]
+    let transactions: [SupportAccountTransactionRecord]
+}
+
+struct OwnerUserReportRecord: Identifiable {
+    let id: String
+    let sourceCollection: String
+    let reportedUserName: String
+    let reportedUserEmail: String?
+    let eventName: String?
+    let reason: String
+    let reportingUserDisplayName: String?
+    let reportingUserId: String?
+    let timestamp: Date?
+}
+
+struct OwnerKYCRecord: Identifiable {
+    let id: String
+    let name: String
+    let email: String
+    let role: String
+    let emailVerified: Bool
+    let profileStatus: String
+    let updatedAt: Date?
+}
+
+struct OwnerFeeSettingsRecord {
+    let blindDateFeeUsd: Double
+    let agentAuthorizationFeeUsd: Double
+    let forexProfitMargin: Double
+    let stripeForexDepositProfitMargin: Double
+    let mobileMoneyHiddenFeeRate: Double
+}
+
+struct OwnerSystemConfigRecord {
+    let maintenanceMode: Bool
+    let allowNewSignups: Bool
+    let enableBlindDate: Bool
+    let enableLiveStreams: Bool
+    let maxUploadMb: Int
+}
+
 // Firestore dictionaries with mixed values (wallet/settings style documents).
 struct AnyCodable: Codable {
     let value: Any

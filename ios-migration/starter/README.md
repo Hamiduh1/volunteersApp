@@ -18,6 +18,7 @@ Copy these files into your iOS target:
 - `Core/Repositories/LiveRepository.swift`
 - `Core/Repositories/PaymentsRepository.swift`
 - `Core/Repositories/AppConfigRepository.swift`
+- `Core/Repositories/OwnerAdminRepository.swift`
 - `App/ContentViewTemplate.swift` (rename to `ContentView.swift`)
 - `App/VolunteersAppiOSAppTemplate.swift` (merge into your app entry file)
 - `Features/Auth/LoginView.swift`
@@ -64,6 +65,21 @@ Copy these files into your iOS target:
 - `Features/Shared/Support/PrivacyPolicyViewModel.swift`
 - `Features/Shared/Support/TermsAndConditionsView.swift`
 - `Features/Shared/Support/TermsAndConditionsViewModel.swift`
+- `Features/Admin/AdminHomeTabView.swift`
+- `Features/Admin/Dashboard/OwnerDashboardView.swift`
+- `Features/Admin/Dashboard/OwnerDashboardViewModel.swift`
+- `Features/Admin/Payouts/AdminPayoutQueueView.swift`
+- `Features/Admin/Payouts/AdminPayoutQueueViewModel.swift`
+- `Features/Admin/SupportConsole/SupportConsoleView.swift`
+- `Features/Admin/SupportConsole/SupportConsoleViewModel.swift`
+- `Features/Admin/Reports/OwnerUserReportsView.swift`
+- `Features/Admin/Reports/OwnerUserReportsViewModel.swift`
+- `Features/Admin/KYC/OwnerKYCReviewView.swift`
+- `Features/Admin/KYC/OwnerKYCReviewViewModel.swift`
+- `Features/Admin/Config/OwnerFeeSettingsView.swift`
+- `Features/Admin/Config/OwnerFeeSettingsViewModel.swift`
+- `Features/Admin/Config/OwnerSystemConfigView.swift`
+- `Features/Admin/Config/OwnerSystemConfigViewModel.swift`
 - `Features/Shared/Support/SupportCenterView.swift`
 - `Features/Shared/Support/SupportCenterViewModel.swift`
 
