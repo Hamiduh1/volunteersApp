@@ -20,6 +20,9 @@ struct AdminHomeTabView: View {
             SupportConsoleView(user: user)
                 .tabItem { Label("Support", systemImage: "person.2.badge.gearshape") }
 
+            CommunityHubView(user: user)
+                .tabItem { Label("Community", systemImage: "person.3.sequence") }
+
             AdvancedToolsHomeView(user: user)
                 .tabItem { Label("Tools", systemImage: "sparkles") }
 

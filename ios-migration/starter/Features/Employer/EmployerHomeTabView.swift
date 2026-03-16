@@ -11,6 +11,9 @@ struct EmployerHomeTabView: View {
             EmployerApplicationsReviewView(user: user)
                 .tabItem { Label("Applications", systemImage: "person.3") }
 
+            CommunityHubView(user: user)
+                .tabItem { Label("Community", systemImage: "person.3.sequence") }
+
             AdvancedToolsHomeView(user: user)
                 .tabItem { Label("Tools", systemImage: "sparkles") }
 

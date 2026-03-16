@@ -14,6 +14,9 @@ struct OrganizerHomeTabView: View {
             OrganizerWalletView(user: user)
                 .tabItem { Label("Wallet", systemImage: "wallet.pass") }
 
+            CommunityHubView(user: user)
+                .tabItem { Label("Community", systemImage: "person.3.sequence") }
+
             AdvancedToolsHomeView(user: user)
                 .tabItem { Label("Tools", systemImage: "sparkles") }
 

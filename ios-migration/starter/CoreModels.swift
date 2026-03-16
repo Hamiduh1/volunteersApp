@@ -376,6 +376,83 @@ struct OwnerSystemConfigRecord {
     let maxUploadMb: Int
 }
 
+struct MindLoomPostRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var authorId: String?
+    var authorName: String?
+    var authorProfileUrl: String?
+    var text: String?
+    var mediaUrl: String?
+    var mediaType: String?
+    var likes: [String]?
+    var commentsCount: Int?
+    var timestamp: Timestamp?
+}
+
+struct MindLoomProfileSummary {
+    let authorId: String
+    let authorName: String
+    let authorEmail: String
+    let authorProfileUrl: String?
+    let followersCount: Int
+    let followingCount: Int
+    let likesCount: Int
+}
+
+struct MarketplaceItemRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var title: String?
+    var description: String?
+    var price: Double?
+    var category: String?
+    var sellerName: String?
+    var sellerId: String?
+    var sellerPhone: String?
+    var imageUrls: [String]?
+    var locationName: String?
+    var countryCode: String?
+    var latitude: Double?
+    var longitude: Double?
+    var status: String?
+    var timestamp: Timestamp?
+}
+
+struct AdvertisementRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var title: String?
+    var description: String?
+    var sponsor: String?
+    var ownerPhone: String?
+    var mediaUrls: [String]?
+    var targetUrl: String?
+    var ownerId: String?
+    var timestamp: Timestamp?
+}
+
+struct GarageSaleMediaRecord: Codable {
+    var url: String?
+    var type: String?
+    var name: String?
+}
+
+struct GarageSaleRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var title: String?
+    var description: String?
+    var contactName: String?
+    var contactPhone: String?
+    var contactEmail: String?
+    var address: String?
+    var city: String?
+    var state: String?
+    var postalCode: String?
+    var latitude: Double?
+    var longitude: Double?
+    var media: [GarageSaleMediaRecord]?
+    var ownerId: String?
+    var timestamp: Timestamp?
+}
+
 // Firestore dictionaries with mixed values (wallet/settings style documents).
 struct AnyCodable: Codable {
     let value: Any

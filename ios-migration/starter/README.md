@@ -19,6 +19,7 @@ Copy these files into your iOS target:
 - `Core/Repositories/PaymentsRepository.swift`
 - `Core/Repositories/AppConfigRepository.swift`
 - `Core/Repositories/OwnerAdminRepository.swift`
+- `Core/Repositories/CommunityRepository.swift`
 - `App/ContentViewTemplate.swift` (rename to `ContentView.swift`)
 - `App/VolunteersAppiOSAppTemplate.swift` (merge into your app entry file)
 - `Features/Auth/LoginView.swift`
@@ -80,6 +81,15 @@ Copy these files into your iOS target:
 - `Features/Admin/Config/OwnerFeeSettingsViewModel.swift`
 - `Features/Admin/Config/OwnerSystemConfigView.swift`
 - `Features/Admin/Config/OwnerSystemConfigViewModel.swift`
+- `Features/Community/CommunityHubView.swift`
+- `Features/Community/MindLoom/MindLoomFeedView.swift`
+- `Features/Community/MindLoom/MindLoomFeedViewModel.swift`
+- `Features/Community/MindLoom/MindLoomProfileView.swift`
+- `Features/Community/MindLoom/MindLoomProfileViewModel.swift`
+- `Features/Community/Marketplace/MarketplaceView.swift`
+- `Features/Community/Marketplace/MarketplaceViewModel.swift`
+- `Features/Community/Sponsored/SponsoredContentView.swift`
+- `Features/Community/Sponsored/SponsoredContentViewModel.swift`
 - `Features/Shared/Support/SupportCenterView.swift`
 - `Features/Shared/Support/SupportCenterViewModel.swift`
 

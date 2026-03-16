@@ -20,6 +20,11 @@ struct VolunteerHomeTabView: View {
                     Label("Activity", systemImage: "clock")
                 }
 
+            CommunityHubView(user: user)
+                .tabItem {
+                    Label("Community", systemImage: "person.3.sequence")
+                }
+
             AdvancedToolsHomeView(user: user)
                 .tabItem {
                     Label("Tools", systemImage: "sparkles")
