@@ -110,4 +110,47 @@ final class EmployerRepository {
             )
         }
     }
+
+    func createJobPosting(
+        uid: String,
+        title: String,
+        description: String,
+        locationString: String,
+        category: String,
+        jobType: String,
+        salaryOrCompensation: String,
+        applicationDeadline: Date
+    ) async throws -> String {
+        let employerName = try await fetchUserDisplayName(uid: uid)
+        let ref = db.collection(FirestoreCollection.jobs.rawValue).document()
+
+        try await ref.setData([
+            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
+            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+            "locationString": locationString.trimmingCharacters(in: .whitespacesAndNewlines),
+            "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
+            "jobType": jobType.trimmingCharacters(in: .whitespacesAndNewlines),
+            "salaryOrCompensation": salaryOrCompensation.trimmingCharacters(in: .whitespacesAndNewlines),
+            "applicationDeadline": Timestamp(date: applicationDeadline),
+            "postedDate": FieldValue.serverTimestamp(),
+            "status": "OPEN",
+            "applicantsCount": 0,
+            "employerUid": uid,
+            "employerId": uid,
+            "employerName": employerName,
+            "createdAt": FieldValue.serverTimestamp(),
+            "lastUpdatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+
+        return ref.documentID
+    }
+
+    private func fetchUserDisplayName(uid: String) async throws -> String {
+        let userSnap = try await db.collection(FirestoreCollection.users.rawValue).document(uid).getDocument()
+        let data = userSnap.data() ?? [:]
+        return (data["name"] as? String)
+            ?? (data["username"] as? String)
+            ?? (data["email"] as? String)
+            ?? "Employer"
+    }
 }

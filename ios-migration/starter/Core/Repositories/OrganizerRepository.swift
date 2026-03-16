@@ -119,6 +119,43 @@ final class OrganizerRepository {
         )
     }
 
+    func createHostedEvent(
+        uid: String,
+        title: String,
+        description: String,
+        category: String,
+        locationName: String,
+        locationAddress: String,
+        eventDate: Date,
+        volunteerLimit: Int,
+        payment: Double
+    ) async throws -> String {
+        let organizerName = try await fetchUserDisplayName(uid: uid)
+        let ref = db.collection(FirestoreCollection.events.rawValue).document()
+
+        try await ref.setData([
+            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
+            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+            "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
+            "locationName": locationName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "locationAddress": locationAddress.trimmingCharacters(in: .whitespacesAndNewlines),
+            "eventDateTime": Timestamp(date: eventDate),
+            "eventTimestamp": Timestamp(date: eventDate),
+            "volunteerLimit": volunteerLimit,
+            "participantsCount": 0,
+            "payment": payment,
+            "eventFee": payment,
+            "status": "OPEN",
+            "organizerId": uid,
+            "organizerUid": uid,
+            "organizerName": organizerName,
+            "createdAt": FieldValue.serverTimestamp(),
+            "lastUpdatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+
+        return ref.documentID
+    }
+
     private func fetchEventTitles(ids: [String]) async throws -> [String: String] {
         var out: [String: String] = [:]
         for id in ids where !id.isEmpty {
@@ -126,5 +163,14 @@ final class OrganizerRepository {
             out[id] = (snap.data()?["title"] as? String) ?? "Event"
         }
         return out
+    }
+
+    private func fetchUserDisplayName(uid: String) async throws -> String {
+        let userSnap = try await db.collection(FirestoreCollection.users.rawValue).document(uid).getDocument()
+        let data = userSnap.data() ?? [:]
+        return (data["name"] as? String)
+            ?? (data["username"] as? String)
+            ?? (data["email"] as? String)
+            ?? "Organizer"
     }
 }

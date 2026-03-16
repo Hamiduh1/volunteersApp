@@ -42,6 +42,8 @@ Copy these files into your iOS target:
 - `Features/Organizer/OrganizerHomeTabView.swift`
 - `Features/Organizer/Hosted/OrganizerHostedEventsView.swift`
 - `Features/Organizer/Hosted/OrganizerHostedEventsViewModel.swift`
+- `Features/Organizer/Hosted/OrganizerEventComposerView.swift`
+- `Features/Organizer/Hosted/OrganizerEventComposerViewModel.swift`
 - `Features/Organizer/Applications/OrganizerApplicationsReviewView.swift`
 - `Features/Organizer/Applications/OrganizerApplicationsReviewViewModel.swift`
 - `Features/Organizer/Wallet/OrganizerWalletView.swift`
@@ -49,6 +51,8 @@ Copy these files into your iOS target:
 - `Features/Employer/EmployerHomeTabView.swift`
 - `Features/Employer/PostedJobs/EmployerPostedJobsView.swift`
 - `Features/Employer/PostedJobs/EmployerPostedJobsViewModel.swift`
+- `Features/Employer/PostedJobs/EmployerJobComposerView.swift`
+- `Features/Employer/PostedJobs/EmployerJobComposerViewModel.swift`
 - `Features/Employer/Applications/EmployerApplicationsReviewView.swift`
 - `Features/Employer/Applications/EmployerApplicationsReviewViewModel.swift`
 - `Features/Shared/Advanced/AdvancedToolsHomeView.swift`

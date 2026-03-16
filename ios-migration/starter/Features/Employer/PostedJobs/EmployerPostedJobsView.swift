@@ -3,6 +3,7 @@ import SwiftUI
 struct EmployerPostedJobsView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = EmployerPostedJobsViewModel()
+    @State private var showingComposer = false
 
     var body: some View {
         NavigationStack {
@@ -26,8 +27,22 @@ struct EmployerPostedJobsView: View {
                 }
             }
             .navigationTitle("Posted Jobs")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingComposer = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
             .task { await viewModel.refresh(uid: user.uid) }
             .refreshable { await viewModel.refresh(uid: user.uid) }
+            .sheet(isPresented: $showingComposer) {
+                EmployerJobComposerView(user: user) {
+                    Task { await viewModel.refresh(uid: user.uid) }
+                }
+            }
             .alert("Error", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
                 set: { if !$0 { viewModel.errorMessage = nil } }
