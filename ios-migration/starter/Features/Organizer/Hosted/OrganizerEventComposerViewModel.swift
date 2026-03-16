@@ -89,8 +89,9 @@ final class OrganizerEventComposerViewModel: ObservableObject {
             }
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
             return false
         }
     }
 }
+

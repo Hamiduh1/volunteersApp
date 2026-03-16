@@ -25,7 +25,8 @@ final class LoginViewModel: ObservableObject {
         do {
             _ = try await AuthService.shared.signIn(email: email, password: password)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

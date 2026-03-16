@@ -30,7 +30,7 @@ final class JobsListViewModel: ObservableObject {
             }
             appliedJobIds = applied
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -44,7 +44,8 @@ final class JobsListViewModel: ObservableObject {
             try await repository.applyToJob(jobId: jobId, user: user)
             appliedJobIds.insert(jobId)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

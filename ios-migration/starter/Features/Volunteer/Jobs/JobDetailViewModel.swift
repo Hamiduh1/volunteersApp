@@ -24,7 +24,7 @@ final class JobDetailViewModel: ObservableObject {
             job = try await repository.fetchJob(jobId: jobId)
             application = try await repository.fetchJobApplication(jobId: jobId, uid: user.uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -38,7 +38,8 @@ final class JobDetailViewModel: ObservableObject {
             try await repository.applyToJob(jobId: jobId, user: user)
             application = try await repository.fetchJobApplication(jobId: jobId, uid: user.uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

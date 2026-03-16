@@ -26,7 +26,7 @@ final class PaymentMethodsViewModel: ObservableObject {
             payoutStatus = try await payoutTask
             statusMessage = "Loaded \(methods.count) payment methods."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -40,7 +40,7 @@ final class PaymentMethodsViewModel: ObservableObject {
             payoutStatus = try await repository.fetchPayoutStatus()
             statusMessage = "Connect account created or already exists."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -57,7 +57,8 @@ final class PaymentMethodsViewModel: ObservableObject {
                 statusMessage = "Onboarding link generated."
             }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

@@ -26,7 +26,8 @@ final class OrganizerWalletViewModel: ObservableObject {
                 ? "Wallet loaded. No transactions found."
                 : "Wallet loaded with \(transactions.count) transactions."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

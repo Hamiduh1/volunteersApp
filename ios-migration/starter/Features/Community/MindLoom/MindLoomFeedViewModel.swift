@@ -22,7 +22,7 @@ final class MindLoomFeedViewModel: ObservableObject {
         do {
             posts = try await repository.fetchMindLoomPosts()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -41,7 +41,7 @@ final class MindLoomFeedViewModel: ObservableObject {
             await refresh()
             statusMessage = "Post shared to MindLoom."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -59,7 +59,7 @@ final class MindLoomFeedViewModel: ObservableObject {
             statusMessage = currentlyLiked ? "Like removed." : "Post liked."
         } catch {
             updateLocalLikes(postId: postId, uid: uid, like: currentlyLiked)
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -76,3 +76,4 @@ final class MindLoomFeedViewModel: ObservableObject {
         posts[index] = updated
     }
 }
+

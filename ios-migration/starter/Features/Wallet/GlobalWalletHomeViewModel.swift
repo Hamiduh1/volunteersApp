@@ -26,7 +26,8 @@ final class GlobalWalletHomeViewModel: ObservableObject {
                 ? "Wallet loaded. No recent transactions yet."
                 : "Wallet loaded with \(transactions.count) recent transactions."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

@@ -59,7 +59,7 @@ final class OwnerSystemConfigViewModel: ObservableObject {
             loadedConfig = config
             apply(config)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -80,7 +80,7 @@ final class OwnerSystemConfigViewModel: ObservableObject {
             apply(config)
             statusMessage = "System config saved."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -122,3 +122,4 @@ final class OwnerSystemConfigViewModel: ObservableObject {
         maxUploadMb = String(config.maxUploadMb)
     }
 }
+

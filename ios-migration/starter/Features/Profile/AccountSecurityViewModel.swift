@@ -22,7 +22,8 @@ final class AccountSecurityViewModel: ObservableObject {
             try await AuthService.shared.sendPasswordReset(email: cleanEmail)
             statusMessage = "Password reset email sent to \(cleanEmail)."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

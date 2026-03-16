@@ -40,7 +40,7 @@ final class MarketplaceViewModel: ObservableObject {
         do {
             items = try await repository.fetchMarketplaceItems()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -76,7 +76,8 @@ final class MarketplaceViewModel: ObservableObject {
             await refresh()
             statusMessage = "Marketplace item posted."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

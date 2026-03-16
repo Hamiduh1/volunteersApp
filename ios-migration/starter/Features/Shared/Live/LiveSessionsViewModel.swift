@@ -65,7 +65,7 @@ final class LiveSessionsViewModel: ObservableObject {
                 ? "No live sessions found."
                 : "Loaded \(sessions.count) sessions (\(liveCount) live)."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -90,7 +90,7 @@ final class LiveSessionsViewModel: ObservableObject {
             let channelLabel = channel.isEmpty ? "selected session" : channel
             tokenStatusMessage = "Token received for \(channelLabel)."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -130,3 +130,4 @@ final class LiveSessionsViewModel: ObservableObject {
         }
     }
 }
+

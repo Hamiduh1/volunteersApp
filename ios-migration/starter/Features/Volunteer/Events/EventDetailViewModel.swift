@@ -24,7 +24,7 @@ final class EventDetailViewModel: ObservableObject {
             event = try await repository.fetchEvent(eventId: eventId)
             application = try await repository.fetchEventApplication(eventId: eventId, uid: user.uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -38,7 +38,8 @@ final class EventDetailViewModel: ObservableObject {
             try await repository.applyToEvent(eventId: eventId, user: user)
             application = try await repository.fetchEventApplication(eventId: eventId, uid: user.uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

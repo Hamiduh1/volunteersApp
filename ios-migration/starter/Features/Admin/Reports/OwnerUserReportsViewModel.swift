@@ -63,7 +63,8 @@ final class OwnerUserReportsViewModel: ObservableObject {
                 statusMessage = "No reports available."
             }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

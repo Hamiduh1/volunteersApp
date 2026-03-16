@@ -72,7 +72,8 @@ final class MyActivityViewModel: ObservableObject {
             items = try await repository.fetchActivity(for: user.uid)
             statusMessage = items.isEmpty ? "No activity found." : "Loaded \(items.count) activity item(s)."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

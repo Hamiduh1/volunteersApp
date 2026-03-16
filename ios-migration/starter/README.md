@@ -7,6 +7,7 @@ Copy these files into your iOS target:
 - `Core/Services/SessionManager.swift`
 - `Core/Services/FirestoreService.swift`
 - `Core/Services/FunctionsService.swift`
+- `Core/Services/AppErrorMapper.swift`
 - `Core/Repositories/EventsRepository.swift`
 - `Core/Repositories/JobsRepository.swift`
 - `Core/Repositories/MyActivityRepository.swift`

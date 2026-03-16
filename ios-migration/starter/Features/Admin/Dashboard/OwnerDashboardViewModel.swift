@@ -66,7 +66,7 @@ final class OwnerDashboardViewModel: ObservableObject {
             summary = try await summaryTask
             transactions = try await txTask
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -79,7 +79,7 @@ final class OwnerDashboardViewModel: ObservableObject {
             statusMessage = try await repository.cashOutOwnerRevenue()
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -93,3 +93,4 @@ final class OwnerDashboardViewModel: ObservableObject {
         }
     }
 }
+

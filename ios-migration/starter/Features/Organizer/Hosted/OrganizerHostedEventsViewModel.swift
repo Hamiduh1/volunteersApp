@@ -17,7 +17,7 @@ final class OrganizerHostedEventsViewModel: ObservableObject {
         do {
             events = try await repository.fetchHostedEvents(uid: uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -27,7 +27,8 @@ final class OrganizerHostedEventsViewModel: ObservableObject {
             try await repository.deleteHostedEvent(eventId: eventId)
             await refresh(uid: uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

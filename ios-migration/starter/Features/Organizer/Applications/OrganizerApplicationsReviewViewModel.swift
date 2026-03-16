@@ -45,7 +45,7 @@ final class OrganizerApplicationsReviewViewModel: ObservableObject {
             items = try await repository.fetchManagedApplications(uid: uid)
             statusMessage = items.isEmpty ? "No applications found." : "Loaded \(items.count) applications."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -71,7 +71,8 @@ final class OrganizerApplicationsReviewViewModel: ObservableObject {
             statusMessage = "Application marked as \(status.displayTitle)."
             await refresh(uid: uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

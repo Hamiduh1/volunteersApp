@@ -84,7 +84,8 @@ final class CallHistoryViewModel: ObservableObject {
                 ? "No call records found."
                 : "Loaded \(callLogs.count) call records (\(missedCount) missed)."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

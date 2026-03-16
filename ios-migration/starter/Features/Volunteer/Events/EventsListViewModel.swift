@@ -34,7 +34,7 @@ final class EventsListViewModel: ObservableObject {
             }
             appliedEventIds = applied
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -48,7 +48,8 @@ final class EventsListViewModel: ObservableObject {
             try await repository.applyToEvent(eventId: eventId, user: user)
             appliedEventIds.insert(eventId)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

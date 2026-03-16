@@ -29,7 +29,7 @@ final class MindLoomProfileViewModel: ObservableObject {
             posts = try await postsTask
             isFollowing = try await followingTask
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -45,7 +45,8 @@ final class MindLoomProfileViewModel: ObservableObject {
             await refresh(authorId: authorId, currentUserId: currentUserId)
             statusMessage = followTarget ? "Following." : "Unfollowed."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

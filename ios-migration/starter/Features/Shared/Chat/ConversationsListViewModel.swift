@@ -75,7 +75,7 @@ final class ConversationsListViewModel: ObservableObject {
             invitations = try await invites
             statusMessage = "Loaded \(conversations.count) conversations and \(pendingInvitationCount) pending invitations."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -95,7 +95,7 @@ final class ConversationsListViewModel: ObservableObject {
             routeToConversation = ConversationRoute(id: conversationId)
             await refresh(user: user)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -114,7 +114,7 @@ final class ConversationsListViewModel: ObservableObject {
             statusMessage = "Invitation declined."
             await refresh(user: user)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -124,3 +124,4 @@ final class ConversationsListViewModel: ObservableObject {
             .lowercased()
     }
 }
+

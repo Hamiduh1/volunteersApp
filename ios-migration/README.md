@@ -25,6 +25,8 @@ This folder starts iOS migration without changing your current Android structure
   Canonical backend contract to follow in iOS.
 - `ios-migration/PHASED_ROLLOUT.md`:
   Execution order, effort, and acceptance criteria.
+- `ios-migration/PHASE26_FINAL_HARDENING.md`:
+  Final build-fix, QA, and TestFlight/App Store readiness checklist.
 - `ios-migration/starter/FirebaseContract.swift`:
   Compile-ready enums/path helpers for collections/functions.
 - `ios-migration/starter/CoreModels.swift`:

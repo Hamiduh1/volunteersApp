@@ -44,7 +44,7 @@ final class WalletTransactionHistoryViewModel: ObservableObject {
             items = try await repository.fetchTransactions(uid: uid, limit: 120)
             statusMessage = items.isEmpty ? "No transactions found." : "Loaded \(items.count) transactions."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -70,3 +70,4 @@ final class WalletTransactionHistoryViewModel: ObservableObject {
             || normalizedStatus.contains("debit")
     }
 }
+

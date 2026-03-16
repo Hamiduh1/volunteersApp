@@ -127,7 +127,7 @@ final class WalletTransactViewModel: ObservableObject {
             }
             statusMessage = "Ready to send. \(beneficiaries.count) beneficiaries and \(paymentMethods.count) payment methods loaded."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -154,7 +154,7 @@ final class WalletTransactViewModel: ObservableObject {
                 toCurrency: normalizedToCurrency
             )
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -224,7 +224,7 @@ final class WalletTransactViewModel: ObservableObject {
             note = ""
             quote = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -236,3 +236,4 @@ final class WalletTransactViewModel: ObservableObject {
         paymentMethods.first { $0.id == selectedPaymentMethodId }
     }
 }
+

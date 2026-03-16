@@ -133,7 +133,7 @@ final class SupportConsoleViewModel: ObservableObject {
             }
             statusMessage = users.isEmpty ? "No matching users found." : "Loaded \(users.count) user(s)."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -190,7 +190,7 @@ final class SupportConsoleViewModel: ObservableObject {
             transactionFilter = .all
             statusMessage = canBypassVerification ? "Account details loaded." : "Verification passed. Account details loaded."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -221,7 +221,7 @@ final class SupportConsoleViewModel: ObservableObject {
             statusMessage = "Associate access granted for \(email)."
             await loadUsers()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -230,3 +230,4 @@ final class SupportConsoleViewModel: ObservableObject {
         return value.range(of: pattern, options: .regularExpression) != nil
     }
 }
+

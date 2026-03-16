@@ -40,7 +40,7 @@ final class ProfileHomeViewModel: ObservableObject {
             phoneNumber = fetched.phoneNumber
             profileImageUrl = fetched.profileImageUrl
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -59,7 +59,7 @@ final class ProfileHomeViewModel: ObservableObject {
             statusMessage = "Profile saved."
             await refresh(uid: uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -74,7 +74,8 @@ final class ProfileHomeViewModel: ObservableObject {
             statusMessage = "Profile image updated."
             await refresh(uid: uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

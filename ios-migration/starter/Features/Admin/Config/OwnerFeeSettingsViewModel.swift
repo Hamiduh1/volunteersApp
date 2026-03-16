@@ -61,7 +61,7 @@ final class OwnerFeeSettingsViewModel: ObservableObject {
             loadedRecord = record
             apply(record)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -82,7 +82,7 @@ final class OwnerFeeSettingsViewModel: ObservableObject {
             apply(record)
             statusMessage = "Fee settings saved."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -147,3 +147,4 @@ final class OwnerFeeSettingsViewModel: ObservableObject {
         abs(lhs - rhs) < epsilon
     }
 }
+

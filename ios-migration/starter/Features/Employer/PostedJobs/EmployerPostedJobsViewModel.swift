@@ -17,7 +17,7 @@ final class EmployerPostedJobsViewModel: ObservableObject {
         do {
             jobs = try await repository.fetchPostedJobs(uid: uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -27,7 +27,8 @@ final class EmployerPostedJobsViewModel: ObservableObject {
             try await repository.deleteJobPosting(jobId: jobId)
             await refresh(uid: uid)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

@@ -74,7 +74,7 @@ final class AdminPayoutQueueViewModel: ObservableObject {
             selectedIds = selectedIds.intersection(validIds)
             statusMessage = items.isEmpty ? "No payout requests in this filter." : "Loaded \(items.count) payout request(s)."
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -123,7 +123,8 @@ final class AdminPayoutQueueViewModel: ObservableObject {
             selectedIds = []
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

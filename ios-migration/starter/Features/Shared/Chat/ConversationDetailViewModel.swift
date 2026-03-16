@@ -20,7 +20,7 @@ final class ConversationDetailViewModel: ObservableObject {
         do {
             messages = try await repository.fetchMessages(conversationId: conversationId)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 
@@ -37,7 +37,8 @@ final class ConversationDetailViewModel: ObservableObject {
             composerText = ""
             await refresh(conversationId: conversationId)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+

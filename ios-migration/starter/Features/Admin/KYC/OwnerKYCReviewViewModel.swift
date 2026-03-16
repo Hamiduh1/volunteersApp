@@ -57,7 +57,8 @@ final class OwnerKYCReviewViewModel: ObservableObject {
                 statusMessage = "No KYC records available."
             }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }
+
