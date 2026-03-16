@@ -13,6 +13,9 @@ struct AdvancedToolsHomeView: View {
                     NavigationLink("Call History") {
                         CallHistoryView(user: user)
                     }
+                    NavigationLink("Dating & Blind Date") {
+                        DateHubView(user: user)
+                    }
                 }
 
                 Section("Live") {

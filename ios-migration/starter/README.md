@@ -20,8 +20,10 @@ Copy these files into your iOS target:
 - `Core/Repositories/PaymentsRepository.swift`
 - `Core/Repositories/AppConfigRepository.swift`
 - `Core/Repositories/AlertsRepository.swift`
+- `Core/Repositories/DateRepository.swift`
 - `Core/Repositories/OwnerAdminRepository.swift`
 - `Core/Repositories/CommunityRepository.swift`
+- `Core/Repositories/GalleryRepository.swift`
 - `Core/Repositories/GlobalWalletRepository.swift`
 - `Core/Repositories/ProfileRepository.swift`
 - `App/ContentView.swift`
@@ -64,6 +66,8 @@ Copy these files into your iOS target:
 - `Features/Employer/Applications/EmployerApplicationsReviewView.swift`
 - `Features/Employer/Applications/EmployerApplicationsReviewViewModel.swift`
 - `Features/Shared/Advanced/AdvancedToolsHomeView.swift`
+- `Features/Shared/Date/DateHubView.swift`
+- `Features/Shared/Date/DateHubViewModel.swift`
 - `Features/Shared/Chat/ConversationsListView.swift`
 - `Features/Shared/Chat/ConversationsListViewModel.swift`
 - `Features/Shared/Chat/ConversationDetailView.swift`
@@ -100,6 +104,8 @@ Copy these files into your iOS target:
 - `Features/Admin/Config/OwnerSystemConfigView.swift`
 - `Features/Admin/Config/OwnerSystemConfigViewModel.swift`
 - `Features/Community/CommunityHubView.swift`
+- `Features/Community/Gallery/GalleryUploadsView.swift`
+- `Features/Community/Gallery/GalleryUploadsViewModel.swift`
 - `Features/Community/MindLoom/MindLoomFeedView.swift`
 - `Features/Community/MindLoom/MindLoomFeedViewModel.swift`
 - `Features/Community/MindLoom/MindLoomProfileView.swift`

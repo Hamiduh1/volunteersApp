@@ -44,16 +44,16 @@ Current snapshot:
 - `Profile/Support`: Partial
 - `Admin/Owner`: Partial
 - `Community (MindLoom/Marketplace/Sponsored/Garage)`: Partial
-- `Date / Blind Date`: Missing
+- `Date / Blind Date`: Partial
 - `Alerts/Notifications`: Aligned
-- `Gallery uploads flow`: Missing
+- `Gallery uploads flow`: Aligned
 
 ## 4) Recommended Next Execution Order
 
-1. `Date / Blind Date` (high schema impact: `dating_profiles`, `blindDateProfiles`, invitation loops, media upload paths).
-2. `Volunteer core behavior parity pass` (application/write loops, status updates, role routing).
-3. `Organizer + Employer behavior parity pass` (approval/rejection write loops + wallets).
-4. `Community and media upload parity pass` (storage path/rules alignment + post creation loops).
+1. `Volunteer core behavior parity pass` (application/write loops, status updates, role routing).
+2. `Organizer + Employer behavior parity pass` (approval/rejection write loops + wallets).
+3. `Community and media upload parity hardening` (MindLoom/Ads/Garage creation loops and upload affordances).
+4. `Date / Blind Date hardening` (UI polish, call/chat handoff polish, and full invitation edge-case QA).
 
 ## 5) Repeatable Audit Commands
 

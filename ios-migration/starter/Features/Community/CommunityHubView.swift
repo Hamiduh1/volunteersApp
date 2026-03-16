@@ -10,6 +10,9 @@ struct CommunityHubView: View {
                     NavigationLink("MindLoom") {
                         MindLoomFeedView(user: user)
                     }
+                    NavigationLink("Gallery Uploads") {
+                        GalleryUploadsView(user: user)
+                    }
                 }
 
                 Section("Commerce") {

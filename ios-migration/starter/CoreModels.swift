@@ -381,6 +381,105 @@ struct CommunityAlertRecord: Identifiable {
     let timestamp: Date
 }
 
+enum DatingGender: String, CaseIterable, Identifiable {
+    case male = "MALE"
+    case female = "FEMALE"
+    case other = "OTHER"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .male:
+            return "Male"
+        case .female:
+            return "Female"
+        case .other:
+            return "Other"
+        }
+    }
+}
+
+enum DatingLookingFor: String, CaseIterable, Identifiable {
+    case men = "MEN"
+    case women = "WOMEN"
+    case everyone = "EVERYONE"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .men:
+            return "Men"
+        case .women:
+            return "Women"
+        case .everyone:
+            return "Everyone"
+        }
+    }
+}
+
+enum BlindDateUserStatusRecord: String {
+    case notJoined = "NotJoined"
+    case active = "Active"
+    case matched = "Matched"
+    case expired = "Expired"
+}
+
+struct DatingProfileRecord: Identifiable {
+    let id: String
+    let uid: String
+    let name: String
+    let bio: String
+    let gender: String
+    let lookingFor: String
+    let phone: String
+    let country: String
+    let imageUrls: [String]
+    let createdAt: Date?
+}
+
+struct BlindDateProfileRecord: Identifiable {
+    let id: String
+    let userId: String
+    let name: String
+    let gender: String
+    let profilePictureUrl: String
+    let media: [String]
+    let bio: String
+    let postedAt: Date?
+    let status: String
+}
+
+enum BlindDateInviteDirectionRecord: String {
+    case received = "RECEIVED"
+    case sent = "SENT"
+}
+
+struct BlindDateInvitationRecord: Identifiable {
+    let id: String
+    let senderId: String
+    let senderName: String
+    let senderProfilePictureUrl: String
+    let recipientId: String
+    let recipientName: String
+    let recipientProfilePictureUrl: String
+    let status: String
+    let sentAt: Date?
+    let updatedAt: Date?
+    let respondedAt: Date?
+}
+
+struct BlindDateTimelineItemRecord: Identifiable {
+    let id: String
+    let direction: BlindDateInviteDirectionRecord
+    let otherUserId: String
+    let otherUserName: String
+    let status: String
+    let sentAt: Date?
+    let updatedAt: Date?
+}
+
 struct OwnerRevenueSummaryRecord {
     let totalCollected: Double
     let balance: Double
@@ -570,6 +669,16 @@ struct GarageSaleRecord: Codable, Identifiable {
     var longitude: Double?
     var media: [GarageSaleMediaRecord]?
     var ownerId: String?
+    var timestamp: Timestamp?
+}
+
+struct GalleryUploadRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var name: String?
+    var imageUrl: String?
+    var imagePathInStorage: String?
+    var uploaderId: String?
+    var eventId: String?
     var timestamp: Timestamp?
 }
 
