@@ -13,6 +13,11 @@ Copy these files into your iOS target:
 - `Core/Repositories/OrganizerRepository.swift`
 - `Core/Repositories/EmployerRepository.swift`
 - `Core/Repositories/OrganizerWalletRepository.swift`
+- `Core/Repositories/ChatRepository.swift`
+- `Core/Repositories/CallsRepository.swift`
+- `Core/Repositories/LiveRepository.swift`
+- `Core/Repositories/PaymentsRepository.swift`
+- `Core/Repositories/AppConfigRepository.swift`
 - `App/ContentViewTemplate.swift` (rename to `ContentView.swift`)
 - `App/VolunteersAppiOSAppTemplate.swift` (merge into your app entry file)
 - `Features/Auth/LoginView.swift`
@@ -42,6 +47,25 @@ Copy these files into your iOS target:
 - `Features/Employer/PostedJobs/EmployerPostedJobsViewModel.swift`
 - `Features/Employer/Applications/EmployerApplicationsReviewView.swift`
 - `Features/Employer/Applications/EmployerApplicationsReviewViewModel.swift`
+- `Features/Shared/Advanced/AdvancedToolsHomeView.swift`
+- `Features/Shared/Chat/ConversationsListView.swift`
+- `Features/Shared/Chat/ConversationsListViewModel.swift`
+- `Features/Shared/Chat/ConversationDetailView.swift`
+- `Features/Shared/Chat/ConversationDetailViewModel.swift`
+- `Features/Shared/Calls/CallHistoryView.swift`
+- `Features/Shared/Calls/CallHistoryViewModel.swift`
+- `Features/Shared/Live/LiveSessionsView.swift`
+- `Features/Shared/Live/LiveSessionsViewModel.swift`
+- `Features/Shared/Payments/PaymentMethodsView.swift`
+- `Features/Shared/Payments/PaymentMethodsViewModel.swift`
+- `Features/Shared/Support/AIAssistantView.swift`
+- `Features/Shared/Support/AIAssistantViewModel.swift`
+- `Features/Shared/Support/PrivacyPolicyView.swift`
+- `Features/Shared/Support/PrivacyPolicyViewModel.swift`
+- `Features/Shared/Support/TermsAndConditionsView.swift`
+- `Features/Shared/Support/TermsAndConditionsViewModel.swift`
+- `Features/Shared/Support/SupportCenterView.swift`
+- `Features/Shared/Support/SupportCenterViewModel.swift`
 
 Recommended destination in Xcode:
 - `VolunteersAppIOS/Core/Contracts/`

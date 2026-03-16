@@ -20,6 +20,11 @@ struct VolunteerHomeTabView: View {
                     Label("Activity", systemImage: "clock")
                 }
 
+            AdvancedToolsHomeView(user: user)
+                .tabItem {
+                    Label("Tools", systemImage: "sparkles")
+                }
+
             VStack(spacing: 16) {
                 Text("Signed in as \(user.email ?? user.uid)")
                     .font(.footnote)

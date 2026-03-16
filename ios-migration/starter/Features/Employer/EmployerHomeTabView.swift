@@ -11,6 +11,9 @@ struct EmployerHomeTabView: View {
             EmployerApplicationsReviewView(user: user)
                 .tabItem { Label("Applications", systemImage: "person.3") }
 
+            AdvancedToolsHomeView(user: user)
+                .tabItem { Label("Tools", systemImage: "sparkles") }
+
             VStack(spacing: 16) {
                 Text("Employer: \(user.email ?? user.uid)")
                     .font(.footnote)

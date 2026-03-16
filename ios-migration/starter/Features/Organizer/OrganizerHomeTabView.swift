@@ -14,6 +14,9 @@ struct OrganizerHomeTabView: View {
             OrganizerWalletView(user: user)
                 .tabItem { Label("Wallet", systemImage: "wallet.pass") }
 
+            AdvancedToolsHomeView(user: user)
+                .tabItem { Label("Tools", systemImage: "sparkles") }
+
             VStack(spacing: 16) {
                 Text("Organizer: \(user.email ?? user.uid)")
                     .font(.footnote)

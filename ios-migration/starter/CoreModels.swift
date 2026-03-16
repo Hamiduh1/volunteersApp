@@ -165,6 +165,102 @@ struct WalletTransactionRecord: Identifiable {
     let note: String?
 }
 
+struct ChatConversationRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var participants: [String]?
+    var lastMessage: String?
+    var lastMessageTimestamp: Timestamp?
+}
+
+struct ChatMessageRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var senderId: String?
+    var text: String?
+    var timestamp: Timestamp?
+}
+
+struct UserInvitationRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var senderId: String?
+    var senderName: String?
+    var senderEmail: String?
+    var status: String?
+    var timestamp: Timestamp?
+}
+
+struct LiveSessionRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var agoraChannelName: String?
+    var hostId: String?
+    var hostName: String?
+    var title: String?
+    var status: String?
+    var createdAt: Timestamp?
+}
+
+struct PaymentMethodRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var type: String?
+    var brand: String?
+    var last4: String?
+    var holderName: String?
+    var status: String?
+}
+
+struct PayoutSetupStatusRecord {
+    let hasAccount: Bool
+    let detailsSubmitted: Bool
+    let payoutsEnabled: Bool
+    let chargesEnabled: Bool
+}
+
+struct CallLogRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var peerUid: String?
+    var peerName: String?
+    var type: String? // audio | video
+    var direction: String? // incoming | outgoing
+    var status: String? // dialed | received | missed | rejected
+    var startedAt: Timestamp?
+    var endedAt: Timestamp?
+    var durationSec: Int?
+}
+
+struct AppConfigTextRecord: Codable {
+    var title: String?
+    var content: String?
+    var updatedAt: Timestamp?
+}
+
+struct FAQItemRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var question: String?
+    var answer: String?
+    var tags: [String]?
+}
+
+struct SupportItemRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var title: String?
+    var value: String?
+    var type: String?
+    var isActive: Bool?
+
+    init(
+        id: String? = nil,
+        title: String? = nil,
+        value: String? = nil,
+        type: String? = nil,
+        isActive: Bool? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.value = value
+        self.type = type
+        self.isActive = isActive
+    }
+}
+
 // Firestore dictionaries with mixed values (wallet/settings style documents).
 struct AnyCodable: Codable {
     let value: Any
