@@ -3,6 +3,7 @@ import SwiftUI
 struct AdminPayoutQueueView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = AdminPayoutQueueViewModel()
+    @State private var showReverseConfirmation = false
 
     var body: some View {
         List {
@@ -24,16 +25,22 @@ struct AdminPayoutQueueView: View {
                 .onChange(of: viewModel.activeFilter) { _, _ in
                     Task { await viewModel.refresh() }
                 }
+                TextField("Search by user, id, status, destination", text: $viewModel.query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Text("Showing \(viewModel.filteredItems.count) item(s) • Selected \(viewModel.selectedIds.count)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Queue") {
-                if viewModel.isLoading && viewModel.items.isEmpty {
+                if viewModel.isLoading && viewModel.filteredItems.isEmpty {
                     ProgressView("Loading payout queue...")
-                } else if viewModel.items.isEmpty {
+                } else if viewModel.filteredItems.isEmpty {
                     Text("No payout requests for this filter.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(viewModel.items) { item in
+                    ForEach(viewModel.filteredItems) { item in
                         HStack(alignment: .top, spacing: 10) {
                             if user.role == .owner || user.role == .admin {
                                 Button {
@@ -69,23 +76,47 @@ struct AdminPayoutQueueView: View {
                     }
                 }
             }
-        }
-        .navigationTitle("Payout Queue")
-        .toolbar {
+
             if user.role == .owner || user.role == .admin {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await viewModel.reverseSelected() }
+                Section("Reversal Controls") {
+                    TextField("Reversal reason (minimum 12 characters)", text: $viewModel.reversalReason, axis: .vertical)
+                        .lineLimit(2...4)
+                    HStack {
+                        Button("Select Visible") {
+                            viewModel.selectVisible()
+                        }
+                        .disabled(viewModel.filteredItems.isEmpty || viewModel.isReversing)
+                        Spacer()
+                        Button("Clear Selection") {
+                            viewModel.clearSelection()
+                        }
+                        .disabled(viewModel.selectedIds.isEmpty || viewModel.isReversing)
+                    }
+                    Button(role: .destructive) {
+                        showReverseConfirmation = true
                     } label: {
                         if viewModel.isReversing {
                             ProgressView()
                         } else {
-                            Text("Reverse")
+                            Text("Reverse Selected")
                         }
                     }
-                    .disabled(viewModel.selectedIds.isEmpty || viewModel.isReversing)
+                    .disabled(!viewModel.canReverse)
                 }
             }
+        }
+        .navigationTitle("Payout Queue")
+        .confirmationDialog(
+            "Confirm reversal for selected payout requests?",
+            isPresented: $showReverseConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reverse Now", role: .destructive) {
+                Task { await viewModel.reverseSelected() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action reverses the selected payout requests and should only be used when settlement failed.")
         }
         .task { await viewModel.refresh() }
         .refreshable { await viewModel.refresh() }

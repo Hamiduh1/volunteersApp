@@ -79,7 +79,10 @@ final class OwnerAdminRepository {
         return rawItems.compactMap { raw in
             guard let row = coerceStringMap(raw) else { return nil }
             guard let payoutId = row.string("payoutRequestId") else { return nil }
-            let createdMs = row.number("createdAtMs")
+            let createdAt = row.dateFromEpochGuess("createdAtMs")
+                ?? row.dateFromEpochGuess("timestampMs")
+                ?? row.dateFromEpochGuess("createdAt")
+                ?? row.dateFromEpochGuess("timestamp")
 
             return AdminPayoutRequestRecord(
                 id: payoutId,
@@ -89,8 +92,13 @@ final class OwnerAdminRepository {
                 currency: (row.string("currency") ?? "USD").uppercased(),
                 status: row.string("status") ?? "UNKNOWN",
                 destinationLabel: row.string("recipientPhone") ?? row.string("recipientNetwork"),
-                createdAt: createdMs > 0 ? Date(timeIntervalSince1970: createdMs / 1000.0) : nil
+                createdAt: createdAt
             )
+        }
+        .sorted {
+            let l = $0.createdAt ?? .distantPast
+            let r = $1.createdAt ?? .distantPast
+            return l > r
         }
     }
 
@@ -372,7 +380,19 @@ private extension Dictionary where Key == String, Value == Any {
     }
 
     func number(_ key: String, fallback: Double = 0) -> Double {
-        (self[key] as? NSNumber)?.doubleValue ?? fallback
+        if let number = self[key] as? NSNumber {
+            return number.doubleValue
+        }
+        if let value = self[key] as? Double {
+            return value
+        }
+        if let value = self[key] as? Int {
+            return Double(value)
+        }
+        if let text = self[key] as? String, let parsed = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return parsed
+        }
+        return fallback
     }
 
     func double(_ key: String, fallback: Double = 0) -> Double {
@@ -380,13 +400,32 @@ private extension Dictionary where Key == String, Value == Any {
     }
 
     func bool(_ key: String) -> Bool {
-        (self[key] as? Bool) ?? false
+        if let value = self[key] as? Bool {
+            return value
+        }
+        if let value = self[key] as? NSNumber {
+            return value.intValue != 0
+        }
+        if let value = self[key] as? String {
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return normalized == "true" || normalized == "1" || normalized == "yes"
+        }
+        return false
     }
 
     func dateFromMillis(_ key: String) -> Date? {
-        let ms = (self[key] as? NSNumber)?.doubleValue ?? 0
+        let ms = number(key)
         guard ms > 0 else { return nil }
         return Date(timeIntervalSince1970: ms / 1000.0)
+    }
+
+    func dateFromEpochGuess(_ key: String) -> Date? {
+        let raw = number(key)
+        guard raw > 0 else { return nil }
+        if raw > 1_000_000_000_000 {
+            return Date(timeIntervalSince1970: raw / 1000.0)
+        }
+        return Date(timeIntervalSince1970: raw)
     }
 }
 
