@@ -6,6 +6,14 @@ struct MindLoomFeedView: View {
 
     var body: some View {
         List {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Create Post") {
                 TextField("Share something...", text: $viewModel.postText, axis: .vertical)
                     .lineLimit(1...4)
@@ -56,10 +64,17 @@ struct MindLoomFeedView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                Button("Like") {
+                                let postId = post.id ?? ""
+                                let isLiked = (post.likes ?? []).contains(user.uid)
+                                Button(isLiked ? "Liked" : "Like") {
                                     Task { await viewModel.toggleLike(post: post, uid: user.uid) }
                                 }
                                 .buttonStyle(.bordered)
+                                .disabled(postId.isEmpty || viewModel.likingPostIds.contains(postId))
+                                if viewModel.likingPostIds.contains(postId) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
                             }
                         }
                         .padding(.vertical, 4)

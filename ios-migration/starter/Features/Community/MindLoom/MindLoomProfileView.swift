@@ -11,10 +11,21 @@ struct MindLoomProfileView: View {
 
     var body: some View {
         List {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if let summary = viewModel.summary {
                 Section("Profile") {
                     Text(summary.authorName).font(.title3.bold())
-                    if !summary.authorEmail.isEmpty {
+                    Text("@\(summary.authorId)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !summary.authorEmail.isEmpty, isSelf {
                         Text(summary.authorEmail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -25,10 +36,15 @@ struct MindLoomProfileView: View {
                         stat("Likes", summary.likesCount)
                     }
                     if !isSelf {
-                        Button(viewModel.isFollowing ? "Following" : "Follow") {
+                        Button(viewModel.isFollowing ? "Unfollow" : "Follow") {
                             Task { await viewModel.toggleFollow(authorId: authorId, currentUserId: currentUserId) }
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isFollowUpdating)
+                        if viewModel.isFollowUpdating {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                     }
                 }
             }

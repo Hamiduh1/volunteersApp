@@ -6,6 +6,14 @@ struct MarketplaceView: View {
 
     var body: some View {
         List {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Post Item") {
                 TextField("Title", text: $viewModel.title)
                 TextField("Description", text: $viewModel.description, axis: .vertical)
@@ -27,7 +35,7 @@ struct MarketplaceView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isPosting)
+                .disabled(!viewModel.canPost)
             }
 
             Section("Filter") {
@@ -36,7 +44,7 @@ struct MarketplaceView: View {
                         Text(option).tag(option)
                     }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
             }
 
             Section("Listings") {
@@ -55,9 +63,14 @@ struct MarketplaceView: View {
                                 .foregroundStyle(.secondary)
                             Text(String(format: "$%.2f", item.price ?? 0))
                                 .font(.subheadline.weight(.semibold))
-                            Text("\(item.sellerName ?? "Seller") • \(item.category ?? "Other")")
+                            Text("\(item.sellerName ?? "Seller") - \(item.category ?? "Other")")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if let ts = item.timestamp?.dateValue() {
+                                Text(ts.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .padding(.vertical, 4)
                     }

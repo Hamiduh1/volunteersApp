@@ -11,6 +11,7 @@ final class MarketplaceViewModel: ObservableObject {
     @Published var price = ""
     @Published var isLoading = false
     @Published var isPosting = false
+    @Published var statusMessage: String?
     @Published var errorMessage: String?
 
     private let repository = CommunityRepository()
@@ -24,9 +25,16 @@ final class MarketplaceViewModel: ObservableObject {
         return items.filter { ($0.category ?? "").caseInsensitiveCompare(selectedCategory) == .orderedSame }
     }
 
+    var canPost: Bool {
+        !isPosting && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (Double(price.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) > 0
+    }
+
     func refresh() async {
         isLoading = true
         errorMessage = nil
+        statusMessage = nil
         defer { isLoading = false }
 
         do {
@@ -50,6 +58,7 @@ final class MarketplaceViewModel: ObservableObject {
 
         isPosting = true
         errorMessage = nil
+        statusMessage = nil
         defer { isPosting = false }
 
         do {
@@ -65,6 +74,7 @@ final class MarketplaceViewModel: ObservableObject {
             category = "Other"
             price = ""
             await refresh()
+            statusMessage = "Marketplace item posted."
         } catch {
             errorMessage = error.localizedDescription
         }

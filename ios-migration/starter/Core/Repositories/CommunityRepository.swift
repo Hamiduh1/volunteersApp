@@ -11,11 +11,13 @@ final class CommunityRepository {
             .getDocuments()
 
         return snapshot.documents.compactMap { doc in
-            try? doc.data(as: MindLoomPostRecord.self)
+            let data = doc.data()
+            guard isActiveCommunityDoc(data) else { return nil }
+            return try? doc.data(as: MindLoomPostRecord.self)
         }
         .sorted {
-            let l = $0.timestamp?.dateValue() ?? .distantPast
-            let r = $1.timestamp?.dateValue() ?? .distantPast
+            let l = postDate($0)
+            let r = postDate($1)
             return l > r
         }
     }
@@ -27,11 +29,13 @@ final class CommunityRepository {
             .getDocuments()
 
         return snapshot.documents.compactMap { doc in
-            try? doc.data(as: MindLoomPostRecord.self)
+            let data = doc.data()
+            guard isActiveCommunityDoc(data) else { return nil }
+            return try? doc.data(as: MindLoomPostRecord.self)
         }
         .sorted {
-            let l = $0.timestamp?.dateValue() ?? .distantPast
-            let r = $1.timestamp?.dateValue() ?? .distantPast
+            let l = postDate($0)
+            let r = postDate($1)
             return l > r
         }
     }
@@ -43,7 +47,7 @@ final class CommunityRepository {
         let userDoc = try await db.collection(FirestoreCollection.users.rawValue).document(user.uid).getDocument()
         let data = userDoc.data() ?? [:]
         let name = (data["name"] as? String) ?? (data["username"] as? String) ?? (user.email ?? "User")
-        let profileUrl = data["profileImageUrl"] as? String
+        let profileUrl = (data["profileImageUrl"] as? String) ?? (data["profilePictureUrl"] as? String)
 
         try await db.collection(FirestoreCollection.jokes.rawValue)
             .document()
@@ -53,6 +57,7 @@ final class CommunityRepository {
                 "authorProfileUrl": profileUrl as Any,
                 "text": clean,
                 "mediaType": "TEXT",
+                "status": "ACTIVE",
                 "likes": [],
                 "commentsCount": 0,
                 "timestamp": FieldValue.serverTimestamp()
@@ -98,7 +103,7 @@ final class CommunityRepository {
             authorId: authorId,
             authorName: (userData["name"] as? String) ?? (userData["username"] as? String) ?? "User",
             authorEmail: (userData["email"] as? String) ?? "",
-            authorProfileUrl: userData["profileImageUrl"] as? String,
+            authorProfileUrl: (userData["profileImageUrl"] as? String) ?? (userData["profilePictureUrl"] as? String),
             followersCount: followers,
             followingCount: following,
             likesCount: likesCount
@@ -138,12 +143,16 @@ final class CommunityRepository {
 
     func fetchMarketplaceItems(limit: Int = 120) async throws -> [MarketplaceItemRecord] {
         let snapshot = try await db.collection(FirestoreCollection.marketplaceItems.rawValue)
-            .whereField("status", isEqualTo: "AVAILABLE")
             .limit(to: limit)
             .getDocuments()
 
         return snapshot.documents.compactMap { doc in
-            try? doc.data(as: MarketplaceItemRecord.self)
+            let data = doc.data()
+            let status = (data["status"] as? String)?.uppercased() ?? "AVAILABLE"
+            let isDeleted = (data["isDeleted"] as? Bool) ?? false
+            guard !isDeleted else { return nil }
+            guard status == "AVAILABLE" || status == "ACTIVE" || status == "OPEN" else { return nil }
+            return try? doc.data(as: MarketplaceItemRecord.self)
         }
         .sorted {
             let l = $0.timestamp?.dateValue() ?? .distantPast
@@ -194,7 +203,9 @@ final class CommunityRepository {
             .getDocuments()
 
         return snapshot.documents.compactMap { doc in
-            try? doc.data(as: AdvertisementRecord.self)
+            let data = doc.data()
+            guard isActiveCommunityDoc(data) else { return nil }
+            return try? doc.data(as: AdvertisementRecord.self)
         }
         .sorted {
             let l = $0.timestamp?.dateValue() ?? .distantPast
@@ -209,12 +220,27 @@ final class CommunityRepository {
             .getDocuments()
 
         return snapshot.documents.compactMap { doc in
-            try? doc.data(as: GarageSaleRecord.self)
+            let data = doc.data()
+            guard isActiveCommunityDoc(data) else { return nil }
+            return try? doc.data(as: GarageSaleRecord.self)
         }
         .sorted {
             let l = $0.timestamp?.dateValue() ?? .distantPast
             let r = $1.timestamp?.dateValue() ?? .distantPast
             return l > r
         }
+    }
+
+    private func isActiveCommunityDoc(_ data: [String: Any]) -> Bool {
+        if (data["isDeleted"] as? Bool) == true { return false }
+        let status = (data["status"] as? String)?.uppercased() ?? "ACTIVE"
+        if ["DELETED", "REMOVED", "INACTIVE", "REJECTED", "HIDDEN", "ARCHIVED", "CLOSED", "DISABLED"].contains(status) {
+            return false
+        }
+        return true
+    }
+
+    private func postDate(_ post: MindLoomPostRecord) -> Date {
+        post.timestamp?.dateValue() ?? .distantPast
     }
 }

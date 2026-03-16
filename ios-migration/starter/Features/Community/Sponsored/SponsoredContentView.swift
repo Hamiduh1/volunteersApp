@@ -2,9 +2,18 @@ import SwiftUI
 
 struct SponsoredContentView: View {
     @StateObject private var viewModel = SponsoredContentViewModel()
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         List {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Sponsored Ads") {
                 if viewModel.isLoading && viewModel.advertisements.isEmpty {
                     ProgressView("Loading ads...")
@@ -23,6 +32,17 @@ struct SponsoredContentView: View {
                                 Text("Sponsor: \(sponsor)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                            }
+
+                            HStack(spacing: 8) {
+                                if let target = ad.targetUrl, let url = URL(string: target) {
+                                    Link("Open", destination: url)
+                                        .font(.subheadline)
+                                }
+                                if let phone = ad.ownerPhone, let url = telURL(from: phone) {
+                                    Button("Call") { openURL(url) }
+                                        .buttonStyle(.bordered)
+                                }
                             }
                         }
                         .padding(.vertical, 4)
@@ -47,6 +67,17 @@ struct SponsoredContentView: View {
                             Text("\(sale.city ?? "") \(sale.state ?? "")")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+
+                            HStack(spacing: 8) {
+                                if let phone = sale.contactPhone, let url = telURL(from: phone) {
+                                    Button("Call") { openURL(url) }
+                                        .buttonStyle(.bordered)
+                                }
+                                if let email = sale.contactEmail, let url = emailURL(from: email) {
+                                    Button("Email") { openURL(url) }
+                                        .buttonStyle(.bordered)
+                                }
+                            }
                         }
                         .padding(.vertical, 4)
                     }
@@ -64,5 +95,17 @@ struct SponsoredContentView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+    }
+
+    private func telURL(from raw: String) -> URL? {
+        let digits = raw.filter { "0123456789+".contains($0) }
+        guard !digits.isEmpty else { return nil }
+        return URL(string: "tel://\(digits)")
+    }
+
+    private func emailURL(from raw: String) -> URL? {
+        let email = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !email.isEmpty else { return nil }
+        return URL(string: "mailto:\(email)")
     }
 }
