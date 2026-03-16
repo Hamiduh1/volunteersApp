@@ -30,6 +30,7 @@ final class SupportConsoleViewModel: ObservableObject {
             if let selected = selectedUser {
                 selectedUser = users.first(where: { $0.id == selected.id })
             }
+            statusMessage = users.isEmpty ? "No matching users found." : "Loaded \(users.count) user(s)."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -49,6 +50,14 @@ final class SupportConsoleViewModel: ObservableObject {
             errorMessage = "Select a user first."
             return
         }
+
+        let cleanEmail = verificationEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPhone = verificationPhone.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !canBypassVerification, cleanEmail.isEmpty, cleanPhone.isEmpty {
+            errorMessage = "Provide verification email or phone."
+            return
+        }
+
         isLoadingDetails = true
         errorMessage = nil
         defer { isLoadingDetails = false }
@@ -56,8 +65,8 @@ final class SupportConsoleViewModel: ObservableObject {
         do {
             let detailsResult = try await repository.getSupportAccountDetails(
                 userId: selectedUser.id,
-                verificationEmail: canBypassVerification ? nil : verificationEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-                verificationPhone: canBypassVerification ? nil : verificationPhone.trimmingCharacters(in: .whitespacesAndNewlines)
+                verificationEmail: canBypassVerification ? nil : cleanEmail,
+                verificationPhone: canBypassVerification ? nil : cleanPhone
             )
             details = detailsResult
             statusMessage = canBypassVerification ? "Account details loaded." : "Verification passed. Account details loaded."

@@ -5,13 +5,37 @@ struct OwnerKYCReviewView: View {
 
     var body: some View {
         List {
-            if viewModel.isLoading && viewModel.items.isEmpty {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Filters") {
+                TextField("Search name/email/role", text: $viewModel.query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Picker("Role", selection: $viewModel.roleFilter) {
+                    ForEach(OwnerKycRoleFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.menu)
+                Toggle("Show Unverified Only", isOn: $viewModel.unverifiedOnly)
+                Text("Showing \(viewModel.filteredItems.count) record(s)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.isLoading && viewModel.filteredItems.isEmpty {
                 ProgressView("Loading KYC records...")
-            } else if viewModel.items.isEmpty {
+            } else if viewModel.filteredItems.isEmpty {
                 Text("No KYC records found.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewModel.items) { item in
+                ForEach(viewModel.filteredItems) { item in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.name)
                             .font(.headline)

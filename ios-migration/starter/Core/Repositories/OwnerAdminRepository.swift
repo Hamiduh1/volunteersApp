@@ -198,27 +198,57 @@ final class OwnerAdminRepository {
     }
 
     func fetchUserReports(limit: Int = 250) async throws -> [OwnerUserReportRecord] {
-        let snapshotA = try await db.collection("user_reports")
-            .limit(to: limit)
-            .getDocuments()
-        let snapshotB = try await db.collection("userReports")
-            .limit(to: limit)
-            .getDocuments()
+        var loadedSnapshots: [(String, QuerySnapshot)] = []
+        var lastError: Error?
+
+        do {
+            let snapshot = try await db.collection("user_reports")
+                .limit(to: limit)
+                .getDocuments()
+            loadedSnapshots.append(("user_reports", snapshot))
+        } catch {
+            lastError = error
+        }
+
+        do {
+            let snapshot = try await db.collection("userReports")
+                .limit(to: limit)
+                .getDocuments()
+            loadedSnapshots.append(("userReports", snapshot))
+        } catch {
+            lastError = error
+        }
+
+        if loadedSnapshots.isEmpty, let lastError {
+            throw lastError
+        }
 
         var merged: [String: OwnerUserReportRecord] = [:]
-        for (collectionName, snapshot) in [("user_reports", snapshotA), ("userReports", snapshotB)] {
+        for (collectionName, snapshot) in loadedSnapshots {
             for doc in snapshot.documents {
                 let data = doc.data()
+                let timestamp = (data["timestamp"] as? Timestamp)?.dateValue()
+                    ?? (data["createdAt"] as? Timestamp)?.dateValue()
+                    ?? data.dateFromMillis("timestampMs")
+                    ?? data.dateFromMillis("createdAtMs")
                 let report = OwnerUserReportRecord(
                     id: "\(collectionName):\(doc.documentID)",
                     sourceCollection: collectionName,
-                    reportedUserName: (data["reportedUserName"] as? String) ?? (data["reportedName"] as? String) ?? "Unknown",
+                    reportedUserName: (data["reportedUserName"] as? String)
+                        ?? (data["reportedName"] as? String)
+                        ?? (data["reportedUsername"] as? String)
+                        ?? "Unknown",
                     reportedUserEmail: data["reportedUserEmail"] as? String,
                     eventName: data["eventName"] as? String,
-                    reason: (data["reasonForReport"] as? String) ?? (data["reason"] as? String) ?? "No reason provided",
-                    reportingUserDisplayName: data["reportingUserDisplayName"] as? String,
-                    reportingUserId: data["reportingUserId"] as? String,
-                    timestamp: (data["timestamp"] as? Timestamp)?.dateValue()
+                    reason: (data["reasonForReport"] as? String)
+                        ?? (data["reason"] as? String)
+                        ?? (data["message"] as? String)
+                        ?? "No reason provided",
+                    reportingUserDisplayName: (data["reportingUserDisplayName"] as? String)
+                        ?? (data["reporterName"] as? String),
+                    reportingUserId: (data["reportingUserId"] as? String)
+                        ?? (data["reporterId"] as? String),
+                    timestamp: timestamp
                 )
                 merged[report.id] = report
             }

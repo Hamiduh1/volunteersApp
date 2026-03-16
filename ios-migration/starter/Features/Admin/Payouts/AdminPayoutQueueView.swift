@@ -51,7 +51,7 @@ struct AdminPayoutQueueView: View {
                                 Text(item.requesterId)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text("\(item.currency) \(String(format: "%.2f", item.amount)) • \(item.status)")
+                                Text("\(item.currency) \(String(format: "%.2f", item.amount)) - \(item.status)")
                                     .font(.subheadline)
                                 if let destination = item.destinationLabel {
                                     Text(destination)
@@ -99,3 +99,4 @@ struct AdminPayoutQueueView: View {
         }
     }
 }
+

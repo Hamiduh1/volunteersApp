@@ -5,13 +5,36 @@ struct OwnerUserReportsView: View {
 
     var body: some View {
         List {
-            if viewModel.isLoading && viewModel.reports.isEmpty {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Filters") {
+                TextField("Search reports", text: $viewModel.query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Picker("Source", selection: $viewModel.activeFilter) {
+                    ForEach(OwnerUserReportsFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Showing \(viewModel.filteredReports.count) report(s)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.isLoading && viewModel.filteredReports.isEmpty {
                 ProgressView("Loading user reports...")
-            } else if viewModel.reports.isEmpty {
+            } else if viewModel.filteredReports.isEmpty {
                 Text("No user reports found.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewModel.reports) { report in
+                ForEach(viewModel.filteredReports) { report in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(report.reportedUserName)
                             .font(.headline)

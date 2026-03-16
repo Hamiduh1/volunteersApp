@@ -27,6 +27,7 @@ struct SupportConsoleView: View {
                             Task { await viewModel.loadUsers() }
                         }
                         .buttonStyle(.bordered)
+                        .disabled(viewModel.isLoadingUsers)
                     }
                 }
 
@@ -57,7 +58,7 @@ struct SupportConsoleView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(user.username).font(.headline)
                                     Text(user.email).font(.caption).foregroundStyle(.secondary)
-                                    Text("\(user.role) • \(user.walletCurrency) \(String(format: "%.2f", user.walletBalance))")
+                                    Text("\(user.role) - \(user.walletCurrency) \(String(format: "%.2f", user.walletBalance))")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -132,7 +133,7 @@ struct SupportConsoleView: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(tx.title).font(.subheadline)
-                                        Text("\(tx.type) • \(tx.status)")
+                                        Text("\(tx.type) - \(tx.status)")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -170,3 +171,4 @@ struct SupportConsoleView: View {
         }
     }
 }
+
