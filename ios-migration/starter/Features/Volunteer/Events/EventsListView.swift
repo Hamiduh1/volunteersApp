@@ -31,7 +31,11 @@ struct EventsListView: View {
                                             Task { await viewModel.apply(eventId: eventId, user: user) }
                                         }
                                         .buttonStyle(.borderedProminent)
-                                        .disabled(eventId.isEmpty)
+                                        .disabled(eventId.isEmpty || viewModel.applyInFlightEventIds.contains(eventId))
+                                        if viewModel.applyInFlightEventIds.contains(eventId) {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        }
                                     }
                                 }
                             }

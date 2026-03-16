@@ -67,12 +67,23 @@ final class MyActivityRepository {
     }
 
     private func fetchJobApplications(uid: String) async throws -> [VolunteerActivityItem] {
-        let snapshot = try await db.collection(FirestoreCollection.applications.rawValue)
-            .whereField("userId", isEqualTo: uid)
-            .getDocuments()
+        let queries: [Query] = [
+            db.collection(FirestoreCollection.applications.rawValue)
+                .whereField("userId", isEqualTo: uid),
+            db.collection(FirestoreCollection.applications.rawValue)
+                .whereField("volunteerUid", isEqualTo: uid)
+        ]
+
+        var docsById: [String: QueryDocumentSnapshot] = [:]
+        for query in queries {
+            let snapshot = try await query.getDocuments()
+            for doc in snapshot.documents {
+                docsById[doc.documentID] = doc
+            }
+        }
 
         var items: [VolunteerActivityItem] = []
-        for doc in snapshot.documents {
+        for doc in docsById.values {
             guard let app = try? doc.data(as: JobApplicationRecord.self) else { continue }
             let jobId = app.jobId ?? ""
             guard !jobId.isEmpty else { continue }

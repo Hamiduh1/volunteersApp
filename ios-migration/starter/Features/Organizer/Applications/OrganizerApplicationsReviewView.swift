@@ -7,6 +7,14 @@ struct OrganizerApplicationsReviewView: View {
     var body: some View {
         NavigationStack {
             VStack {
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                        .padding(.top, 8)
+                }
+
                 Picker("Filter", selection: $viewModel.selectedFilter) {
                     ForEach(OrganizerApplicationFilter.allCases) { filter in
                         Text(filter.title).tag(filter)
@@ -32,19 +40,28 @@ struct OrganizerApplicationsReviewView: View {
                             if !item.volunteerEmail.isEmpty {
                                 Text(item.volunteerEmail).font(.caption).foregroundStyle(.secondary)
                             }
-                            Text("Status: \(item.status.rawValue)")
+                            Text("Status: \(item.status.displayTitle)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            HStack {
-                                Button("Approve") {
-                                    Task { await viewModel.approve(item, uid: user.uid) }
-                                }
-                                .buttonStyle(.borderedProminent)
+                            if item.status.isPendingLike {
+                                HStack {
+                                    Button("Approve") {
+                                        Task { await viewModel.approve(item, uid: user.uid) }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(viewModel.updatingIds.contains(item.id))
 
-                                Button("Reject") {
-                                    Task { await viewModel.reject(item, uid: user.uid) }
+                                    Button("Reject") {
+                                        Task { await viewModel.reject(item, uid: user.uid) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(viewModel.updatingIds.contains(item.id))
+
+                                    if viewModel.updatingIds.contains(item.id) {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
                                 }
-                                .buttonStyle(.bordered)
                             }
                         }
                         .padding(.vertical, 6)

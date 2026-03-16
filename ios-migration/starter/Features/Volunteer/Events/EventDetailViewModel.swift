@@ -5,6 +5,7 @@ import Combine
 final class EventDetailViewModel: ObservableObject {
     @Published private(set) var event: EventRecord?
     @Published private(set) var application: EventApplicationRecord?
+    @Published var isApplying = false
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -28,7 +29,11 @@ final class EventDetailViewModel: ObservableObject {
     }
 
     func apply(eventId: String, user: AppSessionUser) async {
+        guard !eventId.isEmpty else { return }
         guard !isApplied else { return }
+        guard !isApplying else { return }
+        isApplying = true
+        defer { isApplying = false }
         do {
             try await repository.applyToEvent(eventId: eventId, user: user)
             application = try await repository.fetchEventApplication(eventId: eventId, uid: user.uid)

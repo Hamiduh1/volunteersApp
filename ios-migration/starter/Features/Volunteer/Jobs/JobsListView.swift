@@ -34,7 +34,11 @@ struct JobsListView: View {
                                         Task { await viewModel.apply(jobId: jobId, user: user) }
                                     }
                                     .buttonStyle(.borderedProminent)
-                                    .disabled(jobId.isEmpty)
+                                    .disabled(jobId.isEmpty || viewModel.applyInFlightJobIds.contains(jobId))
+                                    if viewModel.applyInFlightJobIds.contains(jobId) {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
                                 }
                             }
                         }

@@ -24,7 +24,7 @@ struct JobDetailView: View {
                     }
 
                     if viewModel.isApplied {
-                        Text("Application status: \((viewModel.application?.status ?? .unknown).rawValue)")
+                        Text("Application status: \((viewModel.application?.status ?? .unknown).displayTitle)")
                             .font(.footnote)
                             .foregroundStyle(.green)
                     } else {
@@ -32,6 +32,11 @@ struct JobDetailView: View {
                             Task { await viewModel.apply(jobId: jobId, user: user) }
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isApplying)
+                        if viewModel.isApplying {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                     }
                 } else {
                     Text("Job not found.")

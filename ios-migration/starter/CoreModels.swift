@@ -57,6 +57,29 @@ enum ApplicationStatus: String, Codable, CaseIterable {
     }
 }
 
+extension ApplicationStatus {
+    var displayTitle: String {
+        rawValue
+            .replacingOccurrences(of: "_", with: " ")
+            .lowercased()
+            .split(separator: " ")
+            .map { $0.capitalized }
+            .joined(separator: " ")
+    }
+
+    var isPendingLike: Bool {
+        self == .pending || self == .viewed
+    }
+
+    var isApprovedLike: Bool {
+        self == .approved || self == .accepted || self == .attended || self == .completed
+    }
+
+    var isRejectedLike: Bool {
+        self == .rejected || self == .rejectedByEmployer || self == .withdrawn
+    }
+}
+
 struct AppUser: Codable, Identifiable {
     @DocumentID var id: String?
     var uid: String?

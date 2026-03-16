@@ -5,6 +5,7 @@ import Combine
 final class JobsListViewModel: ObservableObject {
     @Published private(set) var jobs: [JobRecord] = []
     @Published private(set) var appliedJobIds: Set<String> = []
+    @Published private(set) var applyInFlightJobIds: Set<String> = []
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -34,7 +35,11 @@ final class JobsListViewModel: ObservableObject {
     }
 
     func apply(jobId: String, user: AppSessionUser) async {
+        guard !jobId.isEmpty else { return }
         guard !appliedJobIds.contains(jobId) else { return }
+        guard !applyInFlightJobIds.contains(jobId) else { return }
+        applyInFlightJobIds.insert(jobId)
+        defer { applyInFlightJobIds.remove(jobId) }
         do {
             try await repository.applyToJob(jobId: jobId, user: user)
             appliedJobIds.insert(jobId)

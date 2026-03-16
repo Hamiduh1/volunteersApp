@@ -5,6 +5,7 @@ import Combine
 final class EventsListViewModel: ObservableObject {
     @Published private(set) var events: [EventRecord] = []
     @Published private(set) var appliedEventIds: Set<String> = []
+    @Published private(set) var applyInFlightEventIds: Set<String> = []
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -38,7 +39,11 @@ final class EventsListViewModel: ObservableObject {
     }
 
     func apply(eventId: String, user: AppSessionUser) async {
+        guard !eventId.isEmpty else { return }
         guard !appliedEventIds.contains(eventId) else { return }
+        guard !applyInFlightEventIds.contains(eventId) else { return }
+        applyInFlightEventIds.insert(eventId)
+        defer { applyInFlightEventIds.remove(eventId) }
         do {
             try await repository.applyToEvent(eventId: eventId, user: user)
             appliedEventIds.insert(eventId)

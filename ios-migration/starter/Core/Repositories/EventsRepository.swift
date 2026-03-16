@@ -10,7 +10,13 @@ final class EventsRepository {
         let snapshot = try await db.collection(FirestoreCollection.events.rawValue)
             .limit(to: limit)
             .getDocuments()
-        return snapshot.documents.compactMap { try? $0.data(as: EventRecord.self) }
+        return snapshot.documents.compactMap { doc in
+            if (doc.data()["isDeleted"] as? Bool) == true { return nil }
+            if let status = (doc.data()["status"] as? String)?.uppercased(), status == "CANCELLED" {
+                return nil
+            }
+            return try? doc.data(as: EventRecord.self)
+        }
     }
 
     func hasApplied(eventId: String, uid: String) async throws -> Bool {

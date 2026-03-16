@@ -27,7 +27,7 @@ struct EventDetailView: View {
                     }
 
                     if viewModel.isApplied {
-                        Text("Application status: \((viewModel.application?.status ?? .unknown).rawValue)")
+                        Text("Application status: \((viewModel.application?.status ?? .unknown).displayTitle)")
                             .font(.footnote)
                             .foregroundStyle(.green)
                     } else {
@@ -35,6 +35,11 @@ struct EventDetailView: View {
                             Task { await viewModel.apply(eventId: eventId, user: user) }
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isApplying)
+                        if viewModel.isApplying {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                     }
                 } else {
                     Text("Event not found.")

@@ -72,7 +72,7 @@ private struct ActivityRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(item.status.rawValue.replacingOccurrences(of: "_", with: " "))
+                Text(item.status.displayTitle)
                     .font(.caption.weight(.semibold))
             }
         }

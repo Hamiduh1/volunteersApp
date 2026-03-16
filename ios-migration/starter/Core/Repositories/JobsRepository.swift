@@ -9,7 +9,13 @@ final class JobsRepository {
         let snapshot = try await db.collection(FirestoreCollection.jobs.rawValue)
             .limit(to: limit)
             .getDocuments()
-        return snapshot.documents.compactMap { try? $0.data(as: JobRecord.self) }
+        return snapshot.documents.compactMap { doc in
+            if (doc.data()["isDeleted"] as? Bool) == true { return nil }
+            if let status = (doc.data()["status"] as? String)?.uppercased(), status == "CLOSED" {
+                return nil
+            }
+            return try? doc.data(as: JobRecord.self)
+        }
     }
 
     func hasApplied(jobId: String, uid: String) async throws -> Bool {
