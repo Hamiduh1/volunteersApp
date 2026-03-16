@@ -1,6 +1,30 @@
 import Foundation
 import FirebaseFirestore
 import FirebaseFirestoreSwift
+import FirebaseFunctions
+
+enum LiveRepositoryError: LocalizedError {
+    case missingChannel
+    case missingUid
+    case tokenNotFound
+    case tokenFunctionNotFound
+    case functionsFailure(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingChannel:
+            return "Session channel is missing."
+        case .missingUid:
+            return "Current user id is missing."
+        case .tokenNotFound:
+            return "Token response was empty."
+        case .tokenFunctionNotFound:
+            return "Token function is not deployed. Deploy Cloud Functions and try again."
+        case .functionsFailure(let message):
+            return message
+        }
+    }
+}
 
 final class LiveRepository {
     private let db = Firestore.firestore()
@@ -10,9 +34,7 @@ final class LiveRepository {
             .limit(to: limit)
             .getDocuments()
 
-        return snapshot.documents.compactMap { doc in
-            try? doc.data(as: LiveSessionRecord.self)
-        }
+        return snapshot.documents.compactMap(parseLiveSession)
         .sorted {
             let l = $0.createdAt?.dateValue() ?? .distantPast
             let r = $1.createdAt?.dateValue() ?? .distantPast
@@ -21,22 +43,126 @@ final class LiveRepository {
     }
 
     func getRtcToken(channelName: String, uid: String) async throws -> String {
-        let response = try await FunctionsService.shared.callMap(
-            function: .getAgoraRtcToken,
-            data: [
-                "channelName": channelName,
-                "uid": uid
-            ]
-        )
+        let cleanChannel = channelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanChannel.isEmpty else { throw LiveRepositoryError.missingChannel }
+        guard !cleanUid.isEmpty else { throw LiveRepositoryError.missingUid }
 
-        if let token = response["token"] as? String, !token.isEmpty {
-            return token
+        do {
+            let result = try await FunctionsService.shared.call(
+                function: .getAgoraRtcToken,
+                data: [
+                    "channelName": cleanChannel,
+                    "uid": cleanUid
+                ]
+            )
+            if let token = parseToken(from: result), !token.isEmpty {
+                return token
+            }
+            throw LiveRepositoryError.tokenNotFound
+        } catch let error as LiveRepositoryError {
+            throw error
+        } catch let nsError as NSError {
+            if nsError.domain == FunctionsErrorDomain,
+               nsError.code == FunctionsErrorCode.notFound.rawValue {
+                throw LiveRepositoryError.tokenFunctionNotFound
+            }
+            if let message = nsError.userInfo[NSLocalizedDescriptionKey] as? String,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw LiveRepositoryError.functionsFailure(message)
+            }
+            throw LiveRepositoryError.functionsFailure(nsError.localizedDescription)
         }
-        if let data = response["data"] as? [String: Any],
-           let token = data["token"] as? String,
+    }
+
+    private func parseLiveSession(_ doc: QueryDocumentSnapshot) -> LiveSessionRecord? {
+        if let decoded = try? doc.data(as: LiveSessionRecord.self) {
+            return decoded
+        }
+
+        let data = doc.data()
+        let channel = data.firstNonEmptyString(keys: ["agoraChannelName", "channelName", "agoraChannel", "streamChannel", "channel"])
+        let hostName = data.firstNonEmptyString(keys: ["hostName", "hostDisplayName", "hostUsername", "hostEmail"])
+        let hostId = data.firstNonEmptyString(keys: ["hostId", "hostUid", "organizerId", "userId"])
+        let title = data.firstNonEmptyString(keys: ["title", "sessionTitle", "name"]) ?? "Untitled Session"
+        let status = data.firstNonEmptyString(keys: ["status", "state"]) ?? "unknown"
+        let createdAtDate = data.firstDate(keys: [
+            "createdAt",
+            "timestamp",
+            "startTime",
+            "startedAt",
+            "createdAtMs",
+            "timestampMs"
+        ])
+        let createdAtTimestamp = createdAtDate.map { Timestamp(date: $0) }
+
+        return LiveSessionRecord(
+            id: doc.documentID,
+            agoraChannelName: channel,
+            hostId: hostId,
+            hostName: hostName,
+            title: title,
+            status: status,
+            createdAt: createdAtTimestamp
+        )
+    }
+
+    private func parseToken(from result: Any?) -> String? {
+        if let token = (result as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
            !token.isEmpty {
             return token
         }
-        return ""
+
+        guard let map = result as? [String: Any] else { return nil }
+        for key in ["token", "rtcToken", "agoraRtcToken", "agora_token"] {
+            if let token = (map[key] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !token.isEmpty {
+                return token
+            }
+        }
+        if let nested = map["data"] as? [String: Any],
+           let token = parseToken(from: nested) {
+            return token
+        }
+        if let nested = map["result"] as? [String: Any],
+           let token = parseToken(from: nested) {
+            return token
+        }
+        return nil
+    }
+}
+
+private extension Dictionary where Key == String, Value == Any {
+    func firstNonEmptyString(keys: [String]) -> String? {
+        for key in keys {
+            if let value = self[key] as? String {
+                let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !clean.isEmpty { return clean }
+            }
+        }
+        return nil
+    }
+
+    func firstDate(keys: [String]) -> Date? {
+        for key in keys {
+            if let timestamp = self[key] as? Timestamp {
+                return timestamp.dateValue()
+            }
+            if let date = self[key] as? Date {
+                return date
+            }
+            if let number = self[key] as? NSNumber {
+                let raw = number.doubleValue
+                if raw > 1_000_000_000_000 {
+                    return Date(timeIntervalSince1970: raw / 1000.0)
+                }
+                if raw > 0 {
+                    return Date(timeIntervalSince1970: raw)
+                }
+            }
+        }
+        return nil
     }
 }

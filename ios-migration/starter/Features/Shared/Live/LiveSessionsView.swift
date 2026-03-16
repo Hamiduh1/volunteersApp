@@ -6,21 +6,56 @@ struct LiveSessionsView: View {
 
     var body: some View {
         List {
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let tokenStatus = viewModel.tokenStatusMessage, !tokenStatus.isEmpty {
+                Section {
+                    Text(tokenStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                }
+            }
+
             if !viewModel.tokenPreview.isEmpty {
                 Section("Last RTC Token") {
                     Text(viewModel.tokenPreview)
                         .font(.caption)
                         .textSelection(.enabled)
+                    Button("Clear Token") {
+                        viewModel.clearTokenPreview()
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
 
-            if viewModel.isLoading && viewModel.sessions.isEmpty {
+            Section("Filters") {
+                TextField("Search title, host, status, channel", text: $viewModel.query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Picker("Status", selection: $viewModel.statusFilter) {
+                    ForEach(LiveSessionStatusFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Showing \(viewModel.filteredSessions.count) of \(viewModel.sessions.count) sessions • Live: \(viewModel.liveCount)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.isLoading && viewModel.filteredSessions.isEmpty {
                 ProgressView("Loading live sessions...")
-            } else if viewModel.sessions.isEmpty {
+            } else if viewModel.filteredSessions.isEmpty {
                 Text("No live sessions found.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewModel.sessions) { session in
+                ForEach(viewModel.filteredSessions) { session in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(session.title ?? "Untitled Session")
                             .font(.headline)
@@ -30,11 +65,28 @@ struct LiveSessionsView: View {
                         Text("Status: \((session.status ?? "unknown").uppercased())")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if let channel = session.agoraChannelName, !channel.isEmpty {
+                            Text("Channel: \(channel)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let createdAt = session.createdAt?.dateValue() {
+                            Text(createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
 
                         Button("Request RTC Token") {
                             Task { await viewModel.requestToken(session: session, uid: user.uid) }
                         }
                         .buttonStyle(.bordered)
+                        .disabled(viewModel.isRequestingToken)
+                        .overlay(alignment: .trailing) {
+                            if viewModel.isRequestingToken(for: session) {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
                     }
                     .padding(.vertical, 4)
                 }
