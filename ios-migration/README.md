@@ -31,6 +31,8 @@ This folder starts iOS migration without changing your current Android structure
   Compile-ready enums/path helpers for collections/functions.
 - `ios-migration/starter/CoreModels.swift`:
   Starter Firestore models with status normalization for iOS.
+- `ios-migration/scripts/check_target_coverage.ps1`:
+  Verifies that all files listed in `starter/README.md` are present in your iOS source tree.
 
 ## Immediate Next Steps
 1. Create iOS project target in Xcode (SwiftUI, iOS 16+ recommended).

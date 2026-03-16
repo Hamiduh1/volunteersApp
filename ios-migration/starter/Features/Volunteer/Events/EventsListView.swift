@@ -18,7 +18,7 @@ struct EventsListView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(event.title ?? "Untitled Event")
                                     .font(.headline)
-                                Text(event.locationName ?? event.locationAddress ?? "Location TBD")
+                                Text(event.locationName ?? event.locationAddress ?? "Location unavailable")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                 HStack {

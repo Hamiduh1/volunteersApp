@@ -131,14 +131,29 @@ struct ProfileHomeView: View {
         if let urlString = viewModel.profileImageUrl ?? viewModel.profile.profileImageUrl,
            let url = URL(string: urlString),
            !urlString.isEmpty {
-            AsyncImage(url: url) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                ZStack {
-                    Circle().fill(Color.gray.opacity(0.25))
-                    ProgressView()
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .failure:
+                    ZStack {
+                        Circle().fill(Color.gray.opacity(0.2))
+                        Image(systemName: "person.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                case .empty:
+                    ZStack {
+                        Circle().fill(Color.gray.opacity(0.25))
+                        ProgressView()
+                    }
+                @unknown default:
+                    ZStack {
+                        Circle().fill(Color.gray.opacity(0.2))
+                        Image(systemName: "person.fill")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .clipShape(Circle())

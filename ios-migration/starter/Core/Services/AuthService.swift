@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseAuth
+import FirebaseFirestore
 
 final class AuthService {
     static let shared = AuthService()
@@ -22,6 +23,41 @@ final class AuthService {
     func signIn(email: String, password: String) async throws -> User {
         let result = try await Auth.auth().signIn(withEmail: email, password: password)
         return result.user
+    }
+
+    func signUp(
+        email: String,
+        password: String,
+        name: String,
+        username: String,
+        role: AppUserRole = .volunteer
+    ) async throws -> User {
+        let result = try await Auth.auth().createUser(withEmail: email, password: password)
+        let user = result.user
+
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let emailPrefix = cleanEmail.split(separator: "@").first.map(String.init) ?? "user"
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let userPayload: [String: Any] = [
+            "uid": user.uid,
+            "email": cleanEmail,
+            "name": cleanName.isEmpty ? emailPrefix : cleanName,
+            "username": cleanUsername.isEmpty ? emailPrefix : cleanUsername,
+            "role": role.rawValue,
+            "userRole": role.rawValue,
+            "emailVerified": user.isEmailVerified,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        try await Firestore.firestore()
+            .collection(FirestoreCollection.users.rawValue)
+            .document(user.uid)
+            .setData(userPayload, merge: true)
+
+        return user
     }
 
     func signOut() throws {

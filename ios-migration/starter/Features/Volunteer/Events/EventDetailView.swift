@@ -18,7 +18,7 @@ struct EventDetailView: View {
                         Text(description)
                     }
 
-                    Text("Location: \(event.locationName ?? event.locationAddress ?? "TBD")")
+                    Text("Location: \(event.locationName ?? event.locationAddress ?? "Unavailable")")
                         .foregroundStyle(.secondary)
 
                     if let payment = event.payment {

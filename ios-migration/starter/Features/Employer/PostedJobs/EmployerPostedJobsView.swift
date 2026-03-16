@@ -19,7 +19,7 @@ struct EmployerPostedJobsView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(job.title ?? "Untitled Job")
                                 .font(.headline)
-                            Text(job.locationString ?? "Location TBD")
+                            Text(job.locationString ?? "Location unavailable")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

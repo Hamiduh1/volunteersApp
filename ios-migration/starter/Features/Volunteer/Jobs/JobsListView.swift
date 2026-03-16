@@ -21,7 +21,7 @@ struct JobsListView: View {
                                 Text(job.employerName ?? "Unknown Employer")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                Text(job.locationString ?? "Location TBD")
+                                Text(job.locationString ?? "Location unavailable")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
 

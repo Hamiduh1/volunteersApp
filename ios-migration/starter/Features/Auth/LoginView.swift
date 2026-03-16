@@ -20,6 +20,15 @@ struct LoginView: View {
                     .disabled(viewModel.isLoading)
                 }
 
+                Section("Account") {
+                    NavigationLink("Create Account") {
+                        SignUpView()
+                    }
+                    NavigationLink("Forgot Password") {
+                        ForgotPasswordView()
+                    }
+                }
+
                 if let errorMessage = viewModel.errorMessage {
                     Section("Error") {
                         Text(errorMessage).foregroundStyle(.red)

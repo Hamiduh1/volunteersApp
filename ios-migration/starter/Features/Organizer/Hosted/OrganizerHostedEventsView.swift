@@ -19,7 +19,7 @@ struct OrganizerHostedEventsView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(event.title ?? "Untitled Event")
                                 .font(.headline)
-                            Text(event.locationName ?? event.locationAddress ?? "Location TBD")
+                            Text(event.locationName ?? event.locationAddress ?? "Location unavailable")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }

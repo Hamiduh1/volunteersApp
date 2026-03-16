@@ -16,7 +16,7 @@ struct JobDetailView: View {
 
                     Text("Employer: \(job.employerName ?? "Unknown")")
                         .foregroundStyle(.secondary)
-                    Text("Location: \(job.locationString ?? "TBD")")
+                    Text("Location: \(job.locationString ?? "Unavailable")")
                         .foregroundStyle(.secondary)
 
                     if let description = job.description, !description.isEmpty {

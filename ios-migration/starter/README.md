@@ -23,10 +23,14 @@ Copy these files into your iOS target:
 - `Core/Repositories/CommunityRepository.swift`
 - `Core/Repositories/GlobalWalletRepository.swift`
 - `Core/Repositories/ProfileRepository.swift`
-- `App/ContentViewTemplate.swift` (rename to `ContentView.swift`)
-- `App/VolunteersAppiOSAppTemplate.swift` (merge into your app entry file)
+- `App/ContentView.swift`
+- `App/VolunteersAppiOSApp.swift`
 - `Features/Auth/LoginView.swift`
 - `Features/Auth/LoginViewModel.swift`
+- `Features/Auth/SignUpView.swift`
+- `Features/Auth/SignUpViewModel.swift`
+- `Features/Auth/ForgotPasswordView.swift`
+- `Features/Auth/ForgotPasswordViewModel.swift`
 - `Features/Root/AppRouterView.swift`
 - `Features/Volunteer/VolunteerHomeTabView.swift`
 - `Features/Volunteer/Events/EventsListView.swift`

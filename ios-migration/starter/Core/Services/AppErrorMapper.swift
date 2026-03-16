@@ -1,8 +1,29 @@
 import Foundation
+import FirebaseAuth
 
 enum AppErrorMapper {
     static func message(from error: Error) -> String {
         let nsError = error as NSError
+        if nsError.domain == AuthErrorDomain,
+           let code = AuthErrorCode.Code(rawValue: nsError.code) {
+            switch code {
+            case .emailAlreadyInUse:
+                return "This email is already registered. Sign in or reset the password."
+            case .invalidEmail:
+                return "Enter a valid email address."
+            case .wrongPassword:
+                return "Incorrect password."
+            case .userNotFound:
+                return "No account found for this email."
+            case .weakPassword:
+                return "Password is too weak. Use at least 6 characters."
+            case .networkError:
+                return "Network unavailable. Check your connection and try again."
+            default:
+                break
+            }
+        }
+
         let raw = nsError.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = raw.lowercased()
 
