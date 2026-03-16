@@ -10,6 +10,9 @@ Copy these files into your iOS target:
 - `Core/Repositories/EventsRepository.swift`
 - `Core/Repositories/JobsRepository.swift`
 - `Core/Repositories/MyActivityRepository.swift`
+- `Core/Repositories/OrganizerRepository.swift`
+- `Core/Repositories/EmployerRepository.swift`
+- `Core/Repositories/OrganizerWalletRepository.swift`
 - `App/ContentViewTemplate.swift` (rename to `ContentView.swift`)
 - `App/VolunteersAppiOSAppTemplate.swift` (merge into your app entry file)
 - `Features/Auth/LoginView.swift`
@@ -27,6 +30,18 @@ Copy these files into your iOS target:
 - `Features/Volunteer/Activity/VolunteerActivityItem.swift`
 - `Features/Volunteer/Activity/MyActivityView.swift`
 - `Features/Volunteer/Activity/MyActivityViewModel.swift`
+- `Features/Organizer/OrganizerHomeTabView.swift`
+- `Features/Organizer/Hosted/OrganizerHostedEventsView.swift`
+- `Features/Organizer/Hosted/OrganizerHostedEventsViewModel.swift`
+- `Features/Organizer/Applications/OrganizerApplicationsReviewView.swift`
+- `Features/Organizer/Applications/OrganizerApplicationsReviewViewModel.swift`
+- `Features/Organizer/Wallet/OrganizerWalletView.swift`
+- `Features/Organizer/Wallet/OrganizerWalletViewModel.swift`
+- `Features/Employer/EmployerHomeTabView.swift`
+- `Features/Employer/PostedJobs/EmployerPostedJobsView.swift`
+- `Features/Employer/PostedJobs/EmployerPostedJobsViewModel.swift`
+- `Features/Employer/Applications/EmployerApplicationsReviewView.swift`
+- `Features/Employer/Applications/EmployerApplicationsReviewViewModel.swift`
 
 Recommended destination in Xcode:
 - `VolunteersAppIOS/Core/Contracts/`

@@ -14,11 +14,9 @@ struct AppRouterView: View {
             case .volunteer, .user:
                 VolunteerHomeTabView(user: user)
             case .organizer:
-                Text("Organizer iOS screens are next migration phase.")
-                    .padding()
+                OrganizerHomeTabView(user: user)
             case .employer:
-                Text("Employer iOS screens are next migration phase.")
-                    .padding()
+                EmployerHomeTabView(user: user)
             case .owner, .admin, .associate, .support, .supportAssociate:
                 Text("Admin iOS screens are next migration phase.")
                     .padding()

@@ -150,6 +150,21 @@ struct JobApplicationRecord: Codable, Identifiable {
     var lastUpdatedAt: Timestamp?
 }
 
+struct WalletSummary {
+    let balance: Double
+    let currency: String
+}
+
+struct WalletTransactionRecord: Identifiable {
+    let id: String
+    let title: String
+    let type: String
+    let amount: Double
+    let status: String
+    let createdAt: Date?
+    let note: String?
+}
+
 // Firestore dictionaries with mixed values (wallet/settings style documents).
 struct AnyCodable: Codable {
     let value: Any
