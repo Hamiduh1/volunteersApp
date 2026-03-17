@@ -27,37 +27,14 @@ struct CreateAdvertisementView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
                 Text("Visuals & Attachments")
                     .font(.title3.weight(.bold))
-
-                mediaButtons
-
-                if attachments.isEmpty {
-                    Text("No media selected yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    attachmentPreviewList
-                }
+                mediaSection
 
                 Text("Ad Content")
                     .font(.title3.weight(.bold))
-
-                TextField("Ad Title", text: $title)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Detailed Description", text: $description, axis: .vertical)
-                    .lineLimit(3...6)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Target URL / Link", text: $targetUrl)
-                    .textFieldStyle(.roundedBorder)
-                    .keyboardType(.URL)
-
-                TextField("Contact Phone Number", text: $ownerPhone)
-                    .textFieldStyle(.roundedBorder)
-                    .keyboardType(.phonePad)
+                contentSection
 
                 Button {
                     Task {
@@ -76,15 +53,18 @@ struct CreateAdvertisementView: View {
                         ProgressView()
                     } else {
                         Text("PUBLISH AD")
-                            .fontWeight(.bold)
+                            .fontWeight(.black)
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
                 .disabled(!isFormValid || viewModel.isSubmittingAd)
             }
             .padding(20)
         }
         .navigationTitle("Create Ad")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Close") { onClose() }
@@ -132,67 +112,114 @@ struct CreateAdvertisementView: View {
     }
 
     @ViewBuilder
-    private var mediaButtons: some View {
-        HStack(spacing: 8) {
-            PhotosPicker(
-                selection: $imageItems,
-                maxSelectionCount: 10,
-                matching: .images
-            ) {
-                Label("Add Images", systemImage: "photo")
+    private var mediaSection: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(attachments) { attachment in
+                    mediaAttachmentCard(attachment)
+                }
+                mediaAddButtons
             }
-            .buttonStyle(.bordered)
-
-            PhotosPicker(
-                selection: $videoItems,
-                maxSelectionCount: 10,
-                matching: .videos
-            ) {
-                Label("Add Videos", systemImage: "video")
-            }
-            .buttonStyle(.bordered)
-
-            Button {
-                showDocImporter = true
-            } label: {
-                Label("Add Docs", systemImage: "doc")
-            }
-            .buttonStyle(.bordered)
+            .padding(.horizontal, 2)
         }
+        .frame(height: 170)
     }
 
     @ViewBuilder
-    private var attachmentPreviewList: some View {
-        ForEach(attachments) { attachment in
-            HStack(spacing: 10) {
+    private var mediaAddButtons: some View {
+        PhotosPicker(
+            selection: $imageItems,
+            maxSelectionCount: 10,
+            matching: .images
+        ) {
+            mediaAddCard(icon: "photo.fill", title: "Add Images")
+        }
+        .buttonStyle(.plain)
+
+        PhotosPicker(
+            selection: $videoItems,
+            maxSelectionCount: 10,
+            matching: .videos
+        ) {
+            mediaAddCard(icon: "video.fill", title: "Add Videos")
+        }
+        .buttonStyle(.plain)
+
+        Button {
+            showDocImporter = true
+        } label: {
+            mediaAddCard(icon: "doc.fill", title: "Add Docs")
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func mediaAttachmentCard(_ attachment: CommunityAttachmentDraft) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
                 if attachment.type == .image, let uiImage = UIImage(data: attachment.data) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 64, height: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                } else if attachment.type == .video {
-                    Image(systemName: "video")
-                        .frame(width: 28)
                 } else {
-                    Image(systemName: "doc")
-                        .frame(width: 28)
+                    VStack(spacing: 8) {
+                        Image(systemName: attachment.type == .video ? "video.fill" : "doc.fill")
+                            .font(.system(size: 30, weight: .semibold))
+                        Text(attachment.fileName)
+                            .font(.caption2)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(uiColor: .secondarySystemBackground))
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(attachment.fileName)
-                        .font(.subheadline)
-                        .lineLimit(2)
-                    Text(attachment.type.rawValue.capitalized)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Remove", role: .destructive) {
-                    attachments.removeAll { $0.id == attachment.id }
-                }
-                .buttonStyle(.bordered)
             }
+            .frame(width: 160, height: 160)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+
+            Button {
+                attachments.removeAll { $0.id == attachment.id }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(6)
+                    .background(Color.black.opacity(0.7), in: Circle())
+            }
+            .padding(8)
+        }
+    }
+
+    @ViewBuilder
+    private func mediaAddCard(icon: String, title: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 30, weight: .semibold))
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .multilineTextAlignment(.center)
+        }
+        .frame(width: 160, height: 160)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder
+    private var contentSection: some View {
+        VStack(spacing: 14) {
+            TextField("Ad Title", text: $title)
+                .textFieldStyle(.roundedBorder)
+            TextField("Detailed Description", text: $description, axis: .vertical)
+                .lineLimit(4...6)
+                .textFieldStyle(.roundedBorder)
+            TextField("Target URL / Link", text: $targetUrl)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.URL)
+            TextField("Contact Phone Number", text: $ownerPhone)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.phonePad)
         }
     }
 

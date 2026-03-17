@@ -2,8 +2,8 @@ import Foundation
 import Combine
 
 enum MindLoomFeedScope: String, CaseIterable, Identifiable {
+    case forYou = "For You"
     case following = "Following"
-    case all = "All Posts"
 
     var id: String { rawValue }
 }
@@ -13,7 +13,7 @@ final class MindLoomFeedViewModel: ObservableObject {
     @Published private(set) var posts: [MindLoomPostRecord] = []
     @Published private(set) var followingIds: Set<String> = []
     @Published private(set) var likingPostIds: Set<String> = []
-    @Published var selectedScope: MindLoomFeedScope = .following
+    @Published var selectedScope: MindLoomFeedScope = .forYou
     @Published var postText = ""
     @Published var isLoading = false
     @Published var isPosting = false

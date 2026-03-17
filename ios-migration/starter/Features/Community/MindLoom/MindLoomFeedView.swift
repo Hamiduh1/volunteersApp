@@ -3,10 +3,34 @@ import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
 
+private struct MindLoomCreatorItem: Identifiable {
+    let id: String
+    let name: String
+    let profileUrl: String?
+}
+
 struct MindLoomFeedView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = MindLoomFeedViewModel()
     @State private var showComposer = false
+
+    private var creatorItems: [MindLoomCreatorItem] {
+        var seen = Set<String>()
+        var output: [MindLoomCreatorItem] = []
+        for post in viewModel.posts {
+            let authorId = (post.authorId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !authorId.isEmpty, !seen.contains(authorId) else { continue }
+            seen.insert(authorId)
+            output.append(
+                MindLoomCreatorItem(
+                    id: authorId,
+                    name: (post.authorName ?? "User").trimmingCharacters(in: .whitespacesAndNewlines),
+                    profileUrl: post.authorProfileUrl
+                )
+            )
+        }
+        return output
+    }
 
     var body: some View {
         List {
@@ -14,8 +38,50 @@ struct MindLoomFeedView: View {
                 Section {
                     Text(status)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.82))
                 }
+                .listRowBackground(Color.black)
+            }
+
+            if !creatorItems.isEmpty {
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(creatorItems) { creator in
+                                NavigationLink {
+                                    MindLoomProfileView(authorId: creator.id, currentUserId: user.uid)
+                                } label: {
+                                    VStack(spacing: 6) {
+                                        AsyncImage(url: URL(string: creator.profileUrl ?? "")) { phase in
+                                            switch phase {
+                                            case .success(let image):
+                                                image.resizable().scaledToFill()
+                                            default:
+                                                Circle()
+                                                    .fill(Color.white.opacity(0.15))
+                                                    .overlay(
+                                                        Image(systemName: "person.fill")
+                                                            .foregroundStyle(.white.opacity(0.75))
+                                                    )
+                                            }
+                                        }
+                                        .frame(width: 58, height: 58)
+                                        .clipShape(Circle())
+
+                                        Text(creator.name.isEmpty ? "User" : creator.name)
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                            .foregroundStyle(.white)
+                                    }
+                                    .frame(width: 70)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                }
+                .listRowBackground(Color.black)
             }
 
             Section {
@@ -26,36 +92,55 @@ struct MindLoomFeedView: View {
                 }
                 .pickerStyle(.segmented)
             }
+            .listRowBackground(Color.black)
 
-            Section("Feed") {
+            Section {
                 if viewModel.isLoading && viewModel.posts.isEmpty {
                     ProgressView("Loading feed...")
+                        .foregroundStyle(.white)
                 } else if viewModel.displayedPosts.isEmpty {
                     Text(
                         viewModel.selectedScope == .following
                             ? "No posts yet from people you follow."
                             : "No posts yet."
                     )
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.75))
                 } else {
                     ForEach(viewModel.displayedPosts) { post in
                         postCard(post)
                             .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                             .listRowSeparator(.hidden)
+                            .listRowBackground(Color.black)
                     }
                 }
             }
+            .listRowBackground(Color.black)
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.black.ignoresSafeArea())
         .navigationTitle("MindLoom")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showComposer = true
+                NavigationLink {
+                    LiveSessionsView(user: user)
                 } label: {
-                    Label("Create Post", systemImage: "plus.circle.fill")
+                    Image(systemName: "dot.radiowaves.left.and.right")
                 }
+                .tint(.white)
             }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                showComposer = true
+            } label: {
+                Label("Create", systemImage: "plus")
+                    .fontWeight(.semibold)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.trailing, 16)
+            .padding(.bottom, 22)
         }
         .sheet(isPresented: $showComposer) {
             NavigationStack {
@@ -89,10 +174,10 @@ struct MindLoomFeedView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(post.authorName ?? "User")
                             .font(.headline)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.white)
                         Text(post.timestamp?.dateValue().formatted(date: .abbreviated, time: .shortened) ?? "--")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                 }
                 .buttonStyle(.plain)
@@ -102,6 +187,7 @@ struct MindLoomFeedView: View {
             if let text = post.text, !text.isEmpty {
                 Text(text)
                     .font(.body)
+                    .foregroundStyle(.white)
             }
 
             postMediaView(post)
@@ -110,7 +196,7 @@ struct MindLoomFeedView: View {
                 let likesCount = (post.likes ?? []).count
                 Text("\(likesCount) likes")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.72))
                 Spacer()
                 let postId = post.id ?? ""
                 let isLiked = (post.likes ?? []).contains(user.uid)
@@ -118,6 +204,7 @@ struct MindLoomFeedView: View {
                     Task { await viewModel.toggleLike(post: post, uid: user.uid) }
                 }
                 .buttonStyle(.bordered)
+                .tint(.white.opacity(0.9))
                 .disabled(postId.isEmpty || viewModel.likingPostIds.contains(postId))
                 if viewModel.likingPostIds.contains(postId) {
                     ProgressView()
@@ -128,7 +215,7 @@ struct MindLoomFeedView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(uiColor: .secondarySystemBackground))
+                .fill(Color.white.opacity(0.08))
         )
     }
 
@@ -146,7 +233,7 @@ struct MindLoomFeedView: View {
                         ProgressView()
                     default:
                         Image(systemName: "photo")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                 }
                 .frame(height: 220)
@@ -155,11 +242,13 @@ struct MindLoomFeedView: View {
             } else if type == "VIDEO" {
                 Link(destination: url) {
                     Label("Open Video", systemImage: "video")
+                        .foregroundStyle(.white)
                 }
                 .font(.subheadline)
             } else if type == "DOCUMENT" {
                 Link(destination: url) {
                     Label("Open Document", systemImage: "doc")
+                        .foregroundStyle(.white)
                 }
                 .font(.subheadline)
             }
@@ -184,16 +273,17 @@ private struct MindLoomComposerSheet: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                TextField("Share something...", text: $viewModel.postText, axis: .vertical)
-                    .lineLimit(3...8)
-                    .textFieldStyle(.roundedBorder)
-
-                attachmentToolbar
+            VStack(alignment: .leading, spacing: 16) {
+                OutlinedFieldLike(
+                    text: $viewModel.postText,
+                    title: "What's on your mind?"
+                )
 
                 if let selectedAttachment {
                     attachmentPreview(selectedAttachment)
                 }
+
+                mediaButtons
 
                 Button {
                     Task {
@@ -209,16 +299,18 @@ private struct MindLoomComposerSheet: View {
                     if viewModel.isPosting {
                         ProgressView()
                     } else {
-                        Text("Post to MindLoom")
-                            .fontWeight(.semibold)
+                        Text("Post")
+                            .fontWeight(.bold)
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .disabled(!canPost)
             }
             .padding(20)
         }
         .navigationTitle("Create Post")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Close") { onClose() }
@@ -280,20 +372,14 @@ private struct MindLoomComposerSheet: View {
     }
 
     @ViewBuilder
-    private var attachmentToolbar: some View {
-        HStack(spacing: 8) {
-            PhotosPicker(
-                selection: $selectedImageItem,
-                matching: .images
-            ) {
+    private var mediaButtons: some View {
+        HStack(spacing: 10) {
+            PhotosPicker(selection: $selectedImageItem, matching: .images) {
                 Label("Image", systemImage: "photo")
             }
             .buttonStyle(.bordered)
 
-            PhotosPicker(
-                selection: $selectedVideoItem,
-                matching: .videos
-            ) {
+            PhotosPicker(selection: $selectedVideoItem, matching: .videos) {
                 Label("Video", systemImage: "video")
             }
             .buttonStyle(.bordered)
@@ -301,7 +387,7 @@ private struct MindLoomComposerSheet: View {
             Button {
                 showDocumentPicker = true
             } label: {
-                Label("Doc", systemImage: "doc")
+                Label("Document", systemImage: "doc")
             }
             .buttonStyle(.bordered)
 
@@ -324,7 +410,7 @@ private struct MindLoomComposerSheet: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(height: 180)
+                    .frame(height: 200)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
@@ -336,6 +422,25 @@ private struct MindLoomComposerSheet: View {
             Label(attachment.fileName, systemImage: "doc.fill")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct OutlinedFieldLike: View {
+    @Binding var text: String
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            TextField("", text: $text, axis: .vertical)
+                .lineLimit(6...10)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                )
         }
     }
 }

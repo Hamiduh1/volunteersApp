@@ -20,6 +20,9 @@ Completed in this phase:
 - Added community UX alignment updates:
   - MindLoom feed now supports `Following` vs `All Posts` filtering and dedicated composer sheet flow.
   - Sponsored/Garage section now uses a persistent bottom action CTA for create flow parity style.
+  - Applied final pixel-parity tuning for community:
+    - MindLoom now mirrors Android `For You` / `Following` labeling, dark feed style, creator strip, and floating create CTA.
+    - Ad/Garage create screens now use Android-like section hierarchy and horizontal media-card picker UX.
 
 Validation result:
 - `android_ios_contract_diff.ps1` currently reports no missing collection/function/storage names between extracted Android references and iOS contract enums.

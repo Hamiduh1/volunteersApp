@@ -41,31 +41,21 @@ struct SponsoredContentView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle("Sponsored")
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 0) {
-                Divider()
-                Button {
-                    if selectedSection == .ads {
-                        showCreateAd = true
-                    } else {
-                        showCreateGarageSale = true
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: selectedSection == .ads ? "megaphone.fill" : "storefront.fill")
-                        Text(selectedSection == .ads ? "Create Ad" : "Post Garage Sale")
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .padding(.horizontal, 16)
+        .navigationTitle("Advertisements")
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                if selectedSection == .ads {
+                    showCreateAd = true
+                } else {
+                    showCreateGarageSale = true
                 }
-                .buttonStyle(.borderedProminent)
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
+            } label: {
+                Label(selectedSection == .ads ? "Post Ad" : "Post Garage Sale", systemImage: "plus")
+                    .fontWeight(.semibold)
             }
+            .buttonStyle(.borderedProminent)
+            .padding(.trailing, 16)
+            .padding(.bottom, 22)
         }
         .sheet(isPresented: $showCreateAd) {
             NavigationStack {
