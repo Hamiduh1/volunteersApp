@@ -1,8 +1,23 @@
 import SwiftUI
 
+private enum WalletRecipientLane: String, CaseIterable, Identifiable {
+    case appUser = "app_user"
+    case mobileMoney = "mobile_money"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .appUser: return "App User"
+        case .mobileMoney: return "Mobile Money"
+        }
+    }
+}
+
 struct WalletTransactView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = WalletTransactViewModel()
+    @State private var recipientLane: WalletRecipientLane = .appUser
 
     var body: some View {
         ScrollView {
@@ -16,8 +31,14 @@ struct WalletTransactView: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("Transact")
+        .navigationTitle("Send Money")
         .task { await viewModel.refresh(uid: user.uid) }
+        .onAppear {
+            recipientLane = viewModel.destinationType == .beneficiary ? .mobileMoney : .appUser
+        }
+        .onChange(of: viewModel.destinationType) { _, destination in
+            recipientLane = destination == .beneficiary ? .mobileMoney : .appUser
+        }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
@@ -53,29 +74,45 @@ struct WalletTransactView: View {
                 Text("Step 1: Recipient")
                     .font(.headline)
 
-                Picker("Destination", selection: $viewModel.destinationType) {
-                    ForEach(WalletDestinationType.allCases) { option in
-                        Text(option.title).tag(option)
+                Picker("Recipient Type", selection: $recipientLane) {
+                    ForEach(WalletRecipientLane.allCases) { lane in
+                        Text(lane.title).tag(lane)
                     }
                 }
                 .pickerStyle(.segmented)
-
-                if viewModel.destinationType == .beneficiary {
-                    if viewModel.beneficiaries.isEmpty {
-                        Text("No beneficiaries found. Add beneficiaries from the Android wallet flow, then refresh.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Picker("Beneficiary", selection: $viewModel.selectedBeneficiaryId) {
-                            ForEach(viewModel.beneficiaries) { item in
-                                Text(beneficiaryLabel(item)).tag(item.id ?? "")
-                            }
+                .onChange(of: recipientLane) { _, lane in
+                    switch lane {
+                    case .appUser:
+                        if viewModel.destinationType == .beneficiary {
+                            viewModel.destinationType = .wallet
                         }
+                    case .mobileMoney:
+                        viewModel.destinationType = .beneficiary
                     }
-                } else {
-                    TextField("Recipient User ID", text: $viewModel.recipientUserId)
+                }
+
+                if recipientLane == .appUser {
+                    Text("App User Destination")
+                        .font(.subheadline.weight(.semibold))
+
+                    Picker("Destination", selection: $viewModel.destinationType) {
+                        Text(WalletDestinationType.wallet.title).tag(WalletDestinationType.wallet)
+                        Text(WalletDestinationType.card.title).tag(WalletDestinationType.card)
+                        Text(WalletDestinationType.bank.title).tag(WalletDestinationType.bank)
+                    }
+                    .pickerStyle(.segmented)
+
+                    TextField("Recipient App User ID", text: $viewModel.recipientUserId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textFieldStyle(.roundedBorder)
+
+                    NavigationLink {
+                        UserDirectoryView(user: user)
+                    } label: {
+                        Label("Find App User", systemImage: "person.2")
+                            .font(.subheadline)
+                    }
 
                     if viewModel.isLoadingRecipientMethods &&
                         (viewModel.destinationType == .card || viewModel.destinationType == .bank) {
@@ -87,6 +124,23 @@ struct WalletTransactView: View {
                         payoutSetupStatusRow
                         recipientMethodPicker
                     }
+                } else {
+                    Text("Saved Beneficiaries")
+                        .font(.subheadline.weight(.semibold))
+
+                    if viewModel.beneficiaries.isEmpty {
+                        Text("No beneficiaries found. Add a beneficiary first, then return to send money.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Beneficiary", selection: $viewModel.selectedBeneficiaryId) {
+                            ForEach(viewModel.beneficiaries) { item in
+                                Text(beneficiaryLabel(item)).tag(item.id ?? "")
+                            }
+                        }
+                    }
+                    Text("Mobile money uses beneficiary routing with verification.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let hint = viewModel.recipientDestinationHelpText, !hint.isEmpty {
@@ -135,7 +189,7 @@ struct WalletTransactView: View {
     private var quoteCard: some View {
         CardContainer {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Conversion Preview")
+                Text("Step 3: Conversion Preview")
                     .font(.headline)
 
                 if viewModel.isFetchingQuote {
@@ -158,6 +212,9 @@ struct WalletTransactView: View {
     private var actionCard: some View {
         CardContainer {
             VStack(alignment: .leading, spacing: 10) {
+                Text("Step 4: Confirm")
+                    .font(.headline)
+
                 if let status = viewModel.statusMessage, !status.isEmpty {
                     Text(status)
                         .font(.subheadline)
