@@ -5,100 +5,18 @@ struct WalletTransactView: View {
     @StateObject private var viewModel = WalletTransactViewModel()
 
     var body: some View {
-        Form {
-            if let status = viewModel.statusMessage, !status.isEmpty {
-                Section {
-                    Text(status)
-                        .font(.subheadline)
-                        .foregroundStyle(.green)
-                }
+        ScrollView {
+            VStack(spacing: 14) {
+                balanceCard
+                destinationCard
+                amountCard
+                quoteCard
+                actionCard
             }
-
-            Section("Destination") {
-                Picker("Type", selection: $viewModel.destinationType) {
-                    ForEach(WalletDestinationType.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-
-                switch viewModel.destinationType {
-                case .appUser:
-                    TextField("Recipient User ID", text: $viewModel.recipientUserId)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                case .beneficiary:
-                    if viewModel.beneficiaries.isEmpty {
-                        Text("No beneficiaries found.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Picker("Beneficiary", selection: $viewModel.selectedBeneficiaryId) {
-                            ForEach(viewModel.beneficiaries) { item in
-                                let id = item.id ?? ""
-                                Text(itemLabel(item)).tag(id)
-                            }
-                        }
-                    }
-                case .paymentMethod:
-                    if viewModel.paymentMethods.isEmpty {
-                        Text("No payment methods found.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Picker("Method", selection: $viewModel.selectedPaymentMethodId) {
-                            ForEach(viewModel.paymentMethods) { method in
-                                let id = method.id ?? ""
-                                Text(methodLabel(method)).tag(id)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Section("Amount") {
-                TextField("Amount", text: $viewModel.amountText)
-                    .keyboardType(.decimalPad)
-                TextField("From Currency", text: $viewModel.fromCurrency)
-                    .textInputAutocapitalization(.characters)
-                TextField("To Currency", text: $viewModel.toCurrency)
-                    .textInputAutocapitalization(.characters)
-                TextField("Note (optional)", text: $viewModel.note)
-
-                Button("Get Quote") {
-                    Task { await viewModel.fetchQuote() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!viewModel.canFetchQuote)
-
-                if viewModel.isFetchingQuote {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-
-                if let quote = viewModel.quote {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Rate: \(String(format: "%.4f", quote.rate))")
-                        Text("You send: \(quote.sourceCurrency) \(String(format: "%.2f", quote.sourceAmount))")
-                        Text("Recipient gets: \(quote.targetCurrency) \(String(format: "%.2f", quote.recipientAmount))")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            Section {
-                Button {
-                    Task { await viewModel.submit() }
-                } label: {
-                    if viewModel.isSubmitting {
-                        ProgressView()
-                    } else {
-                        Text("Send Money")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!viewModel.canSubmit)
-            }
+            .padding(16)
         }
-        .navigationTitle("Send Money")
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Transact")
         .task { await viewModel.refresh(uid: user.uid) }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -110,15 +28,229 @@ struct WalletTransactView: View {
         }
     }
 
-    private func itemLabel(_ item: BeneficiaryRecord) -> String {
+    @ViewBuilder
+    private var balanceCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Wallet Balance")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(balanceText)
+                    .font(.title.weight(.bold))
+                if viewModel.isWalletInsufficient {
+                    Text("Insufficient wallet balance for this transfer.")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var destinationCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Destination")
+                    .font(.headline)
+
+                Picker("Destination", selection: $viewModel.destinationType) {
+                    ForEach(WalletDestinationType.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if viewModel.destinationType == .beneficiary {
+                    if viewModel.beneficiaries.isEmpty {
+                        Text("No beneficiaries found.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Beneficiary", selection: $viewModel.selectedBeneficiaryId) {
+                            ForEach(viewModel.beneficiaries) { item in
+                                Text(beneficiaryLabel(item)).tag(item.id ?? "")
+                            }
+                        }
+                    }
+                } else {
+                    TextField("Recipient User ID", text: $viewModel.recipientUserId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+
+                    if viewModel.isLoadingRecipientMethods &&
+                        (viewModel.destinationType == .card || viewModel.destinationType == .bank) {
+                        ProgressView("Loading recipient payout methods...")
+                            .font(.footnote)
+                    }
+
+                    if viewModel.destinationType == .card || viewModel.destinationType == .bank {
+                        payoutSetupStatusRow
+                        recipientMethodPicker
+                    }
+                }
+
+                if let hint = viewModel.recipientDestinationHelpText, !hint.isEmpty {
+                    Text(hint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var amountCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Amount")
+                    .font(.headline)
+
+                TextField("Amount", text: $viewModel.amountText)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+
+                HStack(spacing: 10) {
+                    TextField("From", text: $viewModel.fromCurrency)
+                        .textInputAutocapitalization(.characters)
+                        .textFieldStyle(.roundedBorder)
+
+                    TextField("To", text: $viewModel.toCurrency)
+                        .textInputAutocapitalization(.characters)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                TextField("Note (optional)", text: $viewModel.note)
+                    .textFieldStyle(.roundedBorder)
+
+                Button("Get Quote") {
+                    Task { await viewModel.fetchQuote() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.canFetchQuote)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var quoteCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Conversion Preview")
+                    .font(.headline)
+
+                if viewModel.isFetchingQuote {
+                    ProgressView("Fetching exchange rate...")
+                } else if let quote = viewModel.quote {
+                    Text("Rate: \(String(format: "%.4f", quote.rate))")
+                    Text("You send: \(quote.sourceCurrency) \(String(format: "%.2f", quote.sourceAmount))")
+                    Text("Recipient gets: \(quote.targetCurrency) \(String(format: "%.2f", quote.recipientAmount))")
+                        .fontWeight(.semibold)
+                } else {
+                    Text("Quote appears here for cross-currency transfers.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.footnote)
+        }
+    }
+
+    @ViewBuilder
+    private var actionCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 10) {
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Text(status)
+                        .font(.subheadline)
+                        .foregroundStyle(.green)
+                }
+
+                Button {
+                    Task { await viewModel.submit() }
+                } label: {
+                    if viewModel.isSubmitting {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text(actionTitle)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!viewModel.canSubmit)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var payoutSetupStatusRow: some View {
+        HStack(spacing: 10) {
+            Label(
+                viewModel.recipientHasPayoutAccount ? "Payout setup complete" : "Payout setup incomplete",
+                systemImage: viewModel.recipientHasPayoutAccount ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+            )
+            .font(.footnote)
+            .foregroundStyle(viewModel.recipientHasPayoutAccount ? .green : .orange)
+        }
+    }
+
+    @ViewBuilder
+    private var recipientMethodPicker: some View {
+        if viewModel.filteredRecipientMethods.isEmpty {
+            Text("No eligible \(viewModel.destinationType == .card ? "card" : "bank") payout methods found.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } else {
+            Picker("Recipient payout method", selection: $viewModel.selectedRecipientMethodId) {
+                ForEach(viewModel.filteredRecipientMethods) { method in
+                    Text(methodLabel(method)).tag(viewModel.recipientMethodIdentifier(method))
+                }
+            }
+        }
+    }
+
+    private var balanceText: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = viewModel.summary.currency
+        return formatter.string(from: NSNumber(value: viewModel.summary.balance))
+            ?? "\(viewModel.summary.currency) \(String(format: "%.2f", viewModel.summary.balance))"
+    }
+
+    private var actionTitle: String {
+        switch viewModel.destinationType {
+        case .wallet:
+            return "Send to Wallet"
+        case .card:
+            return "Send to Card"
+        case .bank:
+            return "Send to Bank"
+        case .beneficiary:
+            return "Send to Beneficiary"
+        }
+    }
+
+    private func beneficiaryLabel(_ item: BeneficiaryRecord) -> String {
         let name = item.name ?? "Beneficiary"
         let suffix = [item.network, item.phone].compactMap { $0 }.joined(separator: " - ")
         return suffix.isEmpty ? name : "\(name) - \(suffix)"
     }
 
     private func methodLabel(_ method: PaymentMethodRecord) -> String {
-        let brand = (method.brand ?? method.type ?? "Method").capitalized
-        let last4 = method.last4 ?? "0000"
-        return "\(brand) **** \(last4)"
+        let primary = (method.bankName ?? method.brand ?? method.type ?? "Method").capitalized
+        let last4 = (method.last4 ?? "0000")
+        return "\(primary) ...\(last4)"
+    }
+}
+
+private struct CardContainer<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }

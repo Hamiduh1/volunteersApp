@@ -233,6 +233,15 @@ struct PaymentMethodRecord: Codable, Identifiable {
     var last4: String?
     var holderName: String?
     var status: String?
+    var bankName: String?
+    var network: String?
+    var country: String?
+    var phoneNumber: String?
+    var externalAccountId: String?
+    var stripePaymentMethodId: String?
+    var chargeSourceId: String?
+    var achDebitEnabled: Bool?
+    var achCreditEnabled: Bool?
 }
 
 struct PayoutSetupStatusRecord {

@@ -19,6 +19,32 @@ final class GlobalWalletRepository {
         return WalletSummary(balance: balance, currency: currency)
     }
 
+    func fetchPendingDepositCount(uid: String, limit: Int = 80) async throws -> Int {
+        let collection = db.collection(FirestoreCollection.depositRequests.rawValue)
+        let queries: [Query] = [
+            collection.whereField("userId", isEqualTo: uid).limit(to: limit),
+            collection.whereField("senderId", isEqualTo: uid).limit(to: limit)
+        ]
+
+        var docsByPath: [String: QueryDocumentSnapshot] = [:]
+        for query in queries {
+            do {
+                let snapshot = try await query.getDocuments()
+                for doc in snapshot.documents {
+                    docsByPath[doc.reference.path] = doc
+                }
+            } catch {
+                continue
+            }
+        }
+
+        let pendingStatuses: Set<String> = ["PENDING", "PROCESSING", "QUEUED"]
+        return docsByPath.values.filter { doc in
+            let status = (doc.data().string(keys: ["status"]) ?? "").uppercased()
+            return pendingStatuses.contains(status)
+        }.count
+    }
+
     func fetchTransactions(uid: String, limit: Int = 80) async throws -> [WalletTransactionRecord] {
         let collection = db.collection(FirestoreCollection.users.rawValue)
             .document(uid)
@@ -114,6 +140,24 @@ final class GlobalWalletRepository {
         return docsByPath.values
             .compactMap(parsePaymentMethod)
             .sorted { ($0.brand ?? $0.type ?? "").localizedCaseInsensitiveCompare($1.brand ?? $1.type ?? "") == .orderedAscending }
+    }
+
+    func fetchRecipientHasPayoutAccount(recipientUserId: String) async throws -> Bool {
+        let recipientId = recipientUserId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !recipientId.isEmpty else { return false }
+
+        let snapshot = try await db.collection(FirestoreCollection.users.rawValue)
+            .document(recipientId)
+            .getDocument()
+        let data = snapshot.data() ?? [:]
+        let payoutAccount = data.string(keys: ["payoutAccountId", "stripeAccountId"])
+        return payoutAccount?.isEmpty == false
+    }
+
+    func fetchRecipientPaymentMethods(recipientUserId: String, limit: Int = 60) async throws -> [PaymentMethodRecord] {
+        let recipientId = recipientUserId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !recipientId.isEmpty else { return [] }
+        return try await fetchPaymentMethods(uid: recipientId, limit: limit)
     }
 
     func getQuote(
@@ -220,25 +264,56 @@ final class GlobalWalletRepository {
         currency: String,
         note: String
     ) async throws -> String {
-        let paymentMethodId = paymentMethod.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !paymentMethodId.isEmpty else {
-            throw WalletTransferError.invalidPaymentMethod
-        }
-        let recipientId = senderUserId.trimmingCharacters(in: .whitespacesAndNewlines)
+        try await sendToRecipientPayout(
+            recipientUserId: senderUserId,
+            paymentMethod: paymentMethod,
+            destinationType: nil,
+            amount: amount,
+            currency: currency,
+            note: note
+        )
+    }
+
+    func sendToRecipientPayout(
+        recipientUserId: String,
+        paymentMethod: PaymentMethodRecord,
+        destinationType: String?,
+        amount: Double,
+        currency: String,
+        note: String
+    ) async throws -> String {
+        let recipientId = recipientUserId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !recipientId.isEmpty else {
             throw WalletTransferError.invalidRecipient
         }
-        guard let destinationType = payoutDestinationType(for: paymentMethod) else {
+
+        let methodId = paymentMethod.id?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let externalAccountId = paymentMethod.externalAccountId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recipientMethodIdentifier = methodId?.isEmpty == false ? methodId! : (externalAccountId ?? "")
+        guard !recipientMethodIdentifier.isEmpty else {
+            throw WalletTransferError.invalidPaymentMethod
+        }
+
+        let resolvedDestinationType: String
+        if let explicit = destinationType?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+           !explicit.isEmpty {
+            resolvedDestinationType = explicit
+        } else if let inferred = payoutDestinationType(for: paymentMethod) {
+            resolvedDestinationType = inferred
+        } else {
             throw WalletTransferError.unsupportedPayoutMethod
         }
 
         var payload: [String: Any] = [
             "recipientId": recipientId,
-            "recipientPaymentMethodId": paymentMethodId,
+            "recipientPaymentMethodId": recipientMethodIdentifier,
             "amount": amount,
             "fundingSourceType": "WALLET",
-            "destinationType": destinationType
+            "destinationType": resolvedDestinationType
         ]
+        if let externalAccountId, !externalAccountId.isEmpty {
+            payload["recipientExternalAccountId"] = externalAccountId
+        }
         if let transferNote = note.trimmedNonEmpty {
             payload["note"] = transferNote
         }
@@ -318,7 +393,16 @@ final class GlobalWalletRepository {
             brand: data.string(keys: ["brand", "network", "provider"]),
             last4: data.string(keys: ["last4", "accountLast4", "maskedLast4"]),
             holderName: data.string(keys: ["holderName", "accountHolderName", "name"]),
-            status: data.string(keys: ["status"])
+            status: data.string(keys: ["status"]),
+            bankName: data.string(keys: ["bankName", "bank", "institutionName"]),
+            network: data.string(keys: ["network", "provider"]),
+            country: data.string(keys: ["country", "countryCode"]),
+            phoneNumber: data.string(keys: ["phoneNumber", "phone", "mobileNumber"]),
+            externalAccountId: data.string(keys: ["externalAccountId", "stripeExternalAccountId"]),
+            stripePaymentMethodId: data.string(keys: ["stripePaymentMethodId"]),
+            chargeSourceId: data.string(keys: ["chargeSourceId"]),
+            achDebitEnabled: data.bool(keys: ["achDebitEnabled"], fallback: false),
+            achCreditEnabled: data.bool(keys: ["achCreditEnabled"], fallback: false)
         )
     }
 
