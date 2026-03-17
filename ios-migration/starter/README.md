@@ -114,6 +114,8 @@ Copy these files into your iOS target:
 - `Features/Community/Marketplace/MarketplaceViewModel.swift`
 - `Features/Community/Sponsored/SponsoredContentView.swift`
 - `Features/Community/Sponsored/SponsoredContentViewModel.swift`
+- `Features/Community/Sponsored/CreateAdvertisementView.swift`
+- `Features/Community/Sponsored/CreateGarageSaleView.swift`
 - `Features/Wallet/GlobalWalletHomeView.swift`
 - `Features/Wallet/GlobalWalletHomeViewModel.swift`
 - `Features/Wallet/WalletTransactView.swift`

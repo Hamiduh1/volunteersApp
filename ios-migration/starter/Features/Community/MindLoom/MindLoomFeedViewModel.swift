@@ -26,9 +26,10 @@ final class MindLoomFeedViewModel: ObservableObject {
         }
     }
 
-    func createPost(user: AppSessionUser) async {
+    @discardableResult
+    func createPost(user: AppSessionUser, attachment: CommunityAttachmentDraft?) async -> Bool {
         let text = postText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty || attachment != nil else { return false }
 
         isPosting = true
         errorMessage = nil
@@ -36,12 +37,14 @@ final class MindLoomFeedViewModel: ObservableObject {
         defer { isPosting = false }
 
         do {
-            try await repository.createMindLoomTextPost(user: user, text: text)
+            try await repository.createMindLoomPost(user: user, text: text, attachment: attachment)
             postText = ""
             await refresh()
             statusMessage = "Post shared to MindLoom."
+            return true
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
+            return false
         }
     }
 

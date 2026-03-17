@@ -58,8 +58,11 @@ struct MindLoomProfileView: View {
                 } else {
                     ForEach(viewModel.posts) { post in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(post.text ?? "")
-                                .font(.body)
+                            if let text = post.text, !text.isEmpty {
+                                Text(text)
+                                    .font(.body)
+                            }
+                            postMediaView(post)
                             Text("\((post.likes ?? []).count) likes")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -89,5 +92,39 @@ struct MindLoomProfileView: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func postMediaView(_ post: MindLoomPostRecord) -> some View {
+        let type = (post.mediaType ?? "").uppercased()
+        let urlText = (post.mediaUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !urlText.isEmpty, let url = URL(string: urlText) {
+            if type == "IMAGE" {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .empty:
+                        ProgressView()
+                    default:
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(height: 180)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            } else if type == "VIDEO" {
+                Link(destination: url) {
+                    Label("Open Video", systemImage: "video")
+                }
+                .font(.subheadline)
+            } else if type == "DOCUMENT" {
+                Link(destination: url) {
+                    Label("Open Document", systemImage: "doc")
+                }
+                .font(.subheadline)
+            }
+        }
     }
 }

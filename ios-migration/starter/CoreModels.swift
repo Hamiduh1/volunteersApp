@@ -654,6 +654,49 @@ struct GarageSaleMediaRecord: Codable {
     var name: String?
 }
 
+enum CommunityAttachmentType: String, CaseIterable, Identifiable {
+    case image
+    case video
+    case document
+
+    var id: String { rawValue }
+
+    var storageType: String { rawValue }
+
+    var contentType: String {
+        switch self {
+        case .image:
+            return "image/jpeg"
+        case .video:
+            return "video/mp4"
+        case .document:
+            return "application/pdf"
+        }
+    }
+}
+
+struct CommunityAttachmentDraft: Identifiable, Equatable {
+    let id: UUID
+    let type: CommunityAttachmentType
+    let data: Data
+    let fileName: String
+    let contentType: String
+
+    init(
+        id: UUID = UUID(),
+        type: CommunityAttachmentType,
+        data: Data,
+        fileName: String,
+        contentType: String? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.data = data
+        self.fileName = fileName
+        self.contentType = contentType ?? type.contentType
+    }
+}
+
 struct GarageSaleRecord: Codable, Identifiable {
     @DocumentID var id: String?
     var title: String?

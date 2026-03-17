@@ -20,7 +20,7 @@ struct CommunityHubView: View {
                         MarketplaceView(user: user)
                     }
                     NavigationLink("Sponsored & Garage") {
-                        SponsoredContentView()
+                        SponsoredContentView(user: user)
                     }
                 }
             }

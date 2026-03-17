@@ -1,12 +1,15 @@
 import Foundation
 import FirebaseFirestore
 import FirebaseFirestoreSwift
+import FirebaseStorage
 
 final class CommunityRepository {
     private let db = Firestore.firestore()
+    private let storage = Storage.storage()
 
     func fetchMindLoomPosts(limit: Int = 120) async throws -> [MindLoomPostRecord] {
-        let snapshot = try await db.collection(FirestoreCollection.jokes.rawValue)
+        let snapshot = try await db.collectionGroup(FirestoreCollectionGroup.jokes.rawValue)
+            .order(by: "timestamp", descending: true)
             .limit(to: limit)
             .getDocuments()
 
@@ -14,17 +17,14 @@ final class CommunityRepository {
             let data = doc.data()
             guard isActiveCommunityDoc(data) else { return nil }
             return try? doc.data(as: MindLoomPostRecord.self)
-        }
-        .sorted {
-            let l = postDate($0)
-            let r = postDate($1)
-            return l > r
         }
     }
 
     func fetchMindLoomPosts(authorId: String, limit: Int = 120) async throws -> [MindLoomPostRecord] {
-        let snapshot = try await db.collection(FirestoreCollection.jokes.rawValue)
-            .whereField("authorId", isEqualTo: authorId)
+        let snapshot = try await db.collection(FirestoreCollection.users.rawValue)
+            .document(authorId)
+            .collection(FirestoreSubcollection.jokes.rawValue)
+            .order(by: "timestamp", descending: true)
             .limit(to: limit)
             .getDocuments()
 
@@ -33,41 +33,71 @@ final class CommunityRepository {
             guard isActiveCommunityDoc(data) else { return nil }
             return try? doc.data(as: MindLoomPostRecord.self)
         }
-        .sorted {
-            let l = postDate($0)
-            let r = postDate($1)
-            return l > r
-        }
     }
 
-    func createMindLoomTextPost(user: AppSessionUser, text: String) async throws {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
+    func createMindLoomPost(
+        user: AppSessionUser,
+        text: String,
+        attachment: CommunityAttachmentDraft?
+    ) async throws {
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanText.isEmpty || attachment != nil else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9001,
+                userInfo: [NSLocalizedDescriptionKey: "Enter text or attach media before posting."]
+            )
+        }
 
-        let userDoc = try await db.collection(FirestoreCollection.users.rawValue).document(user.uid).getDocument()
-        let data = userDoc.data() ?? [:]
-        let name = (data["name"] as? String) ?? (data["username"] as? String) ?? (user.email ?? "User")
-        let profileUrl = (data["profileImageUrl"] as? String) ?? (data["profilePictureUrl"] as? String)
+        let (displayName, profileUrl) = try await fetchUserIdentity(user: user)
 
-        try await db.collection(FirestoreCollection.jokes.rawValue)
+        var mediaType = "TEXT"
+        var mediaUrl: String?
+
+        if let attachment {
+            mediaType = attachment.type.rawValue.uppercased()
+            mediaUrl = try await uploadMindLoomAttachment(ownerUid: user.uid, attachment: attachment)
+        }
+
+        let postRef = db.collection(FirestoreCollection.users.rawValue)
+            .document(user.uid)
+            .collection(FirestoreSubcollection.jokes.rawValue)
             .document()
-            .setData([
+
+        try await postRef.setData(
+            [
                 "authorId": user.uid,
-                "authorName": name,
+                "authorName": displayName,
                 "authorProfileUrl": profileUrl as Any,
-                "text": clean,
-                "mediaType": "TEXT",
+                "text": cleanText,
+                "mediaUrl": mediaUrl as Any,
+                "mediaType": mediaType,
                 "status": "ACTIVE",
                 "likes": [],
                 "commentsCount": 0,
                 "timestamp": FieldValue.serverTimestamp()
-            ])
+            ],
+            merge: true
+        )
     }
 
     func toggleMindLoomLike(post: MindLoomPostRecord, uid: String) async throws {
         guard let postId = post.id, !postId.isEmpty else { return }
+        let authorId = (post.authorId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !authorId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9002,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot like this post because author information is missing."]
+            )
+        }
+
         let likes = post.likes ?? []
-        let ref = db.collection(FirestoreCollection.jokes.rawValue).document(postId)
+        let ref = db.collection(FirestoreCollection.users.rawValue)
+            .document(authorId)
+            .collection(FirestoreSubcollection.jokes.rawValue)
+            .document(postId)
+
         if likes.contains(uid) {
             try await ref.updateData(["likes": FieldValue.arrayRemove([uid])])
         } else {
@@ -199,6 +229,7 @@ final class CommunityRepository {
 
     func fetchAdvertisements(limit: Int = 120) async throws -> [AdvertisementRecord] {
         let snapshot = try await db.collection(FirestoreCollection.advertisements.rawValue)
+            .order(by: "timestamp", descending: true)
             .limit(to: limit)
             .getDocuments()
 
@@ -207,15 +238,82 @@ final class CommunityRepository {
             guard isActiveCommunityDoc(data) else { return nil }
             return try? doc.data(as: AdvertisementRecord.self)
         }
-        .sorted {
-            let l = $0.timestamp?.dateValue() ?? .distantPast
-            let r = $1.timestamp?.dateValue() ?? .distantPast
-            return l > r
+    }
+
+    func createAdvertisement(
+        user: AppSessionUser,
+        title: String,
+        description: String,
+        targetUrl: String,
+        ownerPhone: String,
+        media: [CommunityAttachmentDraft],
+        adCost: Double = 5.0
+    ) async throws {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanTargetUrl = targetUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanOwnerPhone = ownerPhone.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanTitle.isEmpty, !cleanDescription.isEmpty, !cleanTargetUrl.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9003,
+                userInfo: [NSLocalizedDescriptionKey: "Title, description, and target URL are required."]
+            )
         }
+        guard !media.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9004,
+                userInfo: [NSLocalizedDescriptionKey: "Add media before publishing an ad."]
+            )
+        }
+
+        let (displayName, _) = try await fetchUserIdentity(user: user)
+        var imageUrls: [String] = []
+        var mediaPayload: [[String: String]] = []
+        for item in media {
+            let uploadedUrl = try await uploadGenericAttachment(
+                ownerUid: user.uid,
+                attachment: item,
+                rootFolder: StorageFolder.ads.rawValue
+            )
+            mediaPayload.append([
+                "url": uploadedUrl,
+                "type": item.type.storageType,
+                "name": item.fileName
+            ])
+            if item.type == .image {
+                imageUrls.append(uploadedUrl)
+            }
+        }
+
+        let adData: [String: Any] = [
+            "title": cleanTitle,
+            "description": cleanDescription,
+            "targetUrl": cleanTargetUrl,
+            "ownerPhone": cleanOwnerPhone,
+            "mediaUrls": imageUrls,
+            "media": mediaPayload,
+            "sponsor": displayName,
+            "ownerId": user.uid,
+            "timestamp": FieldValue.serverTimestamp()
+        ]
+
+        let historyData: [String: Any] = [
+            "title": "Posted Ad: \(cleanTitle)",
+            "amount": adCost,
+            "type": "DEBIT",
+            "status": "COMPLETED",
+            "timestamp": FieldValue.serverTimestamp()
+        ]
+
+        try await runAdvertisementPostingTransaction(userUid: user.uid, adData: adData, historyData: historyData, adCost: adCost)
     }
 
     func fetchGarageSales(limit: Int = 120) async throws -> [GarageSaleRecord] {
         let snapshot = try await db.collection(FirestoreCollection.garageSales.rawValue)
+            .order(by: "timestamp", descending: true)
             .limit(to: limit)
             .getDocuments()
 
@@ -224,10 +322,204 @@ final class CommunityRepository {
             guard isActiveCommunityDoc(data) else { return nil }
             return try? doc.data(as: GarageSaleRecord.self)
         }
-        .sorted {
-            let l = $0.timestamp?.dateValue() ?? .distantPast
-            let r = $1.timestamp?.dateValue() ?? .distantPast
-            return l > r
+    }
+
+    func createGarageSale(
+        user: AppSessionUser,
+        title: String,
+        description: String,
+        contactName: String,
+        contactPhone: String,
+        contactEmail: String,
+        address: String,
+        city: String,
+        state: String,
+        postalCode: String,
+        latitude: Double?,
+        longitude: Double?,
+        media: [CommunityAttachmentDraft]
+    ) async throws {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanContactName = contactName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanTitle.isEmpty, !cleanDescription.isEmpty, !cleanContactName.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9005,
+                userInfo: [NSLocalizedDescriptionKey: "Title, description, and contact name are required."]
+            )
+        }
+
+        var mediaPayload: [[String: String]] = []
+        for item in media {
+            let uploadedUrl = try await uploadGenericAttachment(
+                ownerUid: user.uid,
+                attachment: item,
+                rootFolder: StorageFolder.garageSales.rawValue
+            )
+            mediaPayload.append([
+                "url": uploadedUrl,
+                "type": item.type.storageType,
+                "name": item.fileName
+            ])
+        }
+
+        try await db.collection(FirestoreCollection.garageSales.rawValue)
+            .document()
+            .setData([
+                "title": cleanTitle,
+                "description": cleanDescription,
+                "contactName": cleanContactName,
+                "contactPhone": contactPhone.trimmingCharacters(in: .whitespacesAndNewlines),
+                "contactEmail": contactEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+                "address": address.trimmingCharacters(in: .whitespacesAndNewlines),
+                "city": city.trimmingCharacters(in: .whitespacesAndNewlines),
+                "state": state.trimmingCharacters(in: .whitespacesAndNewlines),
+                "postalCode": postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
+                "latitude": latitude as Any,
+                "longitude": longitude as Any,
+                "media": mediaPayload,
+                "ownerId": user.uid,
+                "timestamp": FieldValue.serverTimestamp()
+            ])
+    }
+
+    private func runAdvertisementPostingTransaction(
+        userUid: String,
+        adData: [String: Any],
+        historyData: [String: Any],
+        adCost: Double
+    ) async throws {
+        let userRef = db.collection(FirestoreCollection.users.rawValue).document(userUid)
+
+        try await withCheckedThrowingContinuation { continuation in
+            db.runTransaction({ transaction, errorPointer -> Any? in
+                do {
+                    let userSnapshot = try transaction.getDocument(userRef)
+                    guard let userData = userSnapshot.data() else {
+                        throw NSError(
+                            domain: "CommunityRepository",
+                            code: 9006,
+                            userInfo: [NSLocalizedDescriptionKey: "User profile not found."]
+                        )
+                    }
+                    guard let wallet = userData["wallet"] as? [String: Any] else {
+                        throw NSError(
+                            domain: "CommunityRepository",
+                            code: 9007,
+                            userInfo: [NSLocalizedDescriptionKey: "Wallet not initialized."]
+                        )
+                    }
+
+                    let currentBalance = (wallet["balance"] as? NSNumber)?.doubleValue ?? 0
+                    if currentBalance < adCost {
+                        throw NSError(
+                            domain: "CommunityRepository",
+                            code: 9008,
+                            userInfo: [NSLocalizedDescriptionKey: "Insufficient funds. Posting an ad costs \(adCost)."]
+                        )
+                    }
+
+                    let adRef = self.db.collection(FirestoreCollection.advertisements.rawValue).document()
+                    let historyRef = userRef.collection(FirestoreSubcollection.transactions.rawValue).document()
+
+                    transaction.updateData(["wallet.balance": currentBalance - adCost], forDocument: userRef)
+                    transaction.setData(adData, forDocument: adRef)
+                    transaction.setData(historyData, forDocument: historyRef)
+                } catch {
+                    errorPointer?.pointee = error as NSError
+                }
+                return nil
+            }) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
+    private func fetchUserIdentity(user: AppSessionUser) async throws -> (String, String?) {
+        let userDoc = try await db.collection(FirestoreCollection.users.rawValue).document(user.uid).getDocument()
+        let data = userDoc.data() ?? [:]
+        let displayName = (data["name"] as? String)
+            ?? (data["username"] as? String)
+            ?? (user.email ?? "User")
+        let profileUrl = (data["profileImageUrl"] as? String) ?? (data["profilePictureUrl"] as? String)
+        return (displayName, profileUrl)
+    }
+
+    private func uploadMindLoomAttachment(ownerUid: String, attachment: CommunityAttachmentDraft) async throws -> String {
+        let folder: String
+        switch attachment.type {
+        case .image:
+            folder = StorageFolder.jokeImages.rawValue
+        case .video:
+            folder = StorageFolder.jokeVideos.rawValue
+        case .document:
+            folder = StorageFolder.jokeDocs.rawValue
+        }
+        return try await uploadGenericAttachment(ownerUid: ownerUid, attachment: attachment, rootFolder: folder)
+    }
+
+    private func uploadGenericAttachment(
+        ownerUid: String,
+        attachment: CommunityAttachmentDraft,
+        rootFolder: String
+    ) async throws -> String {
+        let suffix = normalizedExtension(from: attachment.fileName, fallbackType: attachment.type)
+        let filePath = "\(rootFolder)/\(ownerUid)/\(UUID().uuidString)\(suffix)"
+        let ref = storage.reference().child(filePath)
+
+        let metadata = StorageMetadata()
+        metadata.contentType = attachment.contentType
+
+        _ = try await withCheckedThrowingContinuation { continuation in
+            ref.putData(attachment.data, metadata: metadata) { result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: result)
+                }
+            }
+        }
+
+        let url = try await withCheckedThrowingContinuation { continuation in
+            ref.downloadURL { url, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let url {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(
+                        throwing: NSError(
+                            domain: "CommunityRepository",
+                            code: 9009,
+                            userInfo: [NSLocalizedDescriptionKey: "Upload completed, but download URL was unavailable."]
+                        )
+                    )
+                }
+            }
+        }
+
+        return url.absoluteString
+    }
+
+    private func normalizedExtension(from fileName: String, fallbackType: CommunityAttachmentType) -> String {
+        let ext = (fileName as NSString).pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !ext.isEmpty {
+            return ".\(ext.lowercased())"
+        }
+
+        switch fallbackType {
+        case .image:
+            return ".jpg"
+        case .video:
+            return ".mp4"
+        case .document:
+            return ".pdf"
         }
     }
 
@@ -238,9 +530,5 @@ final class CommunityRepository {
             return false
         }
         return true
-    }
-
-    private func postDate(_ post: MindLoomPostRecord) -> Date {
-        post.timestamp?.dateValue() ?? .distantPast
     }
 }

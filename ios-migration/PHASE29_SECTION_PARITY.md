@@ -12,6 +12,11 @@ Completed in this phase:
   - Storage folders: `gallery_uploads`
 - Updated `ios-migration/FIREBASE_CONTRACT.md` with the same legacy/active structure references.
 - Added audit script: `ios-migration/scripts/android_ios_contract_diff.ps1`
+- Hardened community create loops for iOS starter:
+  - MindLoom now writes/reads Android-compatible paths (`users/{uid}/jokes` + `collectionGroup("jokes")`).
+  - MindLoom create flow supports text, image, video, and document uploads.
+  - Sponsored Ads creation now mirrors Android wallet-debit transaction behavior and media payload shape.
+  - Garage Sale creation now mirrors Android fields and media upload flow.
 
 Validation result:
 - `android_ios_contract_diff.ps1` currently reports no missing collection/function/storage names between extracted Android references and iOS contract enums.
@@ -52,8 +57,8 @@ Current snapshot:
 
 1. `Volunteer core behavior parity pass` (application/write loops, status updates, role routing).
 2. `Organizer + Employer behavior parity pass` (approval/rejection write loops + wallets).
-3. `Community and media upload parity hardening` (MindLoom/Ads/Garage creation loops and upload affordances).
-4. `Date / Blind Date hardening` (UI polish, call/chat handoff polish, and full invitation edge-case QA).
+3. `Date / Blind Date hardening` (UI polish, call/chat handoff polish, and full invitation edge-case QA).
+4. `Community UX polish pass` (closer visual parity tuning for post/create layouts and attachment affordances).
 
 ## 5) Repeatable Audit Commands
 
