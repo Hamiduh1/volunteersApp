@@ -2,15 +2,18 @@ import Foundation
 import SwiftUI
 import PhotosUI
 import UIKit
+import CoreLocation
 
 struct MarketplaceView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = MarketplaceViewModel()
+    @StateObject private var locationRequester = MarketplaceLocationRequester()
     @State private var showCreateSheet = false
     @State private var editingItem: MarketplaceItemRecord?
     @State private var pendingDeleteItem: MarketplaceItemRecord?
     @State private var pendingBuyItem: MarketplaceItemRecord?
     @State private var expandedItemIds: Set<String> = []
+    @State private var hasRequestedLocation = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -32,6 +35,12 @@ struct MarketplaceView: View {
                 .pickerStyle(.menu)
             }
 
+            Section("Search") {
+                TextField("Search listings", text: $viewModel.searchQuery)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+
             Section("Listings") {
                 if viewModel.isLoading && viewModel.filteredItems.isEmpty {
                     ProgressView("Loading marketplace...")
@@ -50,6 +59,13 @@ struct MarketplaceView: View {
         .listStyle(.plain)
         .navigationTitle("Marketplace")
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    locationRequester.requestLocation()
+                } label: {
+                    Image(systemName: "location")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     AIAssistantView()
@@ -131,8 +147,21 @@ struct MarketplaceView: View {
                 Text("You're about to buy this item.")
             }
         }
-        .task { await viewModel.refresh() }
-        .refreshable { await viewModel.refresh() }
+        .task {
+            await viewModel.refresh(user: user)
+            if !hasRequestedLocation {
+                hasRequestedLocation = true
+                locationRequester.requestLocation()
+            }
+        }
+        .refreshable { await viewModel.refresh(user: user) }
+        .onReceive(locationRequester.$latestCoordinate) { coordinate in
+            guard let coordinate else { return }
+            viewModel.updateCurrentUserLocation(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude
+            )
+        }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
@@ -162,6 +191,18 @@ struct MarketplaceView: View {
                     Text("Sold by \(item.sellerName ?? "Seller")")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let location = item.locationName, !location.isEmpty {
+                        let distance = viewModel.distanceText(for: item)
+                        if let distance {
+                            Text("\(location) • \(distance)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(location)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 Spacer()
                 Text(currency(item.price ?? 0))
@@ -621,5 +662,50 @@ private struct MarketplaceEditSheet: View {
                 imageItems = []
             }
         }
+    }
+}
+
+private final class MarketplaceLocationRequester: NSObject, ObservableObject, CLLocationManagerDelegate {
+    @Published var latestCoordinate: CLLocationCoordinate2D?
+
+    private let manager = CLLocationManager()
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
+
+    func requestLocation() {
+        guard CLLocationManager.locationServicesEnabled() else { return }
+
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .denied, .restricted:
+            return
+        @unknown default:
+            return
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        default:
+            break
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        latestCoordinate = locations.last?.coordinate
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // Keep marketplace usable even when location fails or is blocked.
+        print("Marketplace location request failed: \(error.localizedDescription)")
     }
 }

@@ -7,6 +7,28 @@ final class CommunityRepository {
     private let db = Firestore.firestore()
     private let storage = Storage.storage()
 
+    func fetchUserLocation(uid: String) async throws -> (Double, Double)? {
+        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanUid.isEmpty else { return nil }
+
+        let snapshot = try await db.collection(FirestoreCollection.users.rawValue)
+            .document(cleanUid)
+            .getDocument()
+        let data = snapshot.data() ?? [:]
+
+        if let geoPoint = data["geoPoint"] as? GeoPoint {
+            return (geoPoint.latitude, geoPoint.longitude)
+        }
+
+        let lat = data["latitude"] as? Double
+        let lng = data["longitude"] as? Double
+        if let lat, let lng {
+            return (lat, lng)
+        }
+
+        return nil
+    }
+
     func fetchMindLoomPosts(limit: Int = 120) async throws -> [MindLoomPostRecord] {
         let snapshot = try await db.collectionGroup(FirestoreCollectionGroup.jokes.rawValue)
             .order(by: "timestamp", descending: true)

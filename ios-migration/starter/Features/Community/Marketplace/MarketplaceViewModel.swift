@@ -5,6 +5,8 @@ import Combine
 final class MarketplaceViewModel: ObservableObject {
     @Published private(set) var items: [MarketplaceItemRecord] = []
     @Published var selectedCategory: String = "All"
+    @Published var searchQuery: String = ""
+    @Published private(set) var currentUserLocation: (Double, Double)?
     @Published private(set) var isLoading = false
     @Published private(set) var isPosting = false
     @Published private(set) var buyingItemIds: Set<String> = []
@@ -20,21 +22,47 @@ final class MarketplaceViewModel: ObservableObject {
     }
 
     var filteredItems: [MarketplaceItemRecord] {
-        if selectedCategory == "All" { return items }
-        return items.filter { ($0.category ?? "").caseInsensitiveCompare(selectedCategory) == .orderedSame }
+        let categoryFiltered: [MarketplaceItemRecord]
+        if selectedCategory == "All" {
+            categoryFiltered = items
+        } else {
+            categoryFiltered = items.filter { ($0.category ?? "").caseInsensitiveCompare(selectedCategory) == .orderedSame }
+        }
+
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return categoryFiltered }
+        return categoryFiltered.filter { item in
+            let fields = [
+                item.title ?? "",
+                item.description ?? "",
+                item.sellerName ?? "",
+                item.category ?? "",
+                item.locationName ?? ""
+            ]
+            return fields.joined(separator: " ").lowercased().contains(query)
+        }
     }
 
-    func refresh() async {
+    func refresh(user: AppSessionUser) async {
         isLoading = true
         errorMessage = nil
         statusMessage = nil
         defer { isLoading = false }
 
         do {
-            items = try await repository.fetchMarketplaceItems()
+            async let itemsTask = repository.fetchMarketplaceItems()
+            async let locationTask = repository.fetchUserLocation(uid: user.uid)
+            items = try await itemsTask
+            if let location = try await locationTask {
+                currentUserLocation = location
+            }
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
         }
+    }
+
+    func updateCurrentUserLocation(latitude: Double, longitude: Double) {
+        currentUserLocation = (latitude, longitude)
     }
 
     func post(
@@ -67,7 +95,7 @@ final class MarketplaceViewModel: ObservableObject {
                 longitude: longitude,
                 images: images
             )
-            await refresh()
+            await refresh(user: user)
             statusMessage = "Item posted successfully."
             return true
         } catch {
@@ -117,7 +145,7 @@ final class MarketplaceViewModel: ObservableObject {
                 existingImageUrls: existingImageUrls,
                 newImages: newImages
             )
-            await refresh()
+            await refresh(user: user)
             statusMessage = "Listing updated."
             return true
         } catch {
@@ -170,5 +198,43 @@ final class MarketplaceViewModel: ObservableObject {
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
         }
+    }
+
+    func distanceText(for item: MarketplaceItemRecord) -> String? {
+        guard let userLocation = currentUserLocation else { return nil }
+        guard let lat = item.latitude, let lng = item.longitude else { return nil }
+        if lat == 0 && lng == 0 { return nil }
+
+        let distanceKm = calculateDistanceKm(
+            lat1: userLocation.0,
+            lon1: userLocation.1,
+            lat2: lat,
+            lon2: lng
+        )
+        if distanceKm < 1 {
+            return "<1 km away"
+        }
+        return "\(roundToOneDecimal(distanceKm)) km away"
+    }
+
+    private func calculateDistanceKm(
+        lat1: Double,
+        lon1: Double,
+        lat2: Double,
+        lon2: Double
+    ) -> Double {
+        let earthRadiusKm = 6371.0
+        let dLat = (lat2 - lat1) * Double.pi / 180.0
+        let dLon = (lon2 - lon1) * Double.pi / 180.0
+        let a =
+            sin(dLat / 2) * sin(dLat / 2) +
+            cos(lat1 * Double.pi / 180.0) * cos(lat2 * Double.pi / 180.0) *
+            sin(dLon / 2) * sin(dLon / 2)
+        let c = 2 * asin(sqrt(a))
+        return earthRadiusKm * c
+    }
+
+    private func roundToOneDecimal(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
     }
 }
