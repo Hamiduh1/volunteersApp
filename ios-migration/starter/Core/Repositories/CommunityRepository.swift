@@ -319,16 +319,39 @@ final class CommunityRepository {
         title: String,
         description: String,
         category: String,
-        price: Double
+        price: Double,
+        sellerPhone: String,
+        locationName: String,
+        latitude: Double,
+        longitude: Double,
+        images: [CommunityAttachmentDraft]
     ) async throws {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanTitle.isEmpty, !cleanDescription.isEmpty else { return }
+        guard !cleanTitle.isEmpty, !cleanDescription.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9030,
+                userInfo: [NSLocalizedDescriptionKey: "Title and description are required."]
+            )
+        }
 
         let userDoc = try await db.collection(FirestoreCollection.users.rawValue).document(user.uid).getDocument()
         let userData = userDoc.data() ?? [:]
         let sellerName = (userData["name"] as? String) ?? (userData["username"] as? String) ?? (user.email ?? "Seller")
-        let sellerPhone = (userData["phoneNumber"] as? String) ?? ""
+        let resolvedSellerPhone = sellerPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? ((userData["phoneNumber"] as? String) ?? "")
+            : sellerPhone.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var imageUrls: [String] = []
+        for image in images where image.type == .image {
+            let uploaded = try await uploadGenericAttachment(
+                ownerUid: user.uid,
+                attachment: image,
+                rootFolder: StorageFolder.marketplaceImages.rawValue
+            )
+            imageUrls.append(uploaded)
+        }
 
         try await db.collection(FirestoreCollection.marketplaceItems.rawValue)
             .document()
@@ -339,15 +362,140 @@ final class CommunityRepository {
                 "category": category,
                 "sellerName": sellerName,
                 "sellerId": user.uid,
-                "sellerPhone": sellerPhone,
-                "imageUrls": [],
-                "locationName": "Global",
+                "sellerPhone": resolvedSellerPhone,
+                "imageUrls": imageUrls,
+                "locationName": locationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "Global"
+                    : locationName.trimmingCharacters(in: .whitespacesAndNewlines),
                 "countryCode": "INT",
-                "latitude": 0.0,
-                "longitude": 0.0,
+                "latitude": latitude,
+                "longitude": longitude,
                 "status": "AVAILABLE",
                 "timestamp": FieldValue.serverTimestamp()
             ])
+    }
+
+    func updateMarketplaceItem(
+        user: AppSessionUser,
+        itemId: String,
+        title: String,
+        description: String,
+        category: String,
+        price: Double,
+        sellerPhone: String,
+        locationName: String,
+        latitude: Double,
+        longitude: Double,
+        existingImageUrls: [String],
+        newImages: [CommunityAttachmentDraft]
+    ) async throws {
+        let cleanItemId = itemId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanItemId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9031,
+                userInfo: [NSLocalizedDescriptionKey: "Item ID is missing."]
+            )
+        }
+
+        var mergedImageUrls = existingImageUrls
+        for image in newImages where image.type == .image {
+            let uploaded = try await uploadGenericAttachment(
+                ownerUid: user.uid,
+                attachment: image,
+                rootFolder: StorageFolder.marketplaceImages.rawValue
+            )
+            mergedImageUrls.append(uploaded)
+        }
+
+        try await db.collection(FirestoreCollection.marketplaceItems.rawValue)
+            .document(cleanItemId)
+            .updateData([
+                "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
+                "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+                "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
+                "price": price,
+                "sellerPhone": sellerPhone.trimmingCharacters(in: .whitespacesAndNewlines),
+                "locationName": locationName.trimmingCharacters(in: .whitespacesAndNewlines),
+                "latitude": latitude,
+                "longitude": longitude,
+                "imageUrls": mergedImageUrls
+            ])
+    }
+
+    func deleteMarketplaceItem(itemId: String) async throws {
+        let cleanItemId = itemId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanItemId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9032,
+                userInfo: [NSLocalizedDescriptionKey: "Item ID is missing."]
+            )
+        }
+
+        try await db.collection(FirestoreCollection.marketplaceItems.rawValue)
+            .document(cleanItemId)
+            .delete()
+    }
+
+    func submitMarketplacePurchaseRequest(buyerUid: String, item: MarketplaceItemRecord) async throws {
+        let cleanBuyer = buyerUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let itemId = (item.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let sellerId = (item.sellerId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let price = item.price ?? 0
+        guard !cleanBuyer.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9033,
+                userInfo: [NSLocalizedDescriptionKey: "Please log in."]
+            )
+        }
+        guard !itemId.isEmpty, !sellerId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9034,
+                userInfo: [NSLocalizedDescriptionKey: "Seller info missing."]
+            )
+        }
+        guard cleanBuyer != sellerId else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9035,
+                userInfo: [NSLocalizedDescriptionKey: "You cannot buy your own item."]
+            )
+        }
+
+        try await db.collection(FirestoreCollection.purchaseRequests.rawValue)
+            .document()
+            .setData([
+                "buyerId": cleanBuyer,
+                "sellerId": sellerId,
+                "itemId": itemId,
+                "price": price,
+                "status": "pending",
+                "createdAt": FieldValue.serverTimestamp()
+            ])
+    }
+
+    func sendMarketplaceChatInvitation(
+        sender: AppSessionUser,
+        item: MarketplaceItemRecord
+    ) async throws -> String {
+        let sellerId = (item.sellerId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sellerId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9036,
+                userInfo: [NSLocalizedDescriptionKey: "Seller info missing."]
+            )
+        }
+
+        return try await sendSponsoredChatInvitation(
+            sender: sender,
+            recipientId: sellerId,
+            contextLabel: "Marketplace: \(item.title ?? "Listing")",
+            duplicateMessage: "Invitation already sent to \(item.sellerName ?? "seller")."
+        )
     }
 
     func fetchAdvertisements(limit: Int = 120) async throws -> [AdvertisementRecord] {
