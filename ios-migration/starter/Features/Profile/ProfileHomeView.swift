@@ -146,8 +146,12 @@ struct ProfileHomeView: View {
                 case .failure:
                     ZStack {
                         Circle().fill(Color.gray.opacity(0.2))
-                        Image(systemName: "person.fill")
-                            .foregroundStyle(.secondary)
+                        BrandSymbolView(
+                            assetName: BrandAsset.avatarPlaceholder,
+                            fallbackSystemName: "person.fill",
+                            size: 28,
+                            tint: .secondary
+                        )
                     }
                 case .empty:
                     ZStack {
@@ -157,8 +161,12 @@ struct ProfileHomeView: View {
                 @unknown default:
                     ZStack {
                         Circle().fill(Color.gray.opacity(0.2))
-                        Image(systemName: "person.fill")
-                            .foregroundStyle(.secondary)
+                        BrandSymbolView(
+                            assetName: BrandAsset.avatarPlaceholder,
+                            fallbackSystemName: "person.fill",
+                            size: 28,
+                            tint: .secondary
+                        )
                     }
                 }
             }
@@ -166,8 +174,12 @@ struct ProfileHomeView: View {
         } else {
             ZStack {
                 Circle().fill(Color.gray.opacity(0.2))
-                Image(systemName: "person.fill")
-                    .foregroundStyle(.secondary)
+                BrandSymbolView(
+                    assetName: BrandAsset.avatarPlaceholder,
+                    fallbackSystemName: "person.fill",
+                    size: 28,
+                    tint: .secondary
+                )
             }
         }
     }

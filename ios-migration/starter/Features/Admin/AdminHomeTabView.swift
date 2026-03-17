@@ -11,26 +11,68 @@ struct AdminHomeTabView: View {
         TabView {
             if isOwnerOrAdmin {
                 OwnerDashboardView(user: user)
-                    .tabItem { Label("Dashboard", systemImage: "chart.line.uptrend.xyaxis") }
+                    .tabItem {
+                        BrandTabLabel(
+                            title: "Dashboard",
+                            assetName: BrandAsset.tabDashboard,
+                            fallbackSystemName: "chart.line.uptrend.xyaxis"
+                        )
+                    }
 
                 AdminControlsHubView(user: user)
-                    .tabItem { Label("Controls", systemImage: "switch.2") }
+                    .tabItem {
+                        BrandTabLabel(
+                            title: "Controls",
+                            assetName: BrandAsset.tabControls,
+                            fallbackSystemName: "switch.2"
+                        )
+                    }
             }
 
             SupportConsoleView(user: user)
-                .tabItem { Label("Support", systemImage: "person.2.badge.gearshape") }
+                .tabItem {
+                    BrandTabLabel(
+                        title: "Support",
+                        assetName: BrandAsset.tabSupport,
+                        fallbackSystemName: "person.2.badge.gearshape"
+                    )
+                }
 
             GlobalWalletHomeView(user: user)
-                .tabItem { Label("Wallet", systemImage: "wallet.pass") }
+                .tabItem {
+                    BrandTabLabel(
+                        title: "Wallet",
+                        assetName: BrandAsset.tabWallet,
+                        fallbackSystemName: "wallet.pass"
+                    )
+                }
 
             CommunityHubView(user: user)
-                .tabItem { Label("Community", systemImage: "person.3.sequence") }
+                .tabItem {
+                    BrandTabLabel(
+                        title: "Community",
+                        assetName: BrandAsset.tabCommunity,
+                        fallbackSystemName: "person.3.sequence"
+                    )
+                }
 
             AdvancedToolsHomeView(user: user)
-                .tabItem { Label("Tools", systemImage: "sparkles") }
+                .tabItem {
+                    BrandTabLabel(
+                        title: "Tools",
+                        assetName: BrandAsset.tabTools,
+                        fallbackSystemName: "sparkles"
+                    )
+                }
 
             ProfileHomeView(user: user)
-            .tabItem { Label("Profile", systemImage: "person") }
+            .tabItem {
+                BrandTabLabel(
+                    title: "Profile",
+                    assetName: BrandAsset.tabProfile,
+                    fallbackSystemName: "person"
+                )
+            }
         }
     }
 }

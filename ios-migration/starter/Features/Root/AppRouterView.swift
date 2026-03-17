@@ -6,7 +6,15 @@ struct AppRouterView: View {
     var body: some View {
         switch session.state {
         case .loading:
-            ProgressView("Loading...")
+            VStack(spacing: 12) {
+                BrandSymbolView(
+                    assetName: BrandAsset.companyMark,
+                    fallbackSystemName: "person.3.sequence",
+                    size: 38,
+                    useTemplate: false
+                )
+                ProgressView("Loading...")
+            }
         case .signedOut:
             LoginView()
         case .signedIn(let user):

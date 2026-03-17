@@ -8,6 +8,7 @@ Copy these files into your iOS target:
 - `Core/Services/FirestoreService.swift`
 - `Core/Services/FunctionsService.swift`
 - `Core/Services/AppErrorMapper.swift`
+- `Core/Services/BrandAssets.swift`
 - `Core/Repositories/EventsRepository.swift`
 - `Core/Repositories/JobsRepository.swift`
 - `Core/Repositories/MyActivityRepository.swift`
@@ -128,6 +129,8 @@ Copy these files into your iOS target:
 - `Features/Profile/AccountSecurityViewModel.swift`
 - `Features/Shared/Support/SupportCenterView.swift`
 - `Features/Shared/Support/SupportCenterViewModel.swift`
+- `Assets.xcassets/`
+- `IOS_ASSET_PACK_MAP.md`
 
 Recommended destination in Xcode:
 - `VolunteersAppIOS/Core/Contracts/`
@@ -136,8 +139,10 @@ Recommended destination in Xcode:
 - `VolunteersAppIOS/Core/Repositories/`
 - `VolunteersAppIOS/App/`
 - `VolunteersAppIOS/Features/...`
+- `VolunteersAppIOS/Assets.xcassets/`
 
 Notes:
 - `CoreModels.swift` intentionally keeps fields optional for backward compatibility.
 - `ApplicationStatus` decoder normalizes lowercase/uppercase statuses.
 - Keep backend keys unchanged while both Android and iOS clients are active.
+- Asset fallbacks are built in. If a branded icon is missing, the app uses SF Symbols automatically.

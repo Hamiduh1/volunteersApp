@@ -7,37 +7,65 @@ struct VolunteerHomeTabView: View {
         TabView {
             EventsListView(user: user)
                 .tabItem {
-                    Label("Events", systemImage: "calendar")
+                    BrandTabLabel(
+                        title: "Events",
+                        assetName: BrandAsset.tabEvents,
+                        fallbackSystemName: "calendar"
+                    )
                 }
 
             JobsListView(user: user)
                 .tabItem {
-                    Label("Jobs", systemImage: "briefcase")
+                    BrandTabLabel(
+                        title: "Jobs",
+                        assetName: BrandAsset.tabJobs,
+                        fallbackSystemName: "briefcase"
+                    )
                 }
 
             MyActivityView(user: user)
                 .tabItem {
-                    Label("Activity", systemImage: "clock")
+                    BrandTabLabel(
+                        title: "Activity",
+                        assetName: BrandAsset.tabActivity,
+                        fallbackSystemName: "clock"
+                    )
                 }
 
             GlobalWalletHomeView(user: user)
                 .tabItem {
-                    Label("Wallet", systemImage: "wallet.pass")
+                    BrandTabLabel(
+                        title: "Wallet",
+                        assetName: BrandAsset.tabWallet,
+                        fallbackSystemName: "wallet.pass"
+                    )
                 }
 
             CommunityHubView(user: user)
                 .tabItem {
-                    Label("Community", systemImage: "person.3.sequence")
+                    BrandTabLabel(
+                        title: "Community",
+                        assetName: BrandAsset.tabCommunity,
+                        fallbackSystemName: "person.3.sequence"
+                    )
                 }
 
             AdvancedToolsHomeView(user: user)
                 .tabItem {
-                    Label("Tools", systemImage: "sparkles")
+                    BrandTabLabel(
+                        title: "Tools",
+                        assetName: BrandAsset.tabTools,
+                        fallbackSystemName: "sparkles"
+                    )
                 }
 
             ProfileHomeView(user: user)
             .tabItem {
-                Label("Profile", systemImage: "person")
+                BrandTabLabel(
+                    title: "Profile",
+                    assetName: BrandAsset.tabProfile,
+                    fallbackSystemName: "person"
+                )
             }
         }
     }

@@ -13,6 +13,23 @@ struct LoginView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    VStack(spacing: 8) {
+                        BrandSymbolView(
+                            assetName: BrandAsset.appLogo,
+                            fallbackSystemName: "person.3.sequence.fill",
+                            size: 64,
+                            useTemplate: false
+                        )
+                        Text("Volunteers App")
+                            .font(.title3.weight(.semibold))
+                        Text("Sign in to continue")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
                 Section("Sign In") {
                     TextField("Email", text: $viewModel.email)
                         .textInputAutocapitalization(.never)
@@ -81,7 +98,7 @@ struct LoginView: View {
                     }
                 }
             }
-            .navigationTitle("Volunteers App")
+            .navigationTitle("Login")
         }
     }
 }
