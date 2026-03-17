@@ -1,10 +1,19 @@
 import Foundation
 import Combine
 
+enum MindLoomFeedScope: String, CaseIterable, Identifiable {
+    case following = "Following"
+    case all = "All Posts"
+
+    var id: String { rawValue }
+}
+
 @MainActor
 final class MindLoomFeedViewModel: ObservableObject {
     @Published private(set) var posts: [MindLoomPostRecord] = []
+    @Published private(set) var followingIds: Set<String> = []
     @Published private(set) var likingPostIds: Set<String> = []
+    @Published var selectedScope: MindLoomFeedScope = .following
     @Published var postText = ""
     @Published var isLoading = false
     @Published var isPosting = false
@@ -13,14 +22,27 @@ final class MindLoomFeedViewModel: ObservableObject {
 
     private let repository = CommunityRepository()
 
-    func refresh() async {
+    var displayedPosts: [MindLoomPostRecord] {
+        guard selectedScope == .following else { return posts }
+        return posts.filter { post in
+            guard let authorId = post.authorId, !authorId.isEmpty else { return false }
+            return followingIds.contains(authorId)
+        }
+    }
+
+    func refresh(for user: AppSessionUser) async {
         isLoading = true
         errorMessage = nil
         statusMessage = nil
         defer { isLoading = false }
 
         do {
-            posts = try await repository.fetchMindLoomPosts()
+            async let postsTask = repository.fetchMindLoomPosts()
+            async let followingTask = repository.fetchFollowingIds(currentUid: user.uid)
+            posts = try await postsTask
+            var following = try await followingTask
+            following.insert(user.uid)
+            followingIds = following
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
         }
@@ -39,7 +61,7 @@ final class MindLoomFeedViewModel: ObservableObject {
         do {
             try await repository.createMindLoomPost(user: user, text: text, attachment: attachment)
             postText = ""
-            await refresh()
+            await refresh(for: user)
             statusMessage = "Post shared to MindLoom."
             return true
         } catch {

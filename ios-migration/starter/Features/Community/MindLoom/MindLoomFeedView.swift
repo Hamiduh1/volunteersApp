@@ -6,11 +6,7 @@ import UIKit
 struct MindLoomFeedView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = MindLoomFeedViewModel()
-
-    @State private var selectedImageItem: PhotosPickerItem?
-    @State private var selectedVideoItem: PhotosPickerItem?
-    @State private var showDocumentPicker = false
-    @State private var selectedAttachment: CommunityAttachmentDraft?
+    @State private var showComposer = false
 
     var body: some View {
         List {
@@ -22,14 +18,181 @@ struct MindLoomFeedView: View {
                 }
             }
 
-            Section("Create Post") {
+            Section {
+                Picker("Feed", selection: $viewModel.selectedScope) {
+                    ForEach(MindLoomFeedScope.allCases) { scope in
+                        Text(scope.rawValue).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Section("Feed") {
+                if viewModel.isLoading && viewModel.posts.isEmpty {
+                    ProgressView("Loading feed...")
+                } else if viewModel.displayedPosts.isEmpty {
+                    Text(
+                        viewModel.selectedScope == .following
+                            ? "No posts yet from people you follow."
+                            : "No posts yet."
+                    )
+                    .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.displayedPosts) { post in
+                        postCard(post)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                            .listRowSeparator(.hidden)
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("MindLoom")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showComposer = true
+                } label: {
+                    Label("Create Post", systemImage: "plus.circle.fill")
+                }
+            }
+        }
+        .sheet(isPresented: $showComposer) {
+            NavigationStack {
+                MindLoomComposerSheet(
+                    user: user,
+                    viewModel: viewModel
+                ) {
+                    showComposer = false
+                }
+            }
+        }
+        .task { await viewModel.refresh(for: user) }
+        .refreshable { await viewModel.refresh(for: user) }
+        .alert("Error", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.errorMessage ?? "Unknown error")
+        }
+    }
+
+    @ViewBuilder
+    private func postCard(_ post: MindLoomPostRecord) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                NavigationLink {
+                    MindLoomProfileView(authorId: post.authorId ?? "", currentUserId: user.uid)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(post.authorName ?? "User")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text(post.timestamp?.dateValue().formatted(date: .abbreviated, time: .shortened) ?? "--")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+
+            if let text = post.text, !text.isEmpty {
+                Text(text)
+                    .font(.body)
+            }
+
+            postMediaView(post)
+
+            HStack {
+                let likesCount = (post.likes ?? []).count
+                Text("\(likesCount) likes")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                let postId = post.id ?? ""
+                let isLiked = (post.likes ?? []).contains(user.uid)
+                Button(isLiked ? "Liked" : "Like") {
+                    Task { await viewModel.toggleLike(post: post, uid: user.uid) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(postId.isEmpty || viewModel.likingPostIds.contains(postId))
+                if viewModel.likingPostIds.contains(postId) {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func postMediaView(_ post: MindLoomPostRecord) -> some View {
+        let type = (post.mediaType ?? "").uppercased()
+        let urlText = (post.mediaUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !urlText.isEmpty, let url = URL(string: urlText) {
+            if type == "IMAGE" {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .empty:
+                        ProgressView()
+                    default:
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(height: 220)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else if type == "VIDEO" {
+                Link(destination: url) {
+                    Label("Open Video", systemImage: "video")
+                }
+                .font(.subheadline)
+            } else if type == "DOCUMENT" {
+                Link(destination: url) {
+                    Label("Open Document", systemImage: "doc")
+                }
+                .font(.subheadline)
+            }
+        }
+    }
+}
+
+private struct MindLoomComposerSheet: View {
+    let user: AppSessionUser
+    @ObservedObject var viewModel: MindLoomFeedViewModel
+    let onClose: () -> Void
+
+    @State private var selectedImageItem: PhotosPickerItem?
+    @State private var selectedVideoItem: PhotosPickerItem?
+    @State private var showDocumentPicker = false
+    @State private var selectedAttachment: CommunityAttachmentDraft?
+
+    private var canPost: Bool {
+        (!viewModel.postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedAttachment != nil)
+        && !viewModel.isPosting
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
                 TextField("Share something...", text: $viewModel.postText, axis: .vertical)
-                    .lineLimit(1...4)
+                    .lineLimit(3...8)
+                    .textFieldStyle(.roundedBorder)
 
                 attachmentToolbar
 
-                if let attachment = selectedAttachment {
-                    attachmentPreview(attachment)
+                if let selectedAttachment {
+                    attachmentPreview(selectedAttachment)
                 }
 
                 Button {
@@ -39,6 +202,7 @@ struct MindLoomFeedView: View {
                             selectedAttachment = nil
                             selectedImageItem = nil
                             selectedVideoItem = nil
+                            onClose()
                         }
                     }
                 } label: {
@@ -46,74 +210,20 @@ struct MindLoomFeedView: View {
                         ProgressView()
                     } else {
                         Text("Post to MindLoom")
+                            .fontWeight(.semibold)
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(
-                    (viewModel.postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedAttachment == nil)
-                    || viewModel.isPosting
-                )
+                .disabled(!canPost)
             }
-
-            Section("Feed") {
-                if viewModel.isLoading && viewModel.posts.isEmpty {
-                    ProgressView("Loading feed...")
-                } else if viewModel.posts.isEmpty {
-                    Text("No posts yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.posts) { post in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                NavigationLink {
-                                    MindLoomProfileView(authorId: post.authorId ?? "", currentUserId: user.uid)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(post.authorName ?? "User")
-                                            .font(.headline)
-                                        Text(post.timestamp?.dateValue().formatted(date: .abbreviated, time: .shortened) ?? "--")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                Spacer()
-                            }
-
-                            if let text = post.text, !text.isEmpty {
-                                Text(text)
-                                    .font(.body)
-                            }
-
-                            postMediaView(post)
-
-                            HStack {
-                                let likesCount = (post.likes ?? []).count
-                                Text("\(likesCount) likes")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                let postId = post.id ?? ""
-                                let isLiked = (post.likes ?? []).contains(user.uid)
-                                Button(isLiked ? "Liked" : "Like") {
-                                    Task { await viewModel.toggleLike(post: post, uid: user.uid) }
-                                }
-                                .buttonStyle(.bordered)
-                                .disabled(postId.isEmpty || viewModel.likingPostIds.contains(postId))
-                                if viewModel.likingPostIds.contains(postId) {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
+            .padding(20)
+        }
+        .navigationTitle("Create Post")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Close") { onClose() }
             }
         }
-        .navigationTitle("MindLoom")
-        .task { await viewModel.refresh() }
-        .refreshable { await viewModel.refresh() }
         .onChange(of: selectedImageItem) { newValue in
             guard let newValue else { return }
             Task {
@@ -167,14 +277,6 @@ struct MindLoomFeedView: View {
                 viewModel.errorMessage = AppErrorMapper.message(from: error)
             }
         }
-        .alert("Error", isPresented: Binding(
-            get: { viewModel.errorMessage != nil },
-            set: { if !$0 { viewModel.errorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(viewModel.errorMessage ?? "Unknown error")
-        }
     }
 
     @ViewBuilder
@@ -184,7 +286,7 @@ struct MindLoomFeedView: View {
                 selection: $selectedImageItem,
                 matching: .images
             ) {
-                Label("Add Image", systemImage: "photo")
+                Label("Image", systemImage: "photo")
             }
             .buttonStyle(.bordered)
 
@@ -192,14 +294,14 @@ struct MindLoomFeedView: View {
                 selection: $selectedVideoItem,
                 matching: .videos
             ) {
-                Label("Add Video", systemImage: "video")
+                Label("Video", systemImage: "video")
             }
             .buttonStyle(.bordered)
 
             Button {
                 showDocumentPicker = true
             } label: {
-                Label("Add Doc", systemImage: "doc")
+                Label("Doc", systemImage: "doc")
             }
             .buttonStyle(.bordered)
 
@@ -234,40 +336,6 @@ struct MindLoomFeedView: View {
             Label(attachment.fileName, systemImage: "doc.fill")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private func postMediaView(_ post: MindLoomPostRecord) -> some View {
-        let type = (post.mediaType ?? "").uppercased()
-        let urlText = (post.mediaUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !urlText.isEmpty, let url = URL(string: urlText) {
-            if type == "IMAGE" {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    case .empty:
-                        ProgressView()
-                    default:
-                        Image(systemName: "photo")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(height: 220)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else if type == "VIDEO" {
-                Link(destination: url) {
-                    Label("Open Video", systemImage: "video")
-                }
-                .font(.subheadline)
-            } else if type == "DOCUMENT" {
-                Link(destination: url) {
-                    Label("Open Document", systemImage: "doc")
-                }
-                .font(.subheadline)
-            }
         }
     }
 }

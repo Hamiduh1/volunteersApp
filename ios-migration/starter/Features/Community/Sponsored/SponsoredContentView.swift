@@ -40,14 +40,31 @@ struct SponsoredContentView: View {
                 garageSalesSection
             }
         }
+        .listStyle(.plain)
         .navigationTitle("Sponsored")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if selectedSection == .ads {
-                    Button("Create Ad") { showCreateAd = true }
-                } else {
-                    Button("Post Garage Sale") { showCreateGarageSale = true }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 0) {
+                Divider()
+                Button {
+                    if selectedSection == .ads {
+                        showCreateAd = true
+                    } else {
+                        showCreateGarageSale = true
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: selectedSection == .ads ? "megaphone.fill" : "storefront.fill")
+                        Text(selectedSection == .ads ? "Create Ad" : "Post Garage Sale")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 16)
                 }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
             }
         }
         .sheet(isPresented: $showCreateAd) {
@@ -129,6 +146,13 @@ struct SponsoredContentView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color(uiColor: .secondarySystemBackground))
+                    )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .listRowSeparator(.hidden)
                 }
             }
         }
@@ -185,6 +209,13 @@ struct SponsoredContentView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color(uiColor: .secondarySystemBackground))
+                    )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .listRowSeparator(.hidden)
                 }
             }
         }

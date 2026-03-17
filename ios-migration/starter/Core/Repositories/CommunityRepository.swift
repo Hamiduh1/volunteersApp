@@ -171,6 +171,15 @@ final class CommunityRepository {
         return snap.exists
     }
 
+    func fetchFollowingIds(currentUid: String, limit: Int = 500) async throws -> Set<String> {
+        let snapshot = try await db.collection(FirestoreCollection.users.rawValue)
+            .document(currentUid)
+            .collection(FirestoreSubcollection.following.rawValue)
+            .limit(to: limit)
+            .getDocuments()
+        return Set(snapshot.documents.map { $0.documentID })
+    }
+
     func fetchMarketplaceItems(limit: Int = 120) async throws -> [MarketplaceItemRecord] {
         let snapshot = try await db.collection(FirestoreCollection.marketplaceItems.rawValue)
             .limit(to: limit)

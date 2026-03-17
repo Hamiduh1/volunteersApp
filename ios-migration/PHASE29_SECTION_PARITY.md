@@ -17,6 +17,9 @@ Completed in this phase:
   - MindLoom create flow supports text, image, video, and document uploads.
   - Sponsored Ads creation now mirrors Android wallet-debit transaction behavior and media payload shape.
   - Garage Sale creation now mirrors Android fields and media upload flow.
+- Added community UX alignment updates:
+  - MindLoom feed now supports `Following` vs `All Posts` filtering and dedicated composer sheet flow.
+  - Sponsored/Garage section now uses a persistent bottom action CTA for create flow parity style.
 
 Validation result:
 - `android_ios_contract_diff.ps1` currently reports no missing collection/function/storage names between extracted Android references and iOS contract enums.
