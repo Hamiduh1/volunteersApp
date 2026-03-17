@@ -82,6 +82,15 @@ struct ConversationsListView: View {
             }
         }
         .navigationTitle("Social Inbox")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    UserDirectoryView(user: user)
+                } label: {
+                    Label("Find People", systemImage: "person.2")
+                }
+            }
+        }
         .task {
             async let conv = viewModel.refresh(user: user)
             async let calls = callsViewModel.refresh(user: user)

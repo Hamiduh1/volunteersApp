@@ -260,6 +260,16 @@ struct ChatMessageRecord: Codable, Identifiable {
     var timestamp: Timestamp?
 }
 
+struct DirectoryUserRecord: Identifiable, Hashable {
+    let id: String
+    let uid: String
+    let name: String
+    let email: String
+    let username: String
+    let phoneNumber: String
+    let profileImageUrl: String?
+}
+
 struct UserInvitationRecord: Codable, Identifiable {
     @DocumentID var id: String?
     var senderId: String?

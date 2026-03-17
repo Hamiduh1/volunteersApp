@@ -6,6 +6,83 @@ final class ChatRepository {
     private let db = Firestore.firestore()
     private var userSummaryCache: [String: (name: String, photoUrl: String?)] = [:]
 
+    func fetchDirectoryUsers(currentUid: String, limit: Int = 500) async throws -> [DirectoryUserRecord] {
+        let cleanCurrentUid = currentUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanCurrentUid.isEmpty else { return [] }
+
+        let snapshot = try await db.collection(FirestoreCollection.users.rawValue)
+            .order(by: "name", descending: false)
+            .limit(to: limit)
+            .getDocuments()
+
+        return snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            let uid = data.firstNonEmptyString(keys: ["uid"]) ?? doc.documentID
+            guard uid != cleanCurrentUid else { return nil }
+
+            let name = data.firstNonEmptyString(keys: ["name"]) ?? "Anonymous"
+            let email = data.firstNonEmptyString(keys: ["email"]) ?? ""
+            let username = data.firstNonEmptyString(keys: ["username"]) ?? ""
+            let phone = data.firstNonEmptyString(keys: ["phoneNumber", "phone"]) ?? ""
+            let profileImageUrl = data.firstNonEmptyString(keys: ["profileImageUrl", "profilePictureUrl", "avatarUrl"])
+            return DirectoryUserRecord(
+                id: doc.documentID,
+                uid: uid,
+                name: name,
+                email: email,
+                username: username,
+                phoneNumber: phone,
+                profileImageUrl: profileImageUrl
+            )
+        }
+    }
+
+    func sendDirectoryChatInvitation(sender: AppSessionUser, recipient: DirectoryUserRecord) async throws {
+        let senderUid = sender.uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recipientUid = recipient.uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !senderUid.isEmpty else {
+            throw NSError(
+                domain: "ChatRepository",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Authentication required."]
+            )
+        }
+        guard !recipientUid.isEmpty else {
+            throw NSError(
+                domain: "ChatRepository",
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid user selection."]
+            )
+        }
+
+        let invitationRef = db.collection(FirestoreCollection.users.rawValue)
+            .document(recipientUid)
+            .collection(FirestoreSubcollection.invitations.rawValue)
+            .document(senderUid)
+
+        let existing = try await invitationRef.getDocument()
+        if existing.exists {
+            throw NSError(
+                domain: "ChatRepository",
+                code: 7,
+                userInfo: [NSLocalizedDescriptionKey: "Invitation already sent to \(recipient.name)."]
+            )
+        }
+
+        let senderSummary = try await fetchUserSummary(uid: senderUid)
+        try await invitationRef.setData(
+            [
+                "senderId": senderUid,
+                "senderName": senderSummary.name,
+                "senderProfilePicUrl": senderSummary.photoUrl as Any,
+                "status": "pending",
+                "timestamp": FieldValue.serverTimestamp(),
+                "context": "User Directory"
+            ],
+            merge: true
+        )
+    }
+
     func fetchConversations(uid: String, limit: Int = 100) async throws -> [ChatConversationRecord] {
         let snapshot = try await db.collection(FirestoreCollection.chats.rawValue)
             .whereField("participants", arrayContains: uid)
