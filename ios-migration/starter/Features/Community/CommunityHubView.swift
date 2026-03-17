@@ -4,60 +4,47 @@ struct CommunityHubView: View {
     let user: AppSessionUser
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("Social") {
-                    NavigationLink {
-                        MindLoomFeedView(user: user)
-                    } label: {
-                        hubRow(
-                            title: "MindLoom",
-                            assetName: BrandAsset.hubMindLoom,
-                            fallbackSystemName: "sparkles.tv"
-                        )
-                    }
-
-                    NavigationLink {
-                        GalleryUploadsView(user: user)
-                    } label: {
-                        hubRow(
-                            title: "Gallery Uploads",
-                            assetName: BrandAsset.hubGallery,
-                            fallbackSystemName: "photo.on.rectangle"
-                        )
-                    }
+        List {
+            Section("Social") {
+                NavigationLink {
+                    MindLoomFeedView(user: user)
+                } label: {
+                    hubRow(
+                        title: "MindLoom",
+                        assetName: BrandAsset.hubMindLoom,
+                        fallbackSystemName: "sparkles.tv"
+                    )
                 }
 
-                Section("Commerce") {
-                    NavigationLink {
-                        MarketplaceView(user: user)
-                    } label: {
-                        hubRow(
-                            title: "Marketplace",
-                            assetName: BrandAsset.hubMarketplace,
-                            fallbackSystemName: "storefront"
-                        )
-                    }
-
-                    NavigationLink {
-                        SponsoredContentView(user: user)
-                    } label: {
-                        hubRow(
-                            title: "Sponsored & Garage",
-                            assetName: BrandAsset.hubSponsored,
-                            fallbackSystemName: "megaphone"
-                        )
-                    }
+                NavigationLink {
+                    GalleryUploadsView(user: user)
+                } label: {
+                    hubRow(
+                        title: "Gallery Uploads",
+                        assetName: BrandAsset.hubGallery,
+                        fallbackSystemName: "photo.on.rectangle"
+                    )
                 }
             }
-            .navigationTitle("Community")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    BrandSymbolView(
-                        assetName: BrandAsset.companyMark,
-                        fallbackSystemName: "person.3.sequence",
-                        size: 20,
-                        useTemplate: false
+
+            Section("Commerce") {
+                NavigationLink {
+                    MarketplaceView(user: user)
+                } label: {
+                    hubRow(
+                        title: "Marketplace",
+                        assetName: BrandAsset.hubMarketplace,
+                        fallbackSystemName: "storefront"
+                    )
+                }
+
+                NavigationLink {
+                    SponsoredContentView(user: user)
+                } label: {
+                    hubRow(
+                        title: "Sponsored & Garage",
+                        assetName: BrandAsset.hubSponsored,
+                        fallbackSystemName: "megaphone"
                     )
                 }
             }
