@@ -4,6 +4,7 @@ import FirebaseFirestoreSwift
 
 final class ChatRepository {
     private let db = Firestore.firestore()
+    private var userSummaryCache: [String: (name: String, photoUrl: String?)] = [:]
 
     func fetchConversations(uid: String, limit: Int = 100) async throws -> [ChatConversationRecord] {
         let snapshot = try await db.collection(FirestoreCollection.chats.rawValue)
@@ -11,8 +12,13 @@ final class ChatRepository {
             .limit(to: limit)
             .getDocuments()
 
-        return snapshot.documents.compactMap(parseConversation)
-        .sorted {
+        var records: [ChatConversationRecord] = []
+        for doc in snapshot.documents {
+            guard let parsed = parseConversation(doc) else { continue }
+            records.append(try await enrichConversation(parsed, currentUid: uid))
+        }
+
+        return records.sorted {
             let l = $0.lastMessageTimestamp?.dateValue() ?? .distantPast
             let r = $1.lastMessageTimestamp?.dateValue() ?? .distantPast
             return l > r
@@ -60,6 +66,7 @@ final class ChatRepository {
     func fetchInvitations(uid: String, limit: Int = 100) async throws -> [UserInvitationRecord] {
         var userInvites: QuerySnapshot?
         var chatInvites: QuerySnapshot?
+        var blindDateInvites: QuerySnapshot?
         var lastError: Error?
 
         do {
@@ -82,7 +89,17 @@ final class ChatRepository {
             lastError = error
         }
 
-        if userInvites == nil, chatInvites == nil, let lastError {
+        do {
+            blindDateInvites = try await db.collection(FirestoreCollection.users.rawValue)
+                .document(uid)
+                .collection(FirestoreSubcollection.blindDateInvitations.rawValue)
+                .limit(to: limit)
+                .getDocuments()
+        } catch {
+            lastError = error
+        }
+
+        if userInvites == nil, chatInvites == nil, blindDateInvites == nil, let lastError {
             throw lastError
         }
 
@@ -99,6 +116,12 @@ final class ChatRepository {
             merged[key] = invite
         }
 
+        for doc in blindDateInvites?.documents ?? [] {
+            guard let invite = parseBlindDateInvitation(doc) else { continue }
+            let key = "blind_date:\(invite.id ?? doc.documentID):\(invite.senderId ?? "")"
+            merged[key] = invite
+        }
+
         return merged.values.sorted {
             let l = $0.timestamp?.dateValue() ?? .distantPast
             let r = $1.timestamp?.dateValue() ?? .distantPast
@@ -108,6 +131,7 @@ final class ChatRepository {
 
     func acceptInvitation(uid: String, invitation: UserInvitationRecord) async throws -> String {
         let senderId = invitation.senderId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let source = (invitation.source ?? "chat").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let invitationId = invitation.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? senderId
         guard !senderId.isEmpty else {
             throw NSError(
@@ -115,6 +139,21 @@ final class ChatRepository {
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Invitation sender is missing."]
             )
+        }
+
+        if source == "blind_date" {
+            let result = try await FunctionsService.shared.call(
+                function: .acceptBlindDateInvitation,
+                data: ["senderId": senderId]
+            )
+            try await markInvitationAccepted(uid: uid, invitation: invitation, invitationId: invitationId)
+            if let chatId = parseChatId(from: result), !chatId.isEmpty {
+                return chatId
+            }
+            if let existingConversationId = try await findExistingConversation(currentUid: uid, otherUid: senderId) {
+                return existingConversationId
+            }
+            return ""
         }
 
         if let existingConversationId = try await findExistingConversation(currentUid: uid, otherUid: senderId) {
@@ -145,6 +184,7 @@ final class ChatRepository {
 
     func declineInvitation(uid: String, invitation: UserInvitationRecord) async throws {
         let senderId = invitation.senderId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let source = (invitation.source ?? "chat").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let invitationId = invitation.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? senderId
         guard !invitationId.isEmpty else {
             throw NSError(
@@ -154,10 +194,16 @@ final class ChatRepository {
             )
         }
 
-        if (invitation.source ?? "").lowercased() == "legacy_chat" {
+        if source == "legacy_chat" {
             try await db.collection(FirestoreCollection.users.rawValue)
                 .document(uid)
                 .collection(FirestoreSubcollection.chatInvitations.rawValue)
+                .document(invitationId)
+                .delete()
+        } else if source == "blind_date" {
+            try await db.collection(FirestoreCollection.users.rawValue)
+                .document(uid)
+                .collection(FirestoreSubcollection.blindDateInvitations.rawValue)
                 .document(invitationId)
                 .delete()
         } else {
@@ -167,6 +213,75 @@ final class ChatRepository {
                 .document(invitationId)
                 .delete()
         }
+    }
+
+    func initiateCall(
+        conversationId: String,
+        callerUid: String,
+        receiverUid: String,
+        callType: String
+    ) async throws {
+        let cleanConversationId = conversationId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCallerUid = callerUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanReceiverUid = receiverUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCallType = callType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        guard !cleanConversationId.isEmpty else {
+            throw NSError(domain: "ChatRepository", code: 3, userInfo: [NSLocalizedDescriptionKey: "Conversation id is missing."])
+        }
+        guard !cleanCallerUid.isEmpty, !cleanReceiverUid.isEmpty else {
+            throw NSError(domain: "ChatRepository", code: 4, userInfo: [NSLocalizedDescriptionKey: "Call participants are missing."])
+        }
+        let finalCallType = normalizedCallType == "video" ? "video" : "audio"
+
+        let caller = try await fetchUserSummary(uid: cleanCallerUid)
+        let sessionRef = db.collection(FirestoreCollection.callSessions.rawValue).document()
+        let callLogRef = db.collection(FirestoreCollection.chats.rawValue)
+            .document(cleanConversationId)
+            .collection(FirestoreSubcollection.callLogs.rawValue)
+            .document(sessionRef.documentID)
+        let chatRef = db.collection(FirestoreCollection.chats.rawValue).document(cleanConversationId)
+
+        let batch = db.batch()
+        batch.setData(
+            [
+                "chatId": cleanConversationId,
+                "callerId": cleanCallerUid,
+                "receiverId": cleanReceiverUid,
+                "callerName": caller.name,
+                "callerPhotoUrl": caller.photoUrl as Any,
+                "callType": finalCallType,
+                "status": "ringing",
+                "createdAt": FieldValue.serverTimestamp(),
+                "updatedAt": FieldValue.serverTimestamp()
+            ],
+            forDocument: sessionRef,
+            merge: true
+        )
+        batch.setData(
+            [
+                "chatId": cleanConversationId,
+                "callerId": cleanCallerUid,
+                "receiverId": cleanReceiverUid,
+                "callType": finalCallType,
+                "status": "ringing",
+                "startedAt": FieldValue.serverTimestamp()
+            ],
+            forDocument: callLogRef,
+            merge: true
+        )
+        batch.setData(
+            [
+                "lastCallType": finalCallType,
+                "lastCallStatus": "ringing",
+                "lastCallTimestamp": FieldValue.serverTimestamp(),
+                "lastCallInitiatorId": cleanCallerUid,
+                "lastCallReceiverId": cleanReceiverUid
+            ],
+            forDocument: chatRef,
+            merge: true
+        )
+        try await batch.commit()
     }
 
     private func findExistingConversation(currentUid: String, otherUid: String) async throws -> String? {
@@ -185,12 +300,26 @@ final class ChatRepository {
     }
 
     private func markInvitationAccepted(uid: String, invitation: UserInvitationRecord, invitationId: String) async throws {
-        if (invitation.source ?? "").lowercased() == "legacy_chat" {
+        let source = (invitation.source ?? "").lowercased()
+        if source == "legacy_chat" {
             try await db.collection(FirestoreCollection.users.rawValue)
                 .document(uid)
                 .collection(FirestoreSubcollection.chatInvitations.rawValue)
                 .document(invitationId)
                 .delete()
+        } else if source == "blind_date" {
+            try await db.collection(FirestoreCollection.users.rawValue)
+                .document(uid)
+                .collection(FirestoreSubcollection.blindDateInvitations.rawValue)
+                .document(invitationId)
+                .setData(
+                    [
+                        "status": "accepted",
+                        "updatedAt": FieldValue.serverTimestamp(),
+                        "respondedAt": FieldValue.serverTimestamp()
+                    ],
+                    merge: true
+                )
         } else {
             try await db.collection(FirestoreCollection.users.rawValue)
                 .document(uid)
@@ -212,12 +341,27 @@ final class ChatRepository {
         invitation: UserInvitationRecord,
         invitationId: String
     ) {
-        if (invitation.source ?? "").lowercased() == "legacy_chat" {
+        let source = (invitation.source ?? "").lowercased()
+        if source == "legacy_chat" {
             let legacyRef = db.collection(FirestoreCollection.users.rawValue)
                 .document(uid)
                 .collection(FirestoreSubcollection.chatInvitations.rawValue)
                 .document(invitationId)
             batch.deleteDocument(legacyRef)
+        } else if source == "blind_date" {
+            let inviteRef = db.collection(FirestoreCollection.users.rawValue)
+                .document(uid)
+                .collection(FirestoreSubcollection.blindDateInvitations.rawValue)
+                .document(invitationId)
+            batch.setData(
+                [
+                    "status": "accepted",
+                    "updatedAt": FieldValue.serverTimestamp(),
+                    "respondedAt": FieldValue.serverTimestamp()
+                ],
+                forDocument: inviteRef,
+                merge: true
+            )
         } else {
             let inviteRef = db.collection(FirestoreCollection.users.rawValue)
                 .document(uid)
@@ -241,13 +385,22 @@ final class ChatRepository {
         let data = doc.data()
         let lastMessage = data.firstNonEmptyString(keys: ["lastMessage", "lastMessageText", "message"])
         let lastMessageTimestamp = data.firstTimestamp(keys: ["lastMessageTimestamp", "timestamp", "updatedAt", "createdAt"])
+        let lastCallTimestamp = data.firstTimestamp(keys: ["lastCallTimestamp"])
         let participants = data["participants"] as? [String]
         return ChatConversationRecord(
             id: doc.documentID,
             participants: participants,
+            otherParticipantId: data.firstNonEmptyString(keys: ["otherParticipantId", "otherUserId"]),
+            otherParticipantName: data.firstNonEmptyString(keys: ["otherParticipantName", "otherUserName"]),
+            otherParticipantProfilePicUrl: data.firstNonEmptyString(keys: ["otherParticipantProfilePicUrl", "otherParticipantProfileImageUrl"]),
             lastMessage: lastMessage,
             lastMessageText: lastMessage,
-            lastMessageTimestamp: lastMessageTimestamp
+            lastMessageTimestamp: lastMessageTimestamp,
+            lastCallType: data.firstNonEmptyString(keys: ["lastCallType"]),
+            lastCallStatus: data.firstNonEmptyString(keys: ["lastCallStatus"]),
+            lastCallTimestamp: lastCallTimestamp,
+            lastCallInitiatorId: data.firstNonEmptyString(keys: ["lastCallInitiatorId"]),
+            lastCallReceiverId: data.firstNonEmptyString(keys: ["lastCallReceiverId"])
         )
     }
 
@@ -301,6 +454,90 @@ final class ChatRepository {
             context: data.firstNonEmptyString(keys: ["context", "origin"]) ?? "Volunteer Directory",
             timestamp: timestamp
         )
+    }
+
+    private func parseBlindDateInvitation(_ doc: QueryDocumentSnapshot) -> UserInvitationRecord? {
+        let data = doc.data()
+        let senderId = data.firstNonEmptyString(keys: ["senderId", "fromUid", "inviterId"]) ?? doc.documentID
+        let senderName = data.firstNonEmptyString(keys: ["senderName", "inviterName", "senderDisplayName"]) ?? "Someone"
+        let profileImage = data.firstNonEmptyString(keys: ["senderProfilePictureUrl", "senderProfileImageUrl", "senderAvatarUrl"])
+        let timestamp = data.firstTimestamp(keys: ["sentAt", "timestamp", "createdAt", "updatedAt"])
+        return UserInvitationRecord(
+            id: doc.documentID,
+            senderId: senderId,
+            senderName: senderName,
+            inviterName: senderName,
+            senderEmail: data.firstNonEmptyString(keys: ["senderEmail", "email"]),
+            senderProfileImageUrl: profileImage,
+            status: data.firstNonEmptyString(keys: ["status"]) ?? "pending",
+            source: "blind_date",
+            context: "Blind Date",
+            timestamp: timestamp
+        )
+    }
+
+    private func enrichConversation(
+        _ conversation: ChatConversationRecord,
+        currentUid: String
+    ) async throws -> ChatConversationRecord {
+        let participants = conversation.participants ?? []
+        let otherId = conversation.otherParticipantId
+            ?? participants.first(where: { $0 != currentUid })
+
+        guard let otherId, !otherId.isEmpty else { return conversation }
+        let summary = try await fetchUserSummary(uid: otherId)
+        return ChatConversationRecord(
+            id: conversation.id,
+            participants: conversation.participants,
+            otherParticipantId: otherId,
+            otherParticipantName: conversation.otherParticipantName ?? summary.name,
+            otherParticipantProfilePicUrl: conversation.otherParticipantProfilePicUrl ?? summary.photoUrl,
+            lastMessage: conversation.lastMessage,
+            lastMessageText: conversation.lastMessageText,
+            lastMessageTimestamp: conversation.lastMessageTimestamp,
+            lastCallType: conversation.lastCallType,
+            lastCallStatus: conversation.lastCallStatus,
+            lastCallTimestamp: conversation.lastCallTimestamp,
+            lastCallInitiatorId: conversation.lastCallInitiatorId,
+            lastCallReceiverId: conversation.lastCallReceiverId
+        )
+    }
+
+    private func fetchUserSummary(uid: String) async throws -> (name: String, photoUrl: String?) {
+        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cached = userSummaryCache[cleanUid] {
+            return cached
+        }
+
+        let snapshot = try await db.collection(FirestoreCollection.users.rawValue)
+            .document(cleanUid)
+            .getDocument()
+        let data = snapshot.data() ?? [:]
+        let name = data.firstNonEmptyString(keys: ["name", "username", "email"]) ?? "Unknown user"
+        let photoUrl = data.firstNonEmptyString(keys: ["profilePictureUrl", "profileImageUrl", "avatarUrl"])
+        let summary = (name: name, photoUrl: photoUrl)
+        userSummaryCache[cleanUid] = summary
+        return summary
+    }
+
+    private func parseChatId(from functionResult: Any?) -> String? {
+        if let raw = functionResult as? String {
+            let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return clean.isEmpty ? nil : clean
+        }
+        if let map = functionResult as? [String: Any] {
+            if let chatId = (map["chatId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !chatId.isEmpty {
+                return chatId
+            }
+            if let data = map["data"] as? [String: Any] {
+                return parseChatId(from: data)
+            }
+            if let result = map["result"] as? [String: Any] {
+                return parseChatId(from: result)
+            }
+        }
+        return nil
     }
 }
 

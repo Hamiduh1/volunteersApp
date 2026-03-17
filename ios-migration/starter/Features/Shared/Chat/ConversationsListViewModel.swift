@@ -20,6 +20,7 @@ final class ConversationsListViewModel: ObservableObject {
     @Published private(set) var conversations: [ChatConversationRecord] = []
     @Published private(set) var invitations: [UserInvitationRecord] = []
     @Published private(set) var updatingInvitationIds: Set<String> = []
+    @Published private(set) var initiatingCallKeys: Set<String> = []
     @Published var query = ""
     @Published var invitationFilter: InvitationStatusFilter = .pending
     @Published var statusMessage: String?
@@ -36,6 +37,8 @@ final class ConversationsListViewModel: ObservableObject {
             (conversation.lastMessage ?? "").lowercased().contains(cleanQuery)
                 || (conversation.lastMessageText ?? "").lowercased().contains(cleanQuery)
                 || (conversation.id ?? "").lowercased().contains(cleanQuery)
+                || (conversation.otherParticipantName ?? "").lowercased().contains(cleanQuery)
+                || (conversation.otherParticipantId ?? "").lowercased().contains(cleanQuery)
         }
     }
 
@@ -92,7 +95,9 @@ final class ConversationsListViewModel: ObservableObject {
         do {
             let conversationId = try await repository.acceptInvitation(uid: user.uid, invitation: invitation)
             statusMessage = "Invitation accepted."
-            routeToConversation = ConversationRoute(id: conversationId)
+            if !conversationId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                routeToConversation = ConversationRoute(id: conversationId)
+            }
             await refresh(user: user)
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
@@ -116,6 +121,96 @@ final class ConversationsListViewModel: ObservableObject {
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
         }
+    }
+
+    func startCall(
+        conversation: ChatConversationRecord,
+        user: AppSessionUser,
+        isVideo: Bool
+    ) async {
+        let conversationId = conversation.id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !conversationId.isEmpty else {
+            errorMessage = "Conversation id is missing."
+            return
+        }
+
+        let otherUid = resolveOtherParticipantId(conversation: conversation, currentUid: user.uid)
+        guard let otherUid, !otherUid.isEmpty else {
+            errorMessage = "Unable to resolve the other participant for this conversation."
+            return
+        }
+
+        let key = "\(conversationId):\(isVideo ? "video" : "audio")"
+        guard !initiatingCallKeys.contains(key) else { return }
+        initiatingCallKeys.insert(key)
+        defer { initiatingCallKeys.remove(key) }
+
+        do {
+            try await repository.initiateCall(
+                conversationId: conversationId,
+                callerUid: user.uid,
+                receiverUid: otherUid,
+                callType: isVideo ? "video" : "audio"
+            )
+            statusMessage = isVideo
+                ? "Video call started. Waiting for the recipient."
+                : "Voice call started. Waiting for the recipient."
+            await refresh(user: user)
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
+    func startCallFromLog(
+        conversationId: String?,
+        peerUid: String?,
+        user: AppSessionUser,
+        isVideo: Bool
+    ) async {
+        let cleanConversationId = conversationId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cleanPeerUid = peerUid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !cleanConversationId.isEmpty, !cleanPeerUid.isEmpty else {
+            errorMessage = "This call record cannot be redialed because chat metadata is missing."
+            return
+        }
+
+        let key = "\(cleanConversationId):\(isVideo ? "video" : "audio")"
+        guard !initiatingCallKeys.contains(key) else { return }
+        initiatingCallKeys.insert(key)
+        defer { initiatingCallKeys.remove(key) }
+
+        do {
+            try await repository.initiateCall(
+                conversationId: cleanConversationId,
+                callerUid: user.uid,
+                receiverUid: cleanPeerUid,
+                callType: isVideo ? "video" : "audio"
+            )
+            statusMessage = isVideo
+                ? "Video redial started."
+                : "Voice redial started."
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
+    func isInitiatingCall(conversationId: String?, isVideo: Bool) -> Bool {
+        let cleanConversationId = conversationId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !cleanConversationId.isEmpty else { return false }
+        let key = "\(cleanConversationId):\(isVideo ? "video" : "audio")"
+        return initiatingCallKeys.contains(key)
+    }
+
+    private func resolveOtherParticipantId(
+        conversation: ChatConversationRecord,
+        currentUid: String
+    ) -> String? {
+        let explicit = conversation.otherParticipantId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !explicit.isEmpty, explicit != currentUid {
+            return explicit
+        }
+        let participants = conversation.participants ?? []
+        return participants.first { $0 != currentUid && !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     private func normalizedStatus(_ rawStatus: String?) -> String {

@@ -7,11 +7,8 @@ struct AdvancedToolsHomeView: View {
         NavigationStack {
             List {
                 Section("Communication") {
-                    NavigationLink("Chat & Invitations") {
+                    NavigationLink("Social Inbox") {
                         ConversationsListView(user: user)
-                    }
-                    NavigationLink("Call History") {
-                        CallHistoryView(user: user)
                     }
                     NavigationLink("Dating & Blind Date") {
                         DateHubView(user: user)

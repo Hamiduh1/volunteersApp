@@ -240,9 +240,17 @@ struct EmployerProfileSetupRecord {
 struct ChatConversationRecord: Codable, Identifiable {
     @DocumentID var id: String?
     var participants: [String]?
+    var otherParticipantId: String?
+    var otherParticipantName: String?
+    var otherParticipantProfilePicUrl: String?
     var lastMessage: String?
     var lastMessageText: String?
     var lastMessageTimestamp: Timestamp?
+    var lastCallType: String?
+    var lastCallStatus: String?
+    var lastCallTimestamp: Timestamp?
+    var lastCallInitiatorId: String?
+    var lastCallReceiverId: String?
 }
 
 struct ChatMessageRecord: Codable, Identifiable {
