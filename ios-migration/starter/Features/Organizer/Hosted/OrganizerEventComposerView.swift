@@ -44,6 +44,12 @@ struct OrganizerEventComposerView: View {
                     TextField("Address", text: $viewModel.locationAddress)
                 }
 
+                Section("Requirements & Contact") {
+                    TextField("Volunteer Requirements (optional)", text: $viewModel.requirements, axis: .vertical)
+                        .lineLimit(2...5)
+                    TextField("Contact Info (optional)", text: $viewModel.contactInfo)
+                }
+
                 Section("Capacity & Payment") {
                     TextField("Volunteer Limit", text: $viewModel.volunteerLimitText)
                         .keyboardType(.numberPad)

@@ -44,9 +44,40 @@ struct LiveSessionsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                Text("Showing \(viewModel.filteredSessions.count) of \(viewModel.sessions.count) sessions • Live: \(viewModel.liveCount)")
+                Text("Showing \(viewModel.filteredSessions.count) of \(viewModel.sessions.count) sessions | Live: \(viewModel.liveCount)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+
+            if viewModel.canHostLive(user: user) {
+                Section("Go Live") {
+                    TextField("Session title (optional)", text: $viewModel.hostSessionTitle)
+                    if let active = viewModel.activeHostedSession(for: user.uid) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("You are live")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                            Text(active.title ?? "Untitled Session")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        Button("End My Live Session") {
+                            Task { await viewModel.endLiveSession(session: active, user: user) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .disabled(viewModel.isHostOperationInProgress)
+                    } else {
+                        Button("Start Live Session") {
+                            Task { await viewModel.startLiveSession(user: user) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isHostOperationInProgress)
+                    }
+                    if viewModel.isHostOperationInProgress {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
             }
 
             if viewModel.isLoading && viewModel.filteredSessions.isEmpty {
@@ -93,8 +124,8 @@ struct LiveSessionsView: View {
             }
         }
         .navigationTitle("Live")
-        .task { await viewModel.refresh() }
-        .refreshable { await viewModel.refresh() }
+        .task { await viewModel.refresh(user: user) }
+        .refreshable { await viewModel.refresh(user: user) }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
@@ -105,3 +136,4 @@ struct LiveSessionsView: View {
         }
     }
 }
+

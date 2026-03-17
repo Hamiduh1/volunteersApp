@@ -175,6 +175,124 @@ final class OrganizerRepository {
         }
     }
 
+    func fetchDashboardSnapshot(uid: String) async throws -> OrganizerDashboardSnapshot {
+        let organizerName = try await fetchUserDisplayName(uid: uid)
+        let canGoLive = try await fetchCanGoLive(uid: uid)
+        let events = try await fetchHostedEvents(uid: uid, limit: 200)
+        let applications = try await fetchManagedApplications(uid: uid)
+
+        let totalVolunteers = applications.filter { $0.status != .withdrawn }.count
+        let eventFeeById = Dictionary(uniqueKeysWithValues: events.map { event in
+            let eventId = event.id ?? ""
+            let eventFee = event.payment ?? event.eventFee ?? 0
+            return (eventId, eventFee)
+        })
+        let totalEarnings = applications.reduce(0.0) { partial, item in
+            guard item.status.isApprovedLike else { return partial }
+            return partial + (eventFeeById[item.eventId] ?? 0.0)
+        }
+
+        return OrganizerDashboardSnapshot(
+            organizerName: organizerName,
+            canGoLive: canGoLive,
+            eventCount: events.count,
+            totalVolunteers: totalVolunteers,
+            totalEarnings: totalEarnings
+        )
+    }
+
+    func fetchSummaryItems(uid: String) async throws -> [OrganizerSummaryEventItem] {
+        let events = try await fetchHostedEvents(uid: uid, limit: 250)
+        let applications = try await fetchManagedApplications(uid: uid)
+        let appsByEventId = Dictionary(grouping: applications, by: { $0.eventId })
+
+        let summary = events.compactMap { event -> OrganizerSummaryEventItem? in
+            let eventId = event.id ?? ""
+            guard !eventId.isEmpty else { return nil }
+            let related = appsByEventId[eventId] ?? []
+            let pendingCount = related.filter { $0.status.isPendingLike }.count
+            let approvedCount = related.filter { $0.status.isApprovedLike }.count
+            let rejectedCount = related.filter { $0.status.isRejectedLike }.count
+            let fee = event.payment ?? event.eventFee ?? 0.0
+
+            return OrganizerSummaryEventItem(
+                id: eventId,
+                eventId: eventId,
+                title: event.title ?? "Event",
+                date: event.eventDateTime?.dateValue(),
+                volunteerLimit: event.volunteerLimit ?? 0,
+                appliedCount: related.count,
+                pendingCount: pendingCount,
+                approvedCount: approvedCount,
+                rejectedCount: rejectedCount,
+                totalEarnings: Double(approvedCount) * fee
+            )
+        }
+
+        return summary.sorted {
+            let l = $0.date ?? .distantFuture
+            let r = $1.date ?? .distantFuture
+            return l < r
+        }
+    }
+
+    func fetchOrganizerProfileSetup(uid: String) async throws -> OrganizerProfileSetupRecord {
+        let userDoc = try await db.collection(FirestoreCollection.users.rawValue).document(uid).getDocument()
+        let organizerDoc = try? await db.collection(FirestoreCollection.organizers.rawValue).document(uid).getDocument()
+
+        let userData = userDoc.data() ?? [:]
+        let organizerData = organizerDoc?.data() ?? [:]
+        let name = userData.firstNonEmptyString(keys: ["name", "username"]) ?? ""
+        let email = userData.firstNonEmptyString(keys: ["email"]) ?? ""
+        let organizationName = organizerData.firstNonEmptyString(keys: ["organizationName", "name"]) ?? ""
+        let bio = organizerData.firstNonEmptyString(keys: ["bio", "about"]) ?? ""
+        let location = organizerData.firstNonEmptyString(keys: ["location", "locationName"]) ?? ""
+        let profileImage = userData.firstNonEmptyString(keys: ["profileImageUrl", "profilePictureUrl"])
+            ?? organizerData.firstNonEmptyString(keys: ["profileImageUrl", "profilePictureUrl"])
+
+        return OrganizerProfileSetupRecord(
+            uid: uid,
+            name: name,
+            email: email,
+            organizationName: organizationName,
+            bio: bio,
+            location: location,
+            profileImageUrl: profileImage
+        )
+    }
+
+    func saveOrganizerProfileSetup(
+        uid: String,
+        name: String,
+        organizationName: String,
+        bio: String,
+        location: String
+    ) async throws {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanOrg = organizationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let userRef = db.collection(FirestoreCollection.users.rawValue).document(uid)
+        let organizerRef = db.collection(FirestoreCollection.organizers.rawValue).document(uid)
+
+        try await userRef.setData([
+            "name": cleanName,
+            "username": cleanName,
+            "organizationName": cleanOrg,
+            "lastUpdatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+
+        try await organizerRef.setData([
+            "uid": uid,
+            "name": cleanName,
+            "organizationName": cleanOrg,
+            "bio": cleanBio,
+            "location": cleanLocation,
+            "lastUpdatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+    }
+
     func updateApplicationStatus(eventId: String, documentId: String, status: ApplicationStatus) async throws {
         let eventAppRef = db.collection(FirestoreCollection.events.rawValue)
             .document(eventId)
@@ -255,29 +373,58 @@ final class OrganizerRepository {
         locationAddress: String,
         eventDate: Date,
         volunteerLimit: Int,
-        payment: Double
+        payment: Double,
+        requirements: String,
+        contactInfo: String
     ) async throws -> String {
         let organizerName = try await fetchUserDisplayName(uid: uid)
         let ref = db.collection(FirestoreCollection.events.rawValue).document()
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLocationName = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLocationAddress = locationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanRequirements = requirements.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanContactInfo = contactInfo.trimmingCharacters(in: .whitespacesAndNewlines)
 
         try await ref.setData([
-            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
-            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
-            "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
-            "locationName": locationName.trimmingCharacters(in: .whitespacesAndNewlines),
-            "locationAddress": locationAddress.trimmingCharacters(in: .whitespacesAndNewlines),
+            "title": cleanTitle,
+            "titleLowercase": cleanTitle.lowercased(),
+            "description": cleanDescription,
+            "category": cleanCategory,
+            "locationName": cleanLocationName,
+            "locationAddress": cleanLocationAddress,
             "eventDateTime": Timestamp(date: eventDate),
             "eventTimestamp": Timestamp(date: eventDate),
             "volunteerLimit": volunteerLimit,
             "participantsCount": 0,
             "payment": payment,
             "eventFee": payment,
+            "requirements": cleanRequirements,
+            "contactInfo": cleanContactInfo,
+            "isActive": true,
+            "closeEntries": false,
+            "opportunityType": "EVENT",
             "status": "OPEN",
             "organizerId": uid,
             "organizerUid": uid,
             "organizerName": organizerName,
             "createdAt": FieldValue.serverTimestamp(),
             "lastUpdatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+
+        let hostedRef = db.collection(FirestoreCollection.users.rawValue)
+            .document(uid)
+            .collection(FirestoreSubcollection.hostedEvents.rawValue)
+            .document(ref.documentID)
+        try? await hostedRef.setData([
+            "eventId": ref.documentID,
+            "eventName": cleanTitle,
+            "title": cleanTitle,
+            "location": cleanLocationName.isEmpty ? cleanLocationAddress : cleanLocationName,
+            "status": "OPEN",
+            "timestamp": FieldValue.serverTimestamp(),
+            "eventDateTime": Timestamp(date: eventDate)
         ], merge: true)
 
         return ref.documentID
@@ -293,30 +440,58 @@ final class OrganizerRepository {
         locationAddress: String,
         eventDate: Date,
         volunteerLimit: Int,
-        payment: Double
+        payment: Double,
+        requirements: String,
+        contactInfo: String
     ) async throws {
         let organizerName = try await fetchUserDisplayName(uid: uid)
         let ref = db.collection(FirestoreCollection.events.rawValue).document(eventId)
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLocationName = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLocationAddress = locationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanRequirements = requirements.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanContactInfo = contactInfo.trimmingCharacters(in: .whitespacesAndNewlines)
 
         try await ref.setData([
-            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
-            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
-            "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
-            "locationName": locationName.trimmingCharacters(in: .whitespacesAndNewlines),
-            "locationAddress": locationAddress.trimmingCharacters(in: .whitespacesAndNewlines),
+            "title": cleanTitle,
+            "titleLowercase": cleanTitle.lowercased(),
+            "description": cleanDescription,
+            "category": cleanCategory,
+            "locationName": cleanLocationName,
+            "locationAddress": cleanLocationAddress,
             "eventDateTime": Timestamp(date: eventDate),
             "eventTimestamp": Timestamp(date: eventDate),
             "volunteerLimit": volunteerLimit,
             "payment": payment,
             "eventFee": payment,
+            "requirements": cleanRequirements,
+            "contactInfo": cleanContactInfo,
+            "isActive": true,
+            "opportunityType": "EVENT",
             "organizerId": uid,
             "organizerUid": uid,
             "organizerName": organizerName,
             "lastUpdatedAt": FieldValue.serverTimestamp()
         ], merge: true)
+
+        let hostedRef = db.collection(FirestoreCollection.users.rawValue)
+            .document(uid)
+            .collection(FirestoreSubcollection.hostedEvents.rawValue)
+            .document(eventId)
+        try? await hostedRef.setData([
+            "eventId": eventId,
+            "eventName": cleanTitle,
+            "title": cleanTitle,
+            "location": cleanLocationName.isEmpty ? cleanLocationAddress : cleanLocationName,
+            "status": "OPEN",
+            "timestamp": FieldValue.serverTimestamp(),
+            "eventDateTime": Timestamp(date: eventDate)
+        ], merge: true)
     }
 
-    func deleteHostedEvent(eventId: String) async throws {
+    func deleteHostedEvent(eventId: String, uid: String) async throws {
         let ref = db.collection(FirestoreCollection.events.rawValue).document(eventId)
         do {
             try await ref.delete()
@@ -327,6 +502,12 @@ final class OrganizerRepository {
                 "lastUpdatedAt": FieldValue.serverTimestamp()
             ], merge: true)
         }
+
+        try? await db.collection(FirestoreCollection.users.rawValue)
+            .document(uid)
+            .collection(FirestoreSubcollection.hostedEvents.rawValue)
+            .document(eventId)
+            .delete()
     }
 
     private func fetchEventTitles(ids: [String]) async throws -> [String: String] {
@@ -347,6 +528,13 @@ final class OrganizerRepository {
         let userSnap = try await db.collection(FirestoreCollection.users.rawValue).document(uid).getDocument()
         let data = userSnap.data() ?? [:]
         return data.firstNonEmptyString(keys: ["name", "username", "email"]) ?? "Organizer"
+    }
+
+    private func fetchCanGoLive(uid: String) async throws -> Bool {
+        let userSnap = try await db.collection(FirestoreCollection.users.rawValue).document(uid).getDocument()
+        let data = userSnap.data() ?? [:]
+        let role = (data.firstNonEmptyString(keys: ["role", "userRole"]) ?? "").lowercased()
+        return role == "organizer" || role == "owner" || role == "admin"
     }
 
     private func parseEvent(_ doc: QueryDocumentSnapshot) -> EventRecord? {

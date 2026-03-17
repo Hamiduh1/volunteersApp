@@ -58,6 +58,40 @@ final class OrganizerWalletRepository {
         .map { $0 }
     }
 
+    func fetchTrackedEventIncome(uid: String) async throws -> Double {
+        let eventDocs = try await db.collection(FirestoreCollection.events.rawValue)
+            .whereField("organizerId", isEqualTo: uid)
+            .getDocuments()
+            .documents
+
+        let eventFeeById = Dictionary(uniqueKeysWithValues: eventDocs.map { doc in
+            let fee = doc.data().double(keys: ["eventFee", "payment", "amount"]) ?? 0.0
+            return (doc.documentID, fee)
+        })
+
+        let paidStatuses: Set<String> = ["APPROVED", "ACCEPTED", "ATTENDED", "COMPLETED"]
+        var trackedIncome = 0.0
+
+        for eventDoc in eventDocs {
+            let eventId = eventDoc.documentID
+            let applications = try? await db.collection(FirestoreCollection.events.rawValue)
+                .document(eventId)
+                .collection(FirestoreSubcollection.applications.rawValue)
+                .limit(to: 500)
+                .getDocuments()
+
+            let docs = applications?.documents ?? []
+            for app in docs {
+                let data = app.data()
+                let status = (data.string(keys: ["status"]) ?? "").uppercased()
+                guard paidStatuses.contains(status) else { continue }
+                let explicit = data.double(keys: ["transactionAmount", "eventFee", "amount"])
+                trackedIncome += max(explicit ?? eventFeeById[eventId] ?? 0.0, 0.0)
+            }
+        }
+        return trackedIncome
+    }
+
     private func parseTransaction(_ doc: QueryDocumentSnapshot) -> WalletTransactionRecord {
         let data = doc.data()
         let amount = data.double(keys: ["amount", "transactionAmount", "value", "netAmount"]) ?? 0

@@ -5,10 +5,19 @@ struct OrganizerHomeTabView: View {
 
     var body: some View {
         TabView {
+            OrganizerDashboardView(user: user)
+                .tabItem {
+                    BrandTabLabel(
+                        title: "Home",
+                        assetName: BrandAsset.tabDashboard,
+                        fallbackSystemName: "house.fill"
+                    )
+                }
+
             OrganizerHostedEventsView(user: user)
                 .tabItem {
                     BrandTabLabel(
-                        title: "Hosted",
+                        title: "Events",
                         assetName: BrandAsset.tabHosted,
                         fallbackSystemName: "calendar.badge.clock"
                     )
@@ -23,6 +32,15 @@ struct OrganizerHomeTabView: View {
                     )
                 }
 
+            OrganizerSummaryView(user: user)
+                .tabItem {
+                    BrandTabLabel(
+                        title: "Summary",
+                        assetName: BrandAsset.tabControls,
+                        fallbackSystemName: "chart.bar"
+                    )
+                }
+
             OrganizerWalletView(user: user)
                 .tabItem {
                     BrandTabLabel(
@@ -31,33 +49,6 @@ struct OrganizerHomeTabView: View {
                         fallbackSystemName: "wallet.pass"
                     )
                 }
-
-            CommunityHubView(user: user)
-                .tabItem {
-                    BrandTabLabel(
-                        title: "Community",
-                        assetName: BrandAsset.tabCommunity,
-                        fallbackSystemName: "person.3.sequence"
-                    )
-                }
-
-            AdvancedToolsHomeView(user: user)
-                .tabItem {
-                    BrandTabLabel(
-                        title: "Tools",
-                        assetName: BrandAsset.tabTools,
-                        fallbackSystemName: "sparkles"
-                    )
-                }
-
-            ProfileHomeView(user: user)
-            .tabItem {
-                BrandTabLabel(
-                    title: "Profile",
-                    assetName: BrandAsset.tabProfile,
-                    fallbackSystemName: "person"
-                )
-            }
         }
     }
 }

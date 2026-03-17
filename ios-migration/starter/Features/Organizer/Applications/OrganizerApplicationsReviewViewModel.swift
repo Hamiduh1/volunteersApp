@@ -15,6 +15,7 @@ enum OrganizerApplicationFilter: String, CaseIterable, Identifiable {
 final class OrganizerApplicationsReviewViewModel: ObservableObject {
     @Published private(set) var items: [OrganizerManagedApplicationItem] = []
     @Published var selectedFilter: OrganizerApplicationFilter = .all
+    @Published var selectedEventIdFilter: String = ""
     @Published var isLoading = false
     @Published private(set) var updatingIds: Set<String> = []
     @Published var statusMessage: String?
@@ -23,16 +24,32 @@ final class OrganizerApplicationsReviewViewModel: ObservableObject {
     private let repository = OrganizerRepository()
 
     var filteredItems: [OrganizerManagedApplicationItem] {
+        let byEvent: [OrganizerManagedApplicationItem]
+        if selectedEventIdFilter.isEmpty {
+            byEvent = items
+        } else {
+            byEvent = items.filter { $0.eventId == selectedEventIdFilter }
+        }
+
         switch selectedFilter {
         case .all:
-            return items
+            return byEvent
         case .pending:
-            return items.filter { $0.status.isPendingLike }
+            return byEvent.filter { $0.status.isPendingLike }
         case .approved:
-            return items.filter { $0.status.isApprovedLike }
+            return byEvent.filter { $0.status.isApprovedLike }
         case .rejected:
-            return items.filter { $0.status.isRejectedLike }
+            return byEvent.filter { $0.status.isRejectedLike }
         }
+    }
+
+    var eventFilterOptions: [(id: String, title: String)] {
+        let grouped = Dictionary(grouping: items, by: { $0.eventId })
+        return grouped.map { eventId, applications in
+            let title = applications.first?.eventTitle ?? "Event"
+            return (id: eventId, title: title)
+        }
+        .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
     func refresh(uid: String) async {

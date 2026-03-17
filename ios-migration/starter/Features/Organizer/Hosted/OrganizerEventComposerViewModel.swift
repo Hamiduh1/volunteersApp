@@ -8,6 +8,8 @@ final class OrganizerEventComposerViewModel: ObservableObject {
     @Published var category = "Community"
     @Published var locationName = ""
     @Published var locationAddress = ""
+    @Published var requirements = ""
+    @Published var contactInfo = ""
     @Published var eventDate = Date().addingTimeInterval(3600)
     @Published var volunteerLimitText = "20"
     @Published var paymentText = "0"
@@ -28,6 +30,8 @@ final class OrganizerEventComposerViewModel: ObservableObject {
         self.category = existingEvent?.category ?? "Community"
         self.locationName = existingEvent?.locationName ?? ""
         self.locationAddress = existingEvent?.locationAddress ?? ""
+        self.requirements = existingEvent?.requirements ?? ""
+        self.contactInfo = existingEvent?.contactInfo ?? ""
         self.eventDate = existingEvent?.eventDateTime?.dateValue() ?? Date().addingTimeInterval(3600)
         if let limit = existingEvent?.volunteerLimit, limit > 0 {
             self.volunteerLimitText = String(limit)
@@ -70,7 +74,9 @@ final class OrganizerEventComposerViewModel: ObservableObject {
                     locationAddress: locationAddress,
                     eventDate: eventDate,
                     volunteerLimit: volunteerLimit,
-                    payment: payment
+                    payment: payment,
+                    requirements: requirements,
+                    contactInfo: contactInfo
                 )
                 statusMessage = "Event updated."
             } else {
@@ -83,7 +89,9 @@ final class OrganizerEventComposerViewModel: ObservableObject {
                     locationAddress: locationAddress,
                     eventDate: eventDate,
                     volunteerLimit: volunteerLimit,
-                    payment: payment
+                    payment: payment,
+                    requirements: requirements,
+                    contactInfo: contactInfo
                 )
                 statusMessage = "Event created."
             }

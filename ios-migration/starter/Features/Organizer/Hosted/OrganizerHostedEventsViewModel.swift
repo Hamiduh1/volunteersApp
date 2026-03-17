@@ -24,7 +24,7 @@ final class OrganizerHostedEventsViewModel: ObservableObject {
     func deleteEvent(eventId: String, uid: String) async {
         errorMessage = nil
         do {
-            try await repository.deleteHostedEvent(eventId: eventId)
+            try await repository.deleteHostedEvent(eventId: eventId, uid: uid)
             await refresh(uid: uid)
         } catch {
             errorMessage = AppErrorMapper.message(from: error)

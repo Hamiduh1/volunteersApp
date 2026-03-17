@@ -2,7 +2,13 @@ import SwiftUI
 
 struct OrganizerApplicationsReviewView: View {
     let user: AppSessionUser
+    let preselectedEventId: String?
     @StateObject private var viewModel = OrganizerApplicationsReviewViewModel()
+
+    init(user: AppSessionUser, preselectedEventId: String? = nil) {
+        self.user = user
+        self.preselectedEventId = preselectedEventId
+    }
 
     var body: some View {
         NavigationStack {
@@ -22,6 +28,17 @@ struct OrganizerApplicationsReviewView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding([.horizontal, .top])
+
+                if !viewModel.eventFilterOptions.isEmpty {
+                    Picker("Event", selection: $viewModel.selectedEventIdFilter) {
+                        Text("All Events").tag("")
+                        ForEach(viewModel.eventFilterOptions, id: \.id) { option in
+                            Text(option.title).tag(option.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .padding(.horizontal)
+                }
 
                 if viewModel.isLoading {
                     Spacer()
@@ -69,7 +86,12 @@ struct OrganizerApplicationsReviewView: View {
                 }
             }
             .navigationTitle("Review Applications")
-            .task { await viewModel.refresh(uid: user.uid) }
+            .task {
+                await viewModel.refresh(uid: user.uid)
+                if let preselectedEventId, !preselectedEventId.isEmpty {
+                    viewModel.selectedEventIdFilter = preselectedEventId
+                }
+            }
             .refreshable { await viewModel.refresh(uid: user.uid) }
             .alert("Error", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },

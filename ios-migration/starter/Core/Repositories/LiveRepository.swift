@@ -75,12 +75,81 @@ final class LiveRepository {
         }
     }
 
-    private func parseLiveSession(_ doc: QueryDocumentSnapshot) -> LiveSessionRecord? {
-        if let decoded = try? doc.data(as: LiveSessionRecord.self) {
-            return decoded
+    func startLiveSession(hostUid: String, hostName: String, title: String) async throws -> LiveSessionRecord {
+        let cleanHostUid = hostUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanHostUid.isEmpty else { throw LiveRepositoryError.missingUid }
+
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalTitle = cleanTitle.isEmpty ? "Live Session" : cleanTitle
+        let channel = "live-\(cleanHostUid)-\(Int(Date().timeIntervalSince1970))"
+
+        let ref = db.collection(FirestoreCollection.liveSessions.rawValue).document()
+        try await ref.setData([
+            "agoraChannelName": channel,
+            "channelName": channel,
+            "hostId": cleanHostUid,
+            "hostUid": cleanHostUid,
+            "hostName": hostName,
+            "title": finalTitle,
+            "status": "LIVE",
+            "createdAt": FieldValue.serverTimestamp(),
+            "startTime": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+
+        let created = try await ref.getDocument()
+        if let data = created.data(),
+           let parsed = parseLiveSessionSnapshot(documentId: ref.documentID, data: data) {
+            return parsed
+        }
+        return LiveSessionRecord(
+            id: ref.documentID,
+            agoraChannelName: channel,
+            hostId: cleanHostUid,
+            hostName: hostName,
+            title: finalTitle,
+            status: "LIVE",
+            createdAt: Timestamp(date: Date())
+        )
+    }
+
+    func endLiveSession(sessionId: String, hostUid: String) async throws {
+        let cleanSessionId = sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanSessionId.isEmpty else { return }
+
+        let ref = db.collection(FirestoreCollection.liveSessions.rawValue).document(cleanSessionId)
+        let snap = try await ref.getDocument()
+        let hostId = (snap.data() ?? [:]).firstNonEmptyString(keys: ["hostId", "hostUid"])
+        let cleanHostUid = hostUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let hostId, !hostId.isEmpty, hostId != cleanHostUid {
+            throw LiveRepositoryError.functionsFailure("Only the host can end this live session.")
         }
 
+        try await ref.setData([
+            "status": "ENDED",
+            "endedAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+    }
+
+    private func parseLiveSession(_ doc: QueryDocumentSnapshot) -> LiveSessionRecord? {
         let data = doc.data()
+        return parseLiveSessionSnapshot(documentId: doc.documentID, data: data)
+    }
+
+    private func parseLiveSessionSnapshot(documentId: String, data: [String: Any]) -> LiveSessionRecord? {
+        if let decoded = try? Firestore.Decoder().decode(LiveSessionRecord.self, from: data) {
+            return LiveSessionRecord(
+                id: decoded.id ?? documentId,
+                agoraChannelName: decoded.agoraChannelName,
+                hostId: decoded.hostId,
+                hostName: decoded.hostName,
+                title: decoded.title,
+                status: decoded.status,
+                createdAt: decoded.createdAt
+            )
+        }
+
         let channel = data.firstNonEmptyString(keys: ["agoraChannelName", "channelName", "agoraChannel", "streamChannel", "channel"])
         let hostName = data.firstNonEmptyString(keys: ["hostName", "hostDisplayName", "hostUsername", "hostEmail"])
         let hostId = data.firstNonEmptyString(keys: ["hostId", "hostUid", "organizerId", "userId"])
@@ -97,7 +166,7 @@ final class LiveRepository {
         let createdAtTimestamp = createdAtDate.map { Timestamp(date: $0) }
 
         return LiveSessionRecord(
-            id: doc.documentID,
+            id: documentId,
             agoraChannelName: channel,
             hostId: hostId,
             hostName: hostName,

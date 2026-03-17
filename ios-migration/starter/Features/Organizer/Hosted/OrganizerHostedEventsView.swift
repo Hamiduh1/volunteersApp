@@ -16,12 +16,42 @@ struct OrganizerHostedEventsView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     List(viewModel.events) { event in
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 8) {
                             Text(event.title ?? "Untitled Event")
                                 .font(.headline)
                             Text(event.locationName ?? event.locationAddress ?? "Location unavailable")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+
+                            if let date = event.eventDateTime?.dateValue() {
+                                Text(date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack {
+                                Text("Limit: \(event.volunteerLimit ?? 0)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("Applied: \(event.participantsCount ?? 0)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack(spacing: 8) {
+                                NavigationLink {
+                                    OrganizerApplicationsReviewView(user: user, preselectedEventId: event.id)
+                                } label: {
+                                    Text("Applicants")
+                                }
+                                .buttonStyle(.borderedProminent)
+
+                                Button("Edit") {
+                                    editingEvent = event
+                                }
+                                .buttonStyle(.bordered)
+                            }
                         }
                         .padding(.vertical, 4)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -31,16 +61,6 @@ struct OrganizerHostedEventsView: View {
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
-                            }
-                        }
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            if event.id != nil {
-                                Button {
-                                    editingEvent = event
-                                } label: {
-                                    Label("Edit", systemImage: "pencil")
-                                }
-                                .tint(.blue)
                             }
                         }
                     }

@@ -21,11 +21,40 @@ struct OrganizerWalletView: View {
                         .foregroundStyle(.secondary)
                     Text("\(viewModel.summary.currency) \(String(format: "%.2f", viewModel.summary.balance))")
                         .font(.title2.bold())
+                    if viewModel.trackedEventIncome > 0 {
+                        Text("Tracked Event Income: \(viewModel.summary.currency) \(String(format: "%.2f", viewModel.trackedEventIncome))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let note = viewModel.incomeSourceNote, !note.isEmpty {
+                        Text(note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
                 .background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal)
+
+                HStack(spacing: 10) {
+                    NavigationLink {
+                        WalletTransactView(user: user)
+                    } label: {
+                        Text("Withdraw / Transact")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    NavigationLink {
+                        WalletTransactionHistoryView(user: user)
+                    } label: {
+                        Text("Full History")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
                 .padding(.horizontal)
 
                 if viewModel.isLoading {

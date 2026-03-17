@@ -190,6 +190,37 @@ struct WalletTransactionRecord: Identifiable {
     let note: String?
 }
 
+struct OrganizerDashboardSnapshot {
+    let organizerName: String
+    let canGoLive: Bool
+    let eventCount: Int
+    let totalVolunteers: Int
+    let totalEarnings: Double
+}
+
+struct OrganizerSummaryEventItem: Identifiable {
+    let id: String
+    let eventId: String
+    let title: String
+    let date: Date?
+    let volunteerLimit: Int
+    let appliedCount: Int
+    let pendingCount: Int
+    let approvedCount: Int
+    let rejectedCount: Int
+    let totalEarnings: Double
+}
+
+struct OrganizerProfileSetupRecord {
+    let uid: String
+    let name: String
+    let email: String
+    let organizationName: String
+    let bio: String
+    let location: String
+    let profileImageUrl: String?
+}
+
 struct ChatConversationRecord: Codable, Identifiable {
     @DocumentID var id: String?
     var participants: [String]?

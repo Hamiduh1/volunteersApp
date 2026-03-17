@@ -19,8 +19,10 @@ final class LiveSessionsViewModel: ObservableObject {
     @Published private(set) var sessions: [LiveSessionRecord] = []
     @Published var query = ""
     @Published var statusFilter: LiveSessionStatusFilter = .all
+    @Published var hostSessionTitle = ""
     @Published var isLoading = false
     @Published var isRequestingToken = false
+    @Published var isHostOperationInProgress = false
     @Published private(set) var requestingSessionKey: String?
     @Published var statusMessage: String?
     @Published var tokenStatusMessage: String?
@@ -53,7 +55,23 @@ final class LiveSessionsViewModel: ObservableObject {
         sessions.filter { matchesStatus($0.status, filter: .live) }.count
     }
 
-    func refresh() async {
+    func canHostLive(user: AppSessionUser) -> Bool {
+        switch user.role {
+        case .organizer, .owner, .admin:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func activeHostedSession(for uid: String) -> LiveSessionRecord? {
+        sessions.first { session in
+            let hostId = (session.hostId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return hostId == uid && matchesStatus(session.status, filter: .live)
+        }
+    }
+
+    func refresh(user: AppSessionUser? = nil) async {
         isLoading = true
         errorMessage = nil
         statusMessage = nil
@@ -64,6 +82,58 @@ final class LiveSessionsViewModel: ObservableObject {
             statusMessage = sessions.isEmpty
                 ? "No live sessions found."
                 : "Loaded \(sessions.count) sessions (\(liveCount) live)."
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
+    func startLiveSession(user: AppSessionUser) async {
+        guard canHostLive(user: user) else {
+            errorMessage = "Only organizers/admin can start live sessions."
+            return
+        }
+        guard activeHostedSession(for: user.uid) == nil else {
+            errorMessage = "You already have a live session running."
+            return
+        }
+
+        isHostOperationInProgress = true
+        errorMessage = nil
+        defer { isHostOperationInProgress = false }
+
+        do {
+            let displayName = user.email ?? "Organizer"
+            let created = try await repository.startLiveSession(
+                hostUid: user.uid,
+                hostName: displayName,
+                title: hostSessionTitle
+            )
+            hostSessionTitle = ""
+            statusMessage = "Live session started: \(created.title ?? "Untitled Session")."
+            await refresh(user: user)
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
+    func endLiveSession(session: LiveSessionRecord, user: AppSessionUser) async {
+        guard canHostLive(user: user) else {
+            errorMessage = "Only organizers/admin can end live sessions."
+            return
+        }
+        guard let sessionId = session.id, !sessionId.isEmpty else {
+            errorMessage = "Session id is missing."
+            return
+        }
+
+        isHostOperationInProgress = true
+        errorMessage = nil
+        defer { isHostOperationInProgress = false }
+
+        do {
+            try await repository.endLiveSession(sessionId: sessionId, hostUid: user.uid)
+            statusMessage = "Live session ended."
+            await refresh(user: user)
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
         }

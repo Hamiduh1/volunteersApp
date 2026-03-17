@@ -8,15 +8,37 @@ final class EventsRepository {
 
     func fetchEvents(limit: Int = 50) async throws -> [EventRecord] {
         let snapshot = try await db.collection(FirestoreCollection.events.rawValue)
-            .limit(to: limit)
+            .limit(to: max(limit * 3, 150))
             .getDocuments()
-        return snapshot.documents.compactMap { doc in
-            if (doc.data()["isDeleted"] as? Bool) == true { return nil }
-            if let status = (doc.data()["status"] as? String)?.uppercased(), status == "CANCELLED" {
+
+        let now = Date().addingTimeInterval(-60 * 60 * 2)
+        let allowedStatuses: Set<String> = ["OPEN", "UPCOMING", "ACTIVE", "PUBLISHED"]
+        let filtered = snapshot.documents.compactMap { doc -> EventRecord? in
+            let data = doc.data()
+            if (data["isDeleted"] as? Bool) == true { return nil }
+            if let isActive = data["isActive"] as? Bool, !isActive { return nil }
+            if let closeEntries = data["closeEntries"] as? Bool, closeEntries { return nil }
+            let status = (data["status"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+            if status == "CANCELLED" || status == "CLOSED" || status == "ARCHIVED" {
                 return nil
             }
-            return try? doc.data(as: EventRecord.self)
+            if !status.isEmpty && !allowedStatuses.contains(status) {
+                return nil
+            }
+            guard let event = try? doc.data(as: EventRecord.self) else { return nil }
+            if let eventDate = event.eventDateTime?.dateValue(), eventDate < now {
+                return nil
+            }
+            return event
         }
+
+        return filtered.sorted {
+            let l = $0.eventDateTime?.dateValue() ?? .distantFuture
+            let r = $1.eventDateTime?.dateValue() ?? .distantFuture
+            return l < r
+        }
+        .prefix(limit)
+        .map { $0 }
     }
 
     func hasApplied(eventId: String, uid: String) async throws -> Bool {
@@ -50,6 +72,7 @@ final class EventsRepository {
         let payload: [String: Any] = [
             "applicationId": user.uid,
             "eventId": normalizedEventId,
+            "eventTitle": (eventData["title"] as? String) ?? "",
             "userId": user.uid,
             "volunteerUid": user.uid,
             "volunteerId": user.uid,
@@ -66,6 +89,11 @@ final class EventsRepository {
         try await eventRef
             .collection(FirestoreSubcollection.applications.rawValue)
             .document(user.uid)
+            .setData(payload, merge: true)
+
+        let rootId = "\(normalizedEventId)_\(user.uid)"
+        try? await db.collection(FirestoreCollection.applications.rawValue)
+            .document(rootId)
             .setData(payload, merge: true)
     }
 
