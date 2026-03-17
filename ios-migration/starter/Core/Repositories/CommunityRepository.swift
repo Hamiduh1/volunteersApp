@@ -35,6 +35,120 @@ final class CommunityRepository {
         }
     }
 
+    func updateMindLoomPost(authorUid: String, postId: String, newText: String) async throws {
+        let cleanAuthorUid = authorUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPostId = postId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanText = newText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanAuthorUid.isEmpty, !cleanPostId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9020,
+                userInfo: [NSLocalizedDescriptionKey: "Post reference is missing."]
+            )
+        }
+        guard !cleanText.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9021,
+                userInfo: [NSLocalizedDescriptionKey: "Post text cannot be empty."]
+            )
+        }
+
+        try await db.collection(FirestoreCollection.users.rawValue)
+            .document(cleanAuthorUid)
+            .collection(FirestoreSubcollection.jokes.rawValue)
+            .document(cleanPostId)
+            .updateData(["text": cleanText])
+    }
+
+    func deleteMindLoomPost(authorUid: String, postId: String) async throws {
+        let cleanAuthorUid = authorUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPostId = postId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanAuthorUid.isEmpty, !cleanPostId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9022,
+                userInfo: [NSLocalizedDescriptionKey: "Post reference is missing."]
+            )
+        }
+
+        try await db.collection(FirestoreCollection.users.rawValue)
+            .document(cleanAuthorUid)
+            .collection(FirestoreSubcollection.jokes.rawValue)
+            .document(cleanPostId)
+            .delete()
+    }
+
+    func fetchMindLoomComments(post: MindLoomPostRecord, limit: Int = 250) async throws -> [MindLoomCommentRecord] {
+        let authorId = (post.authorId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let postId = (post.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !authorId.isEmpty, !postId.isEmpty else { return [] }
+
+        let snapshot = try await db.collection(FirestoreCollection.users.rawValue)
+            .document(authorId)
+            .collection(FirestoreSubcollection.jokes.rawValue)
+            .document(postId)
+            .collection(FirestoreSubcollection.comments.rawValue)
+            .order(by: "timestamp", descending: false)
+            .limit(to: limit)
+            .getDocuments()
+
+        return snapshot.documents.compactMap { doc in
+            if let decoded = try? doc.data(as: MindLoomCommentRecord.self) {
+                return decoded
+            }
+            let data = doc.data()
+            return MindLoomCommentRecord(
+                id: doc.documentID,
+                authorId: data["authorId"] as? String,
+                authorName: data["authorName"] as? String,
+                authorProfileUrl: data["authorProfileUrl"] as? String,
+                text: data["text"] as? String,
+                isOwnerResponse: data["isOwnerResponse"] as? Bool,
+                timestamp: data["timestamp"] as? Timestamp
+            )
+        }
+    }
+
+    func postMindLoomComment(user: AppSessionUser, post: MindLoomPostRecord, text: String) async throws {
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanText.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9023,
+                userInfo: [NSLocalizedDescriptionKey: "Comment text cannot be empty."]
+            )
+        }
+
+        let authorId = (post.authorId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let postId = (post.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !authorId.isEmpty, !postId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9024,
+                userInfo: [NSLocalizedDescriptionKey: "Post reference is missing."]
+            )
+        }
+
+        let (displayName, profileUrl) = try await fetchUserIdentity(user: user)
+        let jokeRef = db.collection(FirestoreCollection.users.rawValue)
+            .document(authorId)
+            .collection(FirestoreSubcollection.jokes.rawValue)
+            .document(postId)
+        let commentRef = jokeRef.collection(FirestoreSubcollection.comments.rawValue).document()
+
+        let batch = db.batch()
+        batch.setData([
+            "authorId": user.uid,
+            "authorName": displayName,
+            "authorProfileUrl": profileUrl as Any,
+            "text": cleanText,
+            "timestamp": FieldValue.serverTimestamp()
+        ], forDocument: commentRef, merge: true)
+        batch.updateData(["commentsCount": FieldValue.increment(Int64(1))], forDocument: jokeRef)
+        try await batch.commit()
+    }
+
     func createMindLoomPost(
         user: AppSessionUser,
         text: String,

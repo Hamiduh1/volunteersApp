@@ -3,6 +3,7 @@ import SwiftUI
 struct MindLoomProfileView: View {
     let authorId: String
     let currentUserId: String
+    let currentUser: AppSessionUser? = nil
     @StateObject private var viewModel = MindLoomProfileViewModel()
 
     private var isSelf: Bool {
@@ -36,15 +37,30 @@ struct MindLoomProfileView: View {
                         stat("Likes", summary.likesCount)
                     }
                     if !isSelf {
-                        Button(viewModel.isFollowing ? "Unfollow" : "Follow") {
-                            Task { await viewModel.toggleFollow(authorId: authorId, currentUserId: currentUserId) }
+                        HStack(spacing: 8) {
+                            Button(viewModel.isFollowing ? "Unfollow" : "Follow") {
+                                Task { await viewModel.toggleFollow(authorId: authorId, currentUserId: currentUserId) }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(viewModel.isFollowUpdating)
+
+                            if let currentUser {
+                                Button("Message") {
+                                    Task { await viewModel.sendChatInvitation(currentUser: currentUser, authorId: authorId) }
+                                }
+                                .buttonStyle(.bordered)
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.isFollowUpdating)
-                        if viewModel.isFollowUpdating {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
+                    }
+
+                    ShareLink(item: shareProfileText(summary: summary)) {
+                        Label("Share Profile", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.bordered)
+
+                    if viewModel.isFollowUpdating {
+                        ProgressView()
+                            .controlSize(.small)
                     }
                 }
             }
@@ -83,6 +99,10 @@ struct MindLoomProfileView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+    }
+
+    private func shareProfileText(summary: MindLoomProfileSummary) -> String {
+        "Check out \(summary.authorName) on MindLoom."
     }
 
     @ViewBuilder

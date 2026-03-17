@@ -48,5 +48,26 @@ final class MindLoomProfileViewModel: ObservableObject {
             errorMessage = AppErrorMapper.message(from: error)
         }
     }
+
+    func sendChatInvitation(currentUser: AppSessionUser, authorId: String) async {
+        errorMessage = nil
+        statusMessage = nil
+        let cleanAuthorId = authorId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanAuthorId.isEmpty else {
+            errorMessage = "User info missing."
+            return
+        }
+        do {
+            let message = try await repository.sendSponsoredChatInvitation(
+                sender: currentUser,
+                recipientId: cleanAuthorId,
+                contextLabel: "MindLoom",
+                duplicateMessage: "Invitation already sent."
+            )
+            statusMessage = message
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
 }
 

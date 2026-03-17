@@ -666,6 +666,16 @@ struct MindLoomPostRecord: Codable, Identifiable {
     var timestamp: Timestamp?
 }
 
+struct MindLoomCommentRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var authorId: String?
+    var authorName: String?
+    var authorProfileUrl: String?
+    var text: String?
+    var isOwnerResponse: Bool?
+    var timestamp: Timestamp?
+}
+
 struct MindLoomProfileSummary {
     let authorId: String
     let authorName: String

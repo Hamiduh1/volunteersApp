@@ -13,6 +13,10 @@ struct MindLoomFeedView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = MindLoomFeedViewModel()
     @State private var showComposer = false
+    @State private var activeCommentsPost: MindLoomPostRecord?
+    @State private var activeEditPost: MindLoomPostRecord?
+    @State private var editPostText = ""
+    @State private var pendingDeletePost: MindLoomPostRecord?
 
     private var creatorItems: [MindLoomCreatorItem] {
         var seen = Set<String>()
@@ -49,7 +53,7 @@ struct MindLoomFeedView: View {
                         HStack(spacing: 12) {
                             ForEach(creatorItems) { creator in
                                 NavigationLink {
-                                    MindLoomProfileView(authorId: creator.id, currentUserId: user.uid)
+                                    MindLoomProfileView(authorId: creator.id, currentUserId: user.uid, currentUser: user)
                                 } label: {
                                     VStack(spacing: 6) {
                                         AsyncImage(url: URL(string: creator.profileUrl ?? "")) { phase in
@@ -152,6 +156,54 @@ struct MindLoomFeedView: View {
                 }
             }
         }
+        .sheet(item: $activeCommentsPost) { post in
+            NavigationStack {
+                MindLoomCommentsSheet(
+                    post: post,
+                    comments: viewModel.commentsByPostId[post.id ?? ""] ?? [],
+                    isLoading: viewModel.commentingPostIds.contains(post.id ?? ""),
+                    onReload: {
+                        Task { await viewModel.loadComments(for: post) }
+                    },
+                    onPostComment: { text in
+                        Task { await viewModel.postComment(user: user, post: post, text: text) }
+                    }
+                )
+            }
+        }
+        .sheet(item: $activeEditPost) { post in
+            NavigationStack {
+                MindLoomEditPostSheet(
+                    text: $editPostText,
+                    isSaving: viewModel.updatingPostIds.contains(post.id ?? ""),
+                    onCancel: { activeEditPost = nil },
+                    onSave: {
+                        let postId = post.id ?? ""
+                        guard !postId.isEmpty else { return }
+                        Task {
+                            await viewModel.updatePost(user: user, postId: postId, text: editPostText)
+                            activeEditPost = nil
+                        }
+                    }
+                )
+            }
+        }
+        .confirmationDialog("Delete Post", isPresented: Binding(
+            get: { pendingDeletePost != nil },
+            set: { if !$0 { pendingDeletePost = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                guard let postId = pendingDeletePost?.id, !postId.isEmpty else {
+                    pendingDeletePost = nil
+                    return
+                }
+                Task {
+                    await viewModel.deletePost(user: user, postId: postId)
+                    pendingDeletePost = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingDeletePost = nil }
+        }
         .task { await viewModel.refresh(for: user) }
         .refreshable { await viewModel.refresh(for: user) }
         .alert("Error", isPresented: Binding(
@@ -166,10 +218,16 @@ struct MindLoomFeedView: View {
 
     @ViewBuilder
     private func postCard(_ post: MindLoomPostRecord) -> some View {
+        let postId = post.id ?? ""
+        let isOwner = (post.authorId ?? "") == user.uid
+        let isLiked = (post.likes ?? []).contains(user.uid)
+        let likeCount = (post.likes ?? []).count
+        let commentCount = post.commentsCount ?? 0
+
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 NavigationLink {
-                    MindLoomProfileView(authorId: post.authorId ?? "", currentUserId: user.uid)
+                    MindLoomProfileView(authorId: post.authorId ?? "", currentUserId: user.uid, currentUser: user)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(post.authorName ?? "User")
@@ -182,6 +240,21 @@ struct MindLoomFeedView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
+
+                if isOwner {
+                    Menu {
+                        Button("Edit") {
+                            editPostText = post.text ?? ""
+                            activeEditPost = post
+                        }
+                        Button("Delete", role: .destructive) {
+                            pendingDeletePost = post
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
             }
 
             if let text = post.text, !text.isEmpty {
@@ -193,23 +266,45 @@ struct MindLoomFeedView: View {
             postMediaView(post)
 
             HStack {
-                let likesCount = (post.likes ?? []).count
-                Text("\(likesCount) likes")
+                Text("\(likeCount) likes")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.72))
                 Spacer()
-                let postId = post.id ?? ""
-                let isLiked = (post.likes ?? []).contains(user.uid)
+                Text("\(commentCount) comments")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+
+            HStack(spacing: 8) {
                 Button(isLiked ? "Liked" : "Like") {
                     Task { await viewModel.toggleLike(post: post, uid: user.uid) }
                 }
                 .buttonStyle(.bordered)
                 .tint(.white.opacity(0.9))
                 .disabled(postId.isEmpty || viewModel.likingPostIds.contains(postId))
-                if viewModel.likingPostIds.contains(postId) {
-                    ProgressView()
-                        .controlSize(.small)
+
+                Button("Comment") {
+                    activeCommentsPost = post
+                    Task { await viewModel.loadComments(for: post) }
                 }
+                .buttonStyle(.bordered)
+
+                ShareLink(item: shareText(for: post)) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+
+                if !isOwner {
+                    Button("Message") {
+                        Task { await viewModel.sendChatInvitation(user: user, targetUserId: post.authorId ?? "") }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            if viewModel.likingPostIds.contains(postId) || viewModel.deletingPostIds.contains(postId) {
+                ProgressView()
+                    .controlSize(.small)
             }
         }
         .padding(12)
@@ -251,6 +346,107 @@ struct MindLoomFeedView: View {
                         .foregroundStyle(.white)
                 }
                 .font(.subheadline)
+            }
+        }
+    }
+
+    private func shareText(for post: MindLoomPostRecord) -> String {
+        let author = (post.authorName ?? "User").trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = (post.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            return "Check out \(author) on MindLoom."
+        }
+        return "\(author): \(text)"
+    }
+}
+
+private struct MindLoomCommentsSheet: View {
+    let post: MindLoomPostRecord
+    let comments: [MindLoomCommentRecord]
+    let isLoading: Bool
+    let onReload: () -> Void
+    let onPostComment: (String) -> Void
+    @State private var commentText = ""
+
+    var body: some View {
+        List {
+            Section("Post") {
+                if let text = post.text, !text.isEmpty {
+                    Text(text)
+                } else {
+                    Text("No post text.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Add Comment") {
+                TextField("Add a comment...", text: $commentText, axis: .vertical)
+                    .lineLimit(2...4)
+                Button("Post Comment") {
+                    let text = commentText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { return }
+                    onPostComment(text)
+                    commentText = ""
+                }
+                .disabled(commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            Section("Comments") {
+                if isLoading && comments.isEmpty {
+                    ProgressView("Loading comments...")
+                } else if comments.isEmpty {
+                    Text("No comments yet. Be the first!")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(comments) { comment in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(comment.authorName ?? "User")
+                                .font(.subheadline.weight(.semibold))
+                            Text(comment.text ?? "")
+                                .font(.body)
+                            if let ts = comment.timestamp?.dateValue() {
+                                Text(ts.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Comments")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Reload") { onReload() }
+            }
+        }
+    }
+}
+
+private struct MindLoomEditPostSheet: View {
+    @Binding var text: String
+    let isSaving: Bool
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        Form {
+            Section("Edit Post") {
+                TextField("Update text content", text: $text, axis: .vertical)
+                    .lineLimit(6...10)
+            }
+        }
+        .navigationTitle("Edit Post")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Cancel") { onCancel() }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Save") { onSave() }
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
             }
         }
     }
