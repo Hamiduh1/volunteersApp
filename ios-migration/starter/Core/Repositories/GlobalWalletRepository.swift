@@ -113,6 +113,20 @@ final class GlobalWalletRepository {
             .sorted { ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending }
     }
 
+    func deleteBeneficiary(uid: String, beneficiaryId: String) async throws {
+        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanBeneficiaryId = beneficiaryId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanUid.isEmpty, !cleanBeneficiaryId.isEmpty else {
+            throw WalletTransferError.invalidBeneficiary(reason: "Beneficiary identifier is required.")
+        }
+
+        try await db.collection(FirestoreCollection.users.rawValue)
+            .document(cleanUid)
+            .collection(FirestoreSubcollection.beneficiaries.rawValue)
+            .document(cleanBeneficiaryId)
+            .delete()
+    }
+
     func fetchPaymentMethods(uid: String, limit: Int = 60) async throws -> [PaymentMethodRecord] {
         let collection = db.collection(FirestoreCollection.users.rawValue)
             .document(uid)
@@ -633,7 +647,8 @@ final class GlobalWalletRepository {
             stripePaymentMethodId: data.string(keys: ["stripePaymentMethodId"]),
             chargeSourceId: data.string(keys: ["chargeSourceId"]),
             achDebitEnabled: data.bool(keys: ["achDebitEnabled"], fallback: false),
-            achCreditEnabled: data.bool(keys: ["achCreditEnabled"], fallback: false)
+            achCreditEnabled: data.bool(keys: ["achCreditEnabled"], fallback: false),
+            phoneOwnershipVerified: data.bool(keys: ["phoneOwnershipVerified", "isPhoneVerified"], fallback: false)
         )
     }
 

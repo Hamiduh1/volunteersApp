@@ -3,13 +3,19 @@ import SwiftUI
 struct GlobalWalletHomeView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = GlobalWalletHomeViewModel()
+    @State private var fundingDirection: WalletFundingDirection = .deposit
+    @State private var showBeneficiaryManager = false
+    @State private var beneficiaryToDelete: BeneficiaryRecord?
 
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
                 heroBalanceCard
+                globalCalculatorCard
+                fundingCard
                 quickActionCard
                 servicesCard
+                beneficiariesCard
                 recentTransactionsCard
             }
             .padding(16)
@@ -18,6 +24,26 @@ struct GlobalWalletHomeView: View {
         .navigationTitle("Wallet")
         .task { await viewModel.refresh(uid: user.uid) }
         .refreshable { await viewModel.refresh(uid: user.uid) }
+        .sheet(isPresented: $showBeneficiaryManager) {
+            beneficiaryManagerSheet
+        }
+        .alert("Delete Beneficiary?", isPresented: Binding(
+            get: { beneficiaryToDelete != nil },
+            set: { if !$0 { beneficiaryToDelete = nil } }
+        )) {
+            Button("Cancel", role: .cancel) {
+                beneficiaryToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                guard let beneficiary = beneficiaryToDelete else { return }
+                Task {
+                    await viewModel.deleteBeneficiary(beneficiary)
+                    beneficiaryToDelete = nil
+                }
+            }
+        } message: {
+            Text("This beneficiary will be removed from your wallet recipients.")
+        }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
@@ -46,6 +72,147 @@ struct GlobalWalletHomeView: View {
                     Text("Card deposits are usually quick. ACH bank deposits can take 1-3 business days.")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.86))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var globalCalculatorCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Global Calculator")
+                            .font(.headline)
+                        Text("Live FX estimate")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "globe")
+                        .foregroundStyle(.blue)
+                }
+
+                HStack(spacing: 10) {
+                    TextField("From amount", text: $viewModel.calculatorAmount)
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: viewModel.calculatorAmount) { _, value in
+                            viewModel.onCalculatorInputsChanged(amount: value)
+                        }
+
+                    Picker("From", selection: $viewModel.calculatorFromCountry) {
+                        ForEach(viewModel.supportedCountries, id: \.self) { country in
+                            Text("\(country) (\(viewModel.countryCodeLabel(country)))")
+                                .tag(country)
+                        }
+                    }
+                    .onChange(of: viewModel.calculatorFromCountry) { _, value in
+                        viewModel.onCalculatorInputsChanged(fromCountry: value)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    TextField(
+                        "To amount",
+                        text: .constant(
+                            viewModel.isCalculating || viewModel.calculatorError != nil
+                                ? ""
+                                : String(format: "%.2f", viewModel.calculatorResult)
+                        )
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(true)
+
+                    Picker("To", selection: $viewModel.calculatorToCountry) {
+                        ForEach(viewModel.supportedCountries, id: \.self) { country in
+                            Text("\(country) (\(viewModel.countryCodeLabel(country)))")
+                                .tag(country)
+                        }
+                    }
+                    .onChange(of: viewModel.calculatorToCountry) { _, value in
+                        viewModel.onCalculatorInputsChanged(toCountry: value)
+                    }
+                }
+
+                Group {
+                    if viewModel.isCalculating {
+                        ProgressView("Fetching exchange rate...")
+                            .font(.footnote)
+                    } else if let calculatorError = viewModel.calculatorError, !calculatorError.isEmpty {
+                        Text(calculatorError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    } else {
+                        let fromCode = viewModel.countryCodeLabel(viewModel.calculatorFromCountry)
+                        let toCode = viewModel.countryCodeLabel(viewModel.calculatorToCountry)
+                        Text("1.00 \(fromCode) = \(String(format: "%.3f", viewModel.calculatorRate)) \(toCode)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var fundingCard: some View {
+        let eligibleMethods = viewModel.fundingEligibleMethods(for: fundingDirection)
+
+        CardContainer {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Deposit / Withdraw")
+                    .font(.headline)
+
+                Picker("Direction", selection: $fundingDirection) {
+                    Text("Deposit").tag(WalletFundingDirection.deposit)
+                    Text("Withdraw").tag(WalletFundingDirection.withdraw)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: fundingDirection) { _, newValue in
+                    let first = viewModel.fundingEligibleMethods(for: newValue).first.map(viewModel.methodIdentifier) ?? ""
+                    if !first.isEmpty {
+                        viewModel.selectedFundingMethodId = first
+                    }
+                }
+
+                TextField("Amount", text: $viewModel.fundingAmountText)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+
+                if eligibleMethods.isEmpty {
+                    Text("No eligible payment methods found for this action.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Funding method", selection: $viewModel.selectedFundingMethodId) {
+                        ForEach(eligibleMethods, id: \.id) { method in
+                            Text(viewModel.methodLabel(method))
+                                .tag(viewModel.methodIdentifier(method))
+                        }
+                    }
+                }
+
+                Button {
+                    Task { await viewModel.submitFunding(fundingDirection) }
+                } label: {
+                    if viewModel.isSubmittingFunding {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text(fundingDirection == .deposit ? "Submit Deposit" : "Submit Withdrawal")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isSubmittingFunding || eligibleMethods.isEmpty)
+
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.green)
                 }
             }
         }
@@ -166,6 +333,65 @@ struct GlobalWalletHomeView: View {
                         icon: "wallet.pass"
                     )
                 }
+
+                if user.role == .volunteer || user.role == .user {
+                    Divider()
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Earn as an Agent")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Facilitate cash transactions and earn commissions.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Authorize") {
+                            Task { await viewModel.authorizeAgent() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isSubmittingFunding)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var beneficiariesCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Beneficiaries")
+                        .font(.headline)
+                    Spacer()
+                    Button("Manage") {
+                        showBeneficiaryManager = true
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                if viewModel.beneficiaries.isEmpty {
+                    Text("No beneficiaries saved yet.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.beneficiaries.prefix(3)) { beneficiary in
+                        let name = beneficiary.name ?? "Beneficiary"
+                        let details = [beneficiary.network, beneficiary.phone]
+                            .compactMap { $0 }
+                            .joined(separator: " - ")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(name)
+                                .font(.subheadline.weight(.semibold))
+                            if !details.isEmpty {
+                                Text(details)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
             }
         }
     }
@@ -210,14 +436,51 @@ struct GlobalWalletHomeView: View {
                         .padding(.vertical, 3)
                     }
                 }
+            }
+        }
+    }
 
-                if let status = viewModel.statusMessage, !status.isEmpty {
-                    Text(status)
-                        .font(.footnote)
+    @ViewBuilder
+    private var beneficiaryManagerSheet: some View {
+        NavigationStack {
+            List {
+                if viewModel.beneficiaries.isEmpty {
+                    Text("No beneficiaries found.")
                         .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.beneficiaries) { beneficiary in
+                        let name = beneficiary.name ?? "Beneficiary"
+                        let details = [beneficiary.network, beneficiary.phone]
+                            .compactMap { $0 }
+                            .joined(separator: " - ")
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(name)
+                                    .font(.headline)
+                                if !details.isEmpty {
+                                    Text(details)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                beneficiaryToDelete = beneficiary
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Manage Beneficiaries")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showBeneficiaryManager = false }
                 }
             }
         }
+        .presentationDetents([.large])
     }
 
     private var balanceText: String {

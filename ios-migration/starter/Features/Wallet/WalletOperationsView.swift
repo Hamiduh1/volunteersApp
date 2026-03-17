@@ -105,6 +105,12 @@ struct WalletOperationsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+
+                Button(viewModel.mobileMoneyFlow == .cashIn ? "Submit Cash In" : "Submit Cash Out") {
+                    Task { await viewModel.submitMobileMoney() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!viewModel.canSubmitMobileMoney)
             }
         }
     }

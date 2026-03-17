@@ -309,6 +309,7 @@ struct PaymentMethodRecord: Codable, Identifiable {
     var chargeSourceId: String?
     var achDebitEnabled: Bool?
     var achCreditEnabled: Bool?
+    var phoneOwnershipVerified: Bool?
 }
 
 struct PayoutSetupStatusRecord {

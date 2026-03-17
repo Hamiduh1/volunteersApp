@@ -76,7 +76,8 @@ final class PaymentsRepository {
             brand: data.string(keys: ["brand", "network", "provider"]),
             last4: data.string(keys: ["last4", "accountLast4", "maskedLast4"]),
             holderName: data.string(keys: ["holderName", "accountHolderName", "name"]),
-            status: data.string(keys: ["status"])
+            status: data.string(keys: ["status"]),
+            phoneOwnershipVerified: data.bool(keys: ["phoneOwnershipVerified", "isPhoneVerified"], fallback: false)
         )
     }
 }
