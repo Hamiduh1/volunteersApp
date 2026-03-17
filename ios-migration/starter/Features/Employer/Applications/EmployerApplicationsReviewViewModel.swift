@@ -14,6 +14,7 @@ enum EmployerApplicationFilter: String, CaseIterable, Identifiable {
 @MainActor
 final class EmployerApplicationsReviewViewModel: ObservableObject {
     @Published private(set) var items: [EmployerManagedApplicationItem] = []
+    @Published private(set) var currentJobId: String?
     @Published var selectedFilter: EmployerApplicationFilter = .all
     @Published var isLoading = false
     @Published private(set) var updatingIds: Set<String> = []
@@ -35,13 +36,14 @@ final class EmployerApplicationsReviewViewModel: ObservableObject {
         }
     }
 
-    func refresh(uid: String) async {
+    func refresh(uid: String, jobId: String? = nil) async {
         isLoading = true
         errorMessage = nil
         statusMessage = nil
+        currentJobId = jobId
         defer { isLoading = false }
         do {
-            items = try await repository.fetchManagedApplications(uid: uid)
+            items = try await repository.fetchManagedApplications(uid: uid, jobId: jobId)
             statusMessage = items.isEmpty ? "No applications found." : "Loaded \(items.count) applications."
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
@@ -68,7 +70,7 @@ final class EmployerApplicationsReviewViewModel: ObservableObject {
         do {
             try await repository.updateApplicationStatus(item: item, status: status)
             statusMessage = "Application marked as \(status.displayTitle)."
-            await refresh(uid: uid)
+            await refresh(uid: uid, jobId: currentJobId)
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
         }

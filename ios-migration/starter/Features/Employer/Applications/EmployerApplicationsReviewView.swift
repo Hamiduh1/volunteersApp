@@ -2,7 +2,15 @@ import SwiftUI
 
 struct EmployerApplicationsReviewView: View {
     let user: AppSessionUser
+    let jobId: String?
+    let jobTitle: String?
     @StateObject private var viewModel = EmployerApplicationsReviewViewModel()
+
+    init(user: AppSessionUser, jobId: String? = nil, jobTitle: String? = nil) {
+        self.user = user
+        self.jobId = jobId
+        self.jobTitle = jobTitle
+    }
 
     var body: some View {
         NavigationStack {
@@ -68,9 +76,9 @@ struct EmployerApplicationsReviewView: View {
                     }
                 }
             }
-            .navigationTitle("Review Applications")
-            .task { await viewModel.refresh(uid: user.uid) }
-            .refreshable { await viewModel.refresh(uid: user.uid) }
+            .navigationTitle(jobTitle?.isEmpty == false ? (jobTitle ?? "Applicants") : "Review Applications")
+            .task { await viewModel.refresh(uid: user.uid, jobId: jobId) }
+            .refreshable { await viewModel.refresh(uid: user.uid, jobId: jobId) }
             .alert("Error", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
                 set: { if !$0 { viewModel.errorMessage = nil } }

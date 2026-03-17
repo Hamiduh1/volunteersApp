@@ -50,7 +50,7 @@ struct EmployerHomeTabView: View {
                     )
                 }
 
-            ProfileHomeView(user: user)
+            EmployerProfileSetupView(user: user)
             .tabItem {
                 BrandTabLabel(
                     title: "Profile",

@@ -65,7 +65,12 @@ final class EmployerRepository {
 
         return docsByPath.values
             .compactMap(parseJob)
-            .sorted { ($0.title ?? "") < ($1.title ?? "") }
+            .sorted {
+                let leftDate = $0.postedDate?.dateValue() ?? .distantPast
+                let rightDate = $1.postedDate?.dateValue() ?? .distantPast
+                if leftDate != rightDate { return leftDate > rightDate }
+                return ($0.title ?? "") < ($1.title ?? "")
+            }
     }
 
     func fetchManagedApplications(uid: String) async throws -> [EmployerManagedApplicationItem] {
@@ -141,6 +146,15 @@ final class EmployerRepository {
             let r = $1.appliedAt ?? .distantPast
             return l > r
         }
+    }
+
+    func fetchManagedApplications(uid: String, jobId: String?) async throws -> [EmployerManagedApplicationItem] {
+        let all = try await fetchManagedApplications(uid: uid)
+        guard let jobId, !jobId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return all
+        }
+        let normalized = normalizeDocId(jobId, collection: FirestoreCollection.jobs.rawValue)
+        return all.filter { $0.jobId == normalized }
     }
 
     func updateApplicationStatus(item: EmployerManagedApplicationItem, status: ApplicationStatus) async throws {
@@ -240,31 +254,56 @@ final class EmployerRepository {
 
     func createJobPosting(
         uid: String,
-        title: String,
+        organizationName: String,
+        opportunityTitle: String,
+        roleTitle: String,
         description: String,
-        locationString: String,
+        location: String,
         category: String,
-        jobType: String,
-        salaryOrCompensation: String,
-        applicationDeadline: Date
+        volunteersNeeded: Int,
+        scheduledDate: Date
     ) async throws -> String {
         let employerName = try await fetchUserDisplayName(uid: uid)
         let ref = db.collection(FirestoreCollection.jobs.rawValue).document()
 
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MM/dd/yyyy"
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "hh:mm a"
+
+        let cleanOrganization = organizationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanOpportunity = opportunityTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanRole = roleTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+
         try await ref.setData([
-            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
-            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
-            "locationString": locationString.trimmingCharacters(in: .whitespacesAndNewlines),
-            "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
-            "jobType": jobType.trimmingCharacters(in: .whitespacesAndNewlines),
-            "salaryOrCompensation": salaryOrCompensation.trimmingCharacters(in: .whitespacesAndNewlines),
-            "applicationDeadline": Timestamp(date: applicationDeadline),
+            "title": cleanOpportunity,
+            "organizationName": cleanOrganization,
+            "jobTitle": cleanRole,
+            "description": cleanDescription,
+            "locationString": cleanLocation,
+            "locationName": cleanLocation,
+            "category": cleanCategory,
+            "jobType": "Volunteer",
+            "salaryOrCompensation": "",
+            "date": dateFormatter.string(from: scheduledDate),
+            "time": timeFormatter.string(from: scheduledDate),
+            "applicationDeadline": Timestamp(date: scheduledDate),
+            "eventDateTime": Timestamp(date: scheduledDate),
+            "eventTimestamp": Timestamp(date: scheduledDate),
+            "volunteersNeeded": max(volunteersNeeded, 0),
+            "totalSlots": max(volunteersNeeded, 0),
+            "slotsFilled": 0,
             "postedDate": FieldValue.serverTimestamp(),
-            "status": "OPEN",
+            "status": "open",
             "applicantsCount": 0,
             "employerUid": uid,
             "employerId": uid,
             "employerName": employerName,
+            "createdBy": uid,
+            "isActive": true,
             "createdAt": FieldValue.serverTimestamp(),
             "lastUpdatedAt": FieldValue.serverTimestamp()
         ], merge: true)
@@ -275,25 +314,48 @@ final class EmployerRepository {
     func updateJobPosting(
         jobId: String,
         uid: String,
-        title: String,
+        organizationName: String,
+        opportunityTitle: String,
+        roleTitle: String,
         description: String,
-        locationString: String,
+        location: String,
         category: String,
-        jobType: String,
-        salaryOrCompensation: String,
-        applicationDeadline: Date
+        volunteersNeeded: Int,
+        scheduledDate: Date
     ) async throws {
         let employerName = try await fetchUserDisplayName(uid: uid)
         let ref = db.collection(FirestoreCollection.jobs.rawValue).document(jobId)
 
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MM/dd/yyyy"
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "hh:mm a"
+
+        let cleanOrganization = organizationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanOpportunity = opportunityTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanRole = roleTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+
         try await ref.setData([
-            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
-            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
-            "locationString": locationString.trimmingCharacters(in: .whitespacesAndNewlines),
-            "category": category.trimmingCharacters(in: .whitespacesAndNewlines),
-            "jobType": jobType.trimmingCharacters(in: .whitespacesAndNewlines),
-            "salaryOrCompensation": salaryOrCompensation.trimmingCharacters(in: .whitespacesAndNewlines),
-            "applicationDeadline": Timestamp(date: applicationDeadline),
+            "title": cleanOpportunity,
+            "organizationName": cleanOrganization,
+            "jobTitle": cleanRole,
+            "description": cleanDescription,
+            "locationString": cleanLocation,
+            "locationName": cleanLocation,
+            "category": cleanCategory,
+            "jobType": "Volunteer",
+            "salaryOrCompensation": "",
+            "date": dateFormatter.string(from: scheduledDate),
+            "time": timeFormatter.string(from: scheduledDate),
+            "applicationDeadline": Timestamp(date: scheduledDate),
+            "eventDateTime": Timestamp(date: scheduledDate),
+            "eventTimestamp": Timestamp(date: scheduledDate),
+            "volunteersNeeded": max(volunteersNeeded, 0),
+            "totalSlots": max(volunteersNeeded, 0),
+            "isActive": true,
             "employerUid": uid,
             "employerId": uid,
             "employerName": employerName,
@@ -308,10 +370,106 @@ final class EmployerRepository {
         } catch {
             try await ref.setData([
                 "isDeleted": true,
-                "status": "CLOSED",
+                "status": "closed",
                 "lastUpdatedAt": FieldValue.serverTimestamp()
             ], merge: true)
         }
+    }
+
+    func toggleJobStatus(jobId: String, status: String) async throws {
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let mapped = normalized == "closed" ? "closed" : "open"
+        try await db.collection(FirestoreCollection.jobs.rawValue)
+            .document(jobId)
+            .setData(
+                [
+                    "status": mapped,
+                    "isActive": mapped == "open",
+                    "lastUpdatedAt": FieldValue.serverTimestamp()
+                ],
+                merge: true
+            )
+    }
+
+    func fetchEmployerProfileSetup(uid: String) async throws -> EmployerProfileSetupRecord {
+        let userDoc = try await db.collection(FirestoreCollection.users.rawValue).document(uid).getDocument()
+        let employerDoc = try? await db.collection(FirestoreCollection.employers.rawValue).document(uid).getDocument()
+
+        let userData = userDoc.data() ?? [:]
+        let employerData = employerDoc?.data() ?? [:]
+
+        return EmployerProfileSetupRecord(
+            uid: uid,
+            name: userData.firstNonEmptyString(keys: ["name", "username"]) ?? "",
+            email: userData.firstNonEmptyString(keys: ["email"]) ?? "",
+            organizationName: employerData.firstNonEmptyString(keys: ["organizationName", "companyName", "name"]) ?? "",
+            contactEmail: employerData.firstNonEmptyString(keys: ["contactEmail"]) ?? userData.firstNonEmptyString(keys: ["email"]) ?? "",
+            description: employerData.firstNonEmptyString(keys: ["description", "about"]) ?? "",
+            profileImageUrl: userData.firstNonEmptyString(keys: ["profileImageUrl", "profileUrl"])
+                ?? employerData.firstNonEmptyString(keys: ["profileUrl", "profileImageUrl"])
+        )
+    }
+
+    func saveEmployerProfileSetup(
+        uid: String,
+        name: String,
+        organizationName: String,
+        contactEmail: String,
+        description: String
+    ) async throws {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanOrganization = organizationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanContactEmail = contactEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        try await db.collection(FirestoreCollection.users.rawValue)
+            .document(uid)
+            .setData(
+                [
+                    "name": cleanName,
+                    "username": cleanName,
+                    "organizationName": cleanOrganization,
+                    "updatedAt": FieldValue.serverTimestamp()
+                ],
+                merge: true
+            )
+
+        try await db.collection(FirestoreCollection.employers.rawValue)
+            .document(uid)
+            .setData(
+                [
+                    "uid": uid,
+                    "organizationName": cleanOrganization,
+                    "contactEmail": cleanContactEmail,
+                    "description": cleanDescription,
+                    "profileCompleted": true,
+                    "updatedAt": FieldValue.serverTimestamp(),
+                    "lastUpdatedAt": FieldValue.serverTimestamp()
+                ],
+                merge: true
+            )
+    }
+
+    func saveEmployerProfileImage(uid: String, profileUrl: String) async throws {
+        let cleanUrl = profileUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        try await db.collection(FirestoreCollection.users.rawValue)
+            .document(uid)
+            .setData(
+                [
+                    "profileImageUrl": cleanUrl,
+                    "updatedAt": FieldValue.serverTimestamp()
+                ],
+                merge: true
+            )
+        try await db.collection(FirestoreCollection.employers.rawValue)
+            .document(uid)
+            .setData(
+                [
+                    "profileUrl": cleanUrl,
+                    "lastUpdatedAt": FieldValue.serverTimestamp()
+                ],
+                merge: true
+            )
     }
 
     private func fetchUserDisplayName(uid: String) async throws -> String {
@@ -378,15 +536,21 @@ final class EmployerRepository {
         return JobRecord(
             id: doc.documentID,
             title: data.firstNonEmptyString(keys: ["title", "name"]),
+            organizationName: data.firstNonEmptyString(keys: ["organizationName", "companyName"]),
+            jobTitle: data.firstNonEmptyString(keys: ["jobTitle", "roleTitle"]),
             employerUid: data.firstNonEmptyString(keys: ["employerUid"]),
             employerId: data.firstNonEmptyString(keys: ["employerId"]),
             employerName: data.firstNonEmptyString(keys: ["employerName", "companyName"]),
             description: data.firstNonEmptyString(keys: ["description", "details"]),
             responsibilities: data.firstStringArray(keys: ["responsibilities"]),
-            locationString: data.firstNonEmptyString(keys: ["locationString", "location"]),
+            locationString: data.firstNonEmptyString(keys: ["locationString", "locationName", "location"]),
+            locationName: data.firstNonEmptyString(keys: ["locationName", "locationString", "location"]),
             locationIsRemote: data.firstBool(keys: ["locationIsRemote", "isRemote"]),
             category: data.firstNonEmptyString(keys: ["category"]),
             jobType: data.firstNonEmptyString(keys: ["jobType", "type"]),
+            date: data.firstNonEmptyString(keys: ["date"]),
+            time: data.firstNonEmptyString(keys: ["time"]),
+            volunteersNeeded: data.firstInt(keys: ["volunteersNeeded", "totalSlots", "slots"]),
             postedDate: data.firstTimestamp(keys: ["postedDate", "createdAt"]),
             applicationDeadline: data.firstTimestamp(keys: ["applicationDeadline", "deadline"]),
             status: data.firstNonEmptyString(keys: ["status"]),

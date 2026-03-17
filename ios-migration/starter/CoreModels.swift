@@ -120,15 +120,21 @@ struct EventRecord: Codable, Identifiable {
 struct JobRecord: Codable, Identifiable {
     @DocumentID var id: String?
     var title: String?
+    var organizationName: String?
+    var jobTitle: String?
     var employerUid: String?
     var employerId: String?
     var employerName: String?
     var description: String?
     var responsibilities: [String]?
     var locationString: String?
+    var locationName: String?
     var locationIsRemote: Bool?
     var category: String?
     var jobType: String?
+    var date: String?
+    var time: String?
+    var volunteersNeeded: Int?
     var postedDate: Timestamp?
     var applicationDeadline: Timestamp?
     var status: String?
@@ -218,6 +224,16 @@ struct OrganizerProfileSetupRecord {
     let organizationName: String
     let bio: String
     let location: String
+    let profileImageUrl: String?
+}
+
+struct EmployerProfileSetupRecord {
+    let uid: String
+    let name: String
+    let email: String
+    let organizationName: String
+    let contactEmail: String
+    let description: String
     let profileImageUrl: String?
 }
 

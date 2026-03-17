@@ -31,15 +31,32 @@ struct EmployerJobComposerView: View {
                     }
                 }
 
-                Section("Job Details") {
-                    TextField("Title", text: $viewModel.title)
-                    TextField("Description", text: $viewModel.description, axis: .vertical)
-                        .lineLimit(3...6)
-                    TextField("Location", text: $viewModel.locationString)
-                    TextField("Category", text: $viewModel.category)
-                    TextField("Job Type", text: $viewModel.jobType)
-                    TextField("Salary / Compensation", text: $viewModel.salaryOrCompensation)
-                    DatePicker("Application Deadline", selection: $viewModel.applicationDeadline, displayedComponents: [.date, .hourAndMinute])
+                Section("Opportunity Details") {
+                    TextField("Organization Name", text: $viewModel.organizationName)
+                    TextField("Opportunity Title", text: $viewModel.opportunityTitle)
+                    TextField("Specific Role/Job Title", text: $viewModel.roleTitle)
+                }
+
+                Section("Schedule") {
+                    DatePicker("Date & Time", selection: $viewModel.scheduledDate, displayedComponents: [.date, .hourAndMinute])
+                }
+
+                Section("Location & Category") {
+                    TextField("Location", text: $viewModel.location)
+                    Picker("Category", selection: $viewModel.category) {
+                        ForEach(viewModel.categories, id: \.self) { category in
+                            Text(category).tag(category)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    TextField("Volunteers Needed", text: $viewModel.volunteersNeeded)
+                        .keyboardType(.numberPad)
+                }
+
+                Section("Description") {
+                    TextField("Describe responsibilities and requirements", text: $viewModel.description, axis: .vertical)
+                        .lineLimit(4...8)
                 }
 
                 Section {
@@ -62,7 +79,7 @@ struct EmployerJobComposerView: View {
                     .disabled(viewModel.isSubmitting)
                 }
             }
-            .navigationTitle(viewModel.isEditMode ? "Edit Job" : "New Job")
+            .navigationTitle(viewModel.isEditMode ? "Edit Job/Opportunity" : "Post New Job/Opportunity")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

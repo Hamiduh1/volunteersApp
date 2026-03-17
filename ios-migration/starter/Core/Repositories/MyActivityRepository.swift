@@ -132,7 +132,7 @@ final class MyActivityRepository {
         })
         let jobsById = try await fetchJobsById(Array(jobIds))
 
-        return docsByKey.values.compactMap { doc in
+        let parsed: [VolunteerActivityItem] = docsByKey.values.compactMap { doc in
             let data = doc.data()
             let rawJobId = data.firstNonEmptyString(keys: ["jobId"]) ?? extractJobId(from: doc.reference.path)
             let jobId = normalizeDocumentId(rawJobId, collection: FirestoreCollection.jobs.rawValue)
@@ -147,7 +147,7 @@ final class MyActivityRepository {
                 ?? "Job application"
 
             return VolunteerActivityItem(
-                id: "job-\(doc.documentID)-\(jobId)",
+                id: "job-\(jobId)",
                 type: .job,
                 referenceId: jobId,
                 title: title,
@@ -156,6 +156,20 @@ final class MyActivityRepository {
                 appliedAt: appliedDate
             )
         }
+
+        var bestByJobId: [String: VolunteerActivityItem] = [:]
+        for item in parsed {
+            if let existing = bestByJobId[item.referenceId] {
+                let existingDate = existing.appliedAt ?? .distantPast
+                let candidateDate = item.appliedAt ?? .distantPast
+                if candidateDate > existingDate {
+                    bestByJobId[item.referenceId] = item
+                }
+            } else {
+                bestByJobId[item.referenceId] = item
+            }
+        }
+        return Array(bestByJobId.values)
     }
 
     private func fetchEventsById(_ eventIds: [String]) async throws -> [String: EventRecord] {

@@ -13,11 +13,28 @@ struct JobDetailView: View {
                 } else if let job = viewModel.job {
                     Text(job.title ?? "Job")
                         .font(.title2).bold()
+                    if let role = job.jobTitle, !role.isEmpty {
+                        Text(role)
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
 
-                    Text("Employer: \(job.employerName ?? "Unknown")")
+                    Text("Employer: \(job.organizationName ?? job.employerName ?? "Unknown")")
                         .foregroundStyle(.secondary)
-                    Text("Location: \(job.locationString ?? "Unavailable")")
+                    Text("Location: \(job.locationName ?? job.locationString ?? "Unavailable")")
                         .foregroundStyle(.secondary)
+                    if let date = job.date, !date.isEmpty {
+                        Text("Schedule: \(date) \(job.time ?? "")")
+                            .foregroundStyle(.secondary)
+                    }
+                    if let needed = job.volunteersNeeded ?? job.totalSlots {
+                        Text("Volunteers Needed: \(needed)")
+                            .foregroundStyle(.secondary)
+                    }
+                    if let category = job.category, !category.isEmpty {
+                        Text("Category: \(category)")
+                            .foregroundStyle(.secondary)
+                    }
 
                     if let description = job.description, !description.isEmpty {
                         Text(description)
