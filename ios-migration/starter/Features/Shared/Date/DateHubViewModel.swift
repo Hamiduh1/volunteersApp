@@ -1,5 +1,11 @@
 import Foundation
 
+enum DateGateResult {
+    case proceed
+    case requireAge
+    case requirePreferences
+}
+
 enum DateHubTab: String, CaseIterable, Identifiable {
     case datingLoop = "Dating Loop"
     case blindDate = "Blind Date"
@@ -35,6 +41,8 @@ final class DateHubViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var statusMessage: String?
+    @Published var hasVerifiedAge = false
+    @Published var selectedAge: Int = 0
 
     // Dating Loop state
     @Published var datingProfiles: [DatingProfileRecord] = []
@@ -72,6 +80,35 @@ final class DateHubViewModel: ObservableObject {
         blindStatus == .notJoined || blindStatus == .expired
     }
 
+    var hasDatingProfile: Bool {
+        myDatingProfile != nil
+    }
+
+    var hasDatingPreferences: Bool {
+        hasDatingProfile
+    }
+
+    func gateBlindDateFlow() -> DateGateResult {
+        if !hasVerifiedAge {
+            return .requireAge
+        }
+        if !hasDatingPreferences {
+            return .requirePreferences
+        }
+        return .proceed
+    }
+
+    func verifyAge(_ age: Int) {
+        selectedAge = age
+        hasVerifiedAge = age >= 18
+    }
+
+    func saveDatingPreferences(gender: DatingGender, lookingFor: DatingLookingFor) {
+        profileGender = gender
+        profileLookingFor = lookingFor
+        blindGender = gender
+    }
+
     func refresh() async {
         isLoading = true
         errorMessage = nil
@@ -82,7 +119,11 @@ final class DateHubViewModel: ObservableObject {
             let (profiles, mine) = try await repository.fetchDatingProfiles(currentUid: user.uid)
             datingProfiles = profiles
             myDatingProfile = mine
-            applyMyProfileToForm(mine)
+            if let mine {
+                applyMyProfileToForm(mine)
+            } else {
+                hasVerifiedAge = false
+            }
 
             let overview = try await repository.fetchBlindDateOverview(uid: user.uid)
             blindStatus = overview.status
@@ -125,7 +166,29 @@ final class DateHubViewModel: ObservableObject {
         }
     }
 
-    func joinBlindDate(newMediaData: [Data]) async {
+    func deleteDatingProfile() async {
+        isLoading = true
+        errorMessage = nil
+        statusMessage = nil
+        defer { isLoading = false }
+
+        do {
+            try await repository.deleteDatingProfile(uid: user.uid)
+            myDatingProfile = nil
+            hasVerifiedAge = false
+            profileName = ""
+            profileBio = ""
+            profilePhone = ""
+            existingDatingImageUrls = []
+            statusMessage = "Dating profile deleted."
+            let (profiles, _) = try await repository.fetchDatingProfiles(currentUid: user.uid)
+            datingProfiles = profiles
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
+    func joinBlindDate(newMediaData: [DateMediaUpload]) async {
         isLoading = true
         errorMessage = nil
         statusMessage = nil
@@ -242,6 +305,7 @@ final class DateHubViewModel: ObservableObject {
         guard let profile else {
             return
         }
+        hasVerifiedAge = true
         profileName = profile.name
         profileBio = profile.bio
         profilePhone = profile.phone
@@ -249,6 +313,7 @@ final class DateHubViewModel: ObservableObject {
         existingDatingImageUrls = profile.imageUrls
         profileGender = DatingGender(rawValue: profile.gender.uppercased()) ?? .other
         profileLookingFor = DatingLookingFor(rawValue: profile.lookingFor.uppercased()) ?? .everyone
+        blindGender = profileGender
     }
 
     private func applyBlindFilters() {

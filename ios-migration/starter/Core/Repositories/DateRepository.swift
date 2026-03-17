@@ -11,6 +11,12 @@ struct BlindDateOverviewRecord {
     let invitationTimeline: [BlindDateTimelineItemRecord]
 }
 
+struct DateMediaUpload {
+    let data: Data
+    let fileExtension: String
+    let contentType: String
+}
+
 final class DateRepository {
     private let db = Firestore.firestore()
     private let storage = Storage.storage()
@@ -23,7 +29,9 @@ final class DateRepository {
             .limit(to: 200)
             .getDocuments()
 
-        let profiles = snapshot.documents.compactMap(parseDatingProfile)
+        let rawProfiles = snapshot.documents.compactMap(parseDatingProfile)
+        let activeIds = try await filterActiveRegisteredUserIds(userIds: rawProfiles.map(\.uid))
+        let profiles = rawProfiles.filter { activeIds.contains($0.uid) }
         let myProfile = currentUid.flatMap { uid in
             profiles.first(where: { $0.uid == uid })
         }
@@ -65,6 +73,12 @@ final class DateRepository {
             .setData(payload, merge: true)
     }
 
+    func deleteDatingProfile(uid: String) async throws {
+        try await db.collection(FirestoreCollection.datingProfiles.rawValue)
+            .document(uid)
+            .delete()
+    }
+
     func fetchBlindDateOverview(uid: String) async throws -> BlindDateOverviewRecord {
         let userDoc = try await db.collection(FirestoreCollection.users.rawValue).document(uid).getDocument()
         let role = (userDoc.get("role") as? String)?
@@ -99,11 +113,11 @@ final class DateRepository {
         )
     }
 
-    func joinBlindDate(uid: String, mediaData: [Data], bio: String, gender: DatingGender) async throws -> Bool {
+    func joinBlindDate(uid: String, mediaData: [DateMediaUpload], bio: String, gender: DatingGender) async throws -> Bool {
         var mediaUrls: [String] = []
-        for data in mediaData {
-            let path = "\(StorageFolder.blindDateMedia.rawValue)/\(uid)/\(UUID().uuidString).jpg"
-            let url = try await uploadImage(data: data, path: path)
+        for media in mediaData {
+            let path = "\(StorageFolder.blindDateMedia.rawValue)/\(uid)/\(UUID().uuidString).\(media.fileExtension)"
+            let url = try await uploadBinary(data: media.data, path: path, contentType: media.contentType)
             mediaUrls.append(url)
         }
 
@@ -255,9 +269,11 @@ final class DateRepository {
             .limit(to: 200)
             .getDocuments()
 
-        return snapshot.documents
+        let raw = snapshot.documents
             .compactMap(parseBlindDateProfile)
             .filter { $0.userId != currentUid }
+        let activeIds = try await filterActiveRegisteredUserIds(userIds: raw.map(\.userId))
+        return raw.filter { activeIds.contains($0.userId) }
     }
 
     private func fetchReceivedBlindDateInvitations(uid: String) async throws -> [BlindDateInvitationRecord] {
@@ -339,13 +355,16 @@ final class DateRepository {
         let data = doc.data()
         let userId = (data["userId"] as? String)?.nonEmpty ?? doc.documentID
         guard !userId.isEmpty else { return nil }
+        let media = (data["media"] as? [String])
+            ?? (data["mediaUrls"] as? [String])
+            ?? []
         return BlindDateProfileRecord(
             id: doc.documentID,
             userId: userId,
             name: (data["name"] as? String) ?? "Unknown",
             gender: (data["gender"] as? String) ?? "OTHER",
             profilePictureUrl: (data["profilePictureUrl"] as? String) ?? "",
-            media: (data["media"] as? [String]) ?? [],
+            media: media,
             bio: (data["bio"] as? String) ?? "",
             postedAt: (data["postedAt"] as? Timestamp)?.dateValue(),
             status: (data["status"] as? String) ?? "active"
@@ -434,11 +453,91 @@ final class DateRepository {
         }
         return url.absoluteString
     }
+
+    private func uploadBinary(data: Data, path: String, contentType: String) async throws -> String {
+        let ref = storage.reference().child(path)
+        let metadata = StorageMetadata()
+        metadata.contentType = contentType
+
+        _ = try await withCheckedThrowingContinuation { continuation in
+            ref.putData(data, metadata: metadata) { meta, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: meta)
+                }
+            }
+        }
+
+        let url = try await withCheckedThrowingContinuation { continuation in
+            ref.downloadURL { url, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let url {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(
+                        throwing: NSError(
+                            domain: "DateRepository",
+                            code: 5007,
+                            userInfo: [NSLocalizedDescriptionKey: "Missing download URL"]
+                        )
+                    )
+                }
+            }
+        }
+        return url.absoluteString
+    }
+
+    private func filterActiveRegisteredUserIds(userIds: [String]) async throws -> Set<String> {
+        let candidates = Array(Set(userIds.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }))
+        if candidates.isEmpty { return [] }
+
+        var activeIds = Set<String>()
+        for chunk in candidates.chunked(into: 30) {
+            let usersSnapshot = try await db.collection(FirestoreCollection.users.rawValue)
+                .whereField(FieldPath.documentID(), in: chunk)
+                .getDocuments()
+
+            for doc in usersSnapshot.documents {
+                let role = ((doc.get("role") as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                let profileStatus = ((doc.get("profileStatus") as? String) ?? "active")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                let staffOnboardingStatus = (doc.get("staffOnboardingStatus") as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .uppercased()
+                let isStaffRole = staffRoles.contains(role)
+                let isActiveRegistered = profileStatus == "active"
+                    && (!isStaffRole || staffOnboardingStatus == nil || staffOnboardingStatus == "ACTIVE")
+                if isActiveRegistered {
+                    activeIds.insert(doc.documentID)
+                }
+            }
+        }
+        return activeIds
+    }
 }
 
 private extension String {
     var nonEmpty: String? {
         let clean = trimmingCharacters(in: .whitespacesAndNewlines)
         return clean.isEmpty ? nil : clean
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        var result: [[Element]] = []
+        var index = 0
+        while index < count {
+            let end = Swift.min(index + size, count)
+            result.append(Array(self[index..<end]))
+            index += size
+        }
+        return result
     }
 }

@@ -1,14 +1,22 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
+import UIKit
 
 struct DateHubView: View {
     let user: AppSessionUser
     @StateObject private var viewModel: DateHubViewModel
 
     @State private var datingPhotoItems: [PhotosPickerItem] = []
-    @State private var blindPhotoItems: [PhotosPickerItem] = []
+    @State private var blindMediaItems: [PhotosPickerItem] = []
     @State private var datingPhotoData: [Data] = []
-    @State private var blindPhotoData: [Data] = []
+    @State private var blindMediaDrafts: [DateMediaUpload] = []
+
+    @State private var showAgeDialog = false
+    @State private var showPreferenceDialog = false
+    @State private var showBlindJoinConfirm = false
+    @State private var showDeleteDatingProfileConfirm = false
+    @State private var ageInput = ""
 
     init(user: AppSessionUser) {
         self.user = user
@@ -41,14 +49,14 @@ struct DateHubView: View {
                 blindDateSection
             }
         }
-        .navigationTitle("Dating & Blind Date")
+        .navigationTitle("Dating Loop")
         .task { await viewModel.refresh() }
         .refreshable { await viewModel.refresh() }
         .onChange(of: datingPhotoItems) { _, items in
             Task { datingPhotoData = await loadPhotoData(from: items) }
         }
-        .onChange(of: blindPhotoItems) { _, items in
-            Task { blindPhotoData = await loadPhotoData(from: items) }
+        .onChange(of: blindMediaItems) { _, items in
+            Task { blindMediaDrafts = await loadMediaUploads(from: items) }
         }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -58,14 +66,65 @@ struct DateHubView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+        .alert("Age Verification", isPresented: $showAgeDialog) {
+            TextField("Enter age", text: $ageInput)
+                .keyboardType(.numberPad)
+            Button("Continue") {
+                let age = Int(ageInput.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+                viewModel.verifyAge(age)
+                ageInput = ""
+                if age >= 18 {
+                    showPreferenceDialog = !viewModel.hasDatingPreferences
+                } else {
+                    viewModel.statusMessage = "You must be 18+ to access this section."
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                ageInput = ""
+            }
+        } message: {
+            Text("To access Dating Loop/Blind Date, confirm you are 18 or older.")
+        }
+        .alert("Set Preferences", isPresented: $showPreferenceDialog) {
+            Button("Use Current") {
+                viewModel.saveDatingPreferences(gender: viewModel.profileGender, lookingFor: viewModel.profileLookingFor)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Save a dating profile with gender and preferences first.")
+        }
+        .alert("Confirm Blind Date Join", isPresented: $showBlindJoinConfirm) {
+            Button(viewModel.isStaffExempt ? "Confirm & Join" : "Confirm & Pay") {
+                Task {
+                    await viewModel.joinBlindDate(newMediaData: blindMediaDrafts)
+                    blindMediaDrafts = []
+                    blindMediaItems = []
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                viewModel.isStaffExempt
+                ? "Staff exemption detected. No fee will be charged."
+                : "A wallet fee will be charged to join Blind Date."
+            )
+        }
+        .alert("Delete Dating Profile", isPresented: $showDeleteDatingProfileConfirm) {
+            Button("Delete", role: .destructive) {
+                Task { await viewModel.deleteDatingProfile() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes your Dating Loop profile.")
+        }
     }
 
     @ViewBuilder
     private var datingLoopSection: some View {
-        Section("Your Dating Profile") {
+        Section("Dating Profile") {
             TextField("Name", text: $viewModel.profileName)
             TextField("Bio", text: $viewModel.profileBio, axis: .vertical)
-                .lineLimit(2...4)
+                .lineLimit(2...5)
             TextField("Phone", text: $viewModel.profilePhone)
                 .keyboardType(.phonePad)
             TextField("Country", text: $viewModel.profileCountry)
@@ -84,7 +143,7 @@ struct DateHubView: View {
 
             PhotosPicker(
                 selection: $datingPhotoItems,
-                maxSelectionCount: 4,
+                maxSelectionCount: 6,
                 matching: .images
             ) {
                 Label("Select profile photos", systemImage: "photo.on.rectangle")
@@ -100,14 +159,26 @@ struct DateHubView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Button(viewModel.isLoading ? "Saving..." : "Save Dating Profile") {
-                Task {
-                    await viewModel.saveDatingProfile(newImageData: datingPhotoData)
-                    datingPhotoData = []
-                    datingPhotoItems = []
+            Button(viewModel.isLoading ? "Saving..." : (viewModel.hasDatingProfile ? "Update Dating Profile" : "Create Dating Profile")) {
+                switch viewModel.gateBlindDateFlow() {
+                case .proceed, .requirePreferences:
+                    Task {
+                        await viewModel.saveDatingProfile(newImageData: datingPhotoData)
+                        datingPhotoData = []
+                        datingPhotoItems = []
+                    }
+                case .requireAge:
+                    showAgeDialog = true
                 }
             }
             .disabled(viewModel.isLoading)
+
+            if viewModel.hasDatingProfile {
+                Button("Delete Dating Profile", role: .destructive) {
+                    showDeleteDatingProfileConfirm = true
+                }
+                .disabled(viewModel.isLoading)
+            }
         }
 
         Section("Browse Profiles") {
@@ -159,32 +230,38 @@ struct DateHubView: View {
         if viewModel.canJoinBlindDate {
             Section("Join Blind Date") {
                 TextField("Blind Date Bio", text: $viewModel.blindBio, axis: .vertical)
-                    .lineLimit(2...4)
+                    .lineLimit(2...5)
                 Picker("Gender", selection: $viewModel.blindGender) {
                     ForEach(DatingGender.allCases) { gender in
                         Text(gender.title).tag(gender)
                     }
                 }
                 PhotosPicker(
-                    selection: $blindPhotoItems,
+                    selection: $blindMediaItems,
                     maxSelectionCount: 4,
-                    matching: .images
+                    matching: .any(of: [.images, .videos])
                 ) {
                     Label("Select blind date media", systemImage: "photo.stack")
                 }
-                if !blindPhotoData.isEmpty {
-                    Text("Selected media: \(blindPhotoData.count)")
+                if !blindMediaDrafts.isEmpty {
+                    let imageCount = blindMediaDrafts.filter { $0.contentType.hasPrefix("image/") }.count
+                    let videoCount = blindMediaDrafts.filter { $0.contentType.hasPrefix("video/") }.count
+                    Text("Selected: \(imageCount) images, \(videoCount) videos")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
                 Button(viewModel.isLoading ? "Joining..." : "Join Blind Date") {
-                    Task {
-                        await viewModel.joinBlindDate(newMediaData: blindPhotoData)
-                        blindPhotoData = []
-                        blindPhotoItems = []
+                    switch viewModel.gateBlindDateFlow() {
+                    case .proceed:
+                        showBlindJoinConfirm = true
+                    case .requireAge:
+                        showAgeDialog = true
+                    case .requirePreferences:
+                        showPreferenceDialog = true
                     }
                 }
-                .disabled(viewModel.isLoading)
+                .disabled(viewModel.isLoading || viewModel.blindBio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || blindMediaDrafts.isEmpty)
             }
         } else {
             Section("Blind Date Actions") {
@@ -195,22 +272,26 @@ struct DateHubView: View {
             }
         }
 
-        if !viewModel.filteredBlindProfiles.isEmpty {
-            Section("Find People") {
-                TextField("Search by name", text: Binding(
-                    get: { viewModel.blindSearchQuery },
-                    set: { viewModel.updateBlindSearchQuery($0) }
-                ))
+        Section("Find People") {
+            TextField("Search by name", text: Binding(
+                get: { viewModel.blindSearchQuery },
+                set: { viewModel.updateBlindSearchQuery($0) }
+            ))
 
-                Picker("Gender Filter", selection: Binding(
-                    get: { viewModel.blindGenderFilter },
-                    set: { viewModel.updateBlindGenderFilter($0) }
-                )) {
-                    ForEach(BlindGenderFilter.allCases) { filter in
-                        Text(filter.rawValue).tag(filter)
-                    }
+            Picker("Gender Filter", selection: Binding(
+                get: { viewModel.blindGenderFilter },
+                set: { viewModel.updateBlindGenderFilter($0) }
+            )) {
+                ForEach(BlindGenderFilter.allCases) { filter in
+                    Text(filter.rawValue).tag(filter)
                 }
+            }
 
+            if viewModel.filteredBlindProfiles.isEmpty {
+                Text("No active profiles match your filter.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
                 ForEach(viewModel.filteredBlindProfiles) { profile in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(profile.name.isEmpty ? "Unknown user" : profile.name)
@@ -257,6 +338,21 @@ struct DateHubView: View {
             }
         }
 
+        if !viewModel.sentInvitations.isEmpty {
+            Section("Sent Invitations") {
+                ForEach(viewModel.sentInvitations) { invite in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(invite.recipientName.isEmpty ? "Unknown recipient" : invite.recipientName)
+                            .font(.headline)
+                        Text("Status: \(invite.status.capitalized)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+
         if !viewModel.invitationTimeline.isEmpty {
             Section("Invitation Timeline") {
                 ForEach(viewModel.invitationTimeline) { item in
@@ -299,5 +395,23 @@ struct DateHubView: View {
             }
         }
         return loaded
+    }
+
+    private func loadMediaUploads(from items: [PhotosPickerItem]) async -> [DateMediaUpload] {
+        var uploads: [DateMediaUpload] = []
+        for item in items {
+            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+            let supportedType = item.supportedContentTypes.first
+            if let supportedType, supportedType.conforms(to: .movie) || supportedType.conforms(to: .video) {
+                uploads.append(DateMediaUpload(data: data, fileExtension: "mp4", contentType: "video/mp4"))
+            } else {
+                if let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.88) {
+                    uploads.append(DateMediaUpload(data: jpeg, fileExtension: "jpg", contentType: "image/jpeg"))
+                } else {
+                    uploads.append(DateMediaUpload(data: data, fileExtension: "jpg", contentType: "image/jpeg"))
+                }
+            }
+        }
+        return uploads
     }
 }
