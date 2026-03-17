@@ -50,7 +50,7 @@ struct WalletTransactView: View {
     private var destinationCard: some View {
         CardContainer {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Destination")
+                Text("Step 1: Recipient")
                     .font(.headline)
 
                 Picker("Destination", selection: $viewModel.destinationType) {
@@ -62,7 +62,7 @@ struct WalletTransactView: View {
 
                 if viewModel.destinationType == .beneficiary {
                     if viewModel.beneficiaries.isEmpty {
-                        Text("No beneficiaries found.")
+                        Text("No beneficiaries found. Add beneficiaries from the Android wallet flow, then refresh.")
                             .foregroundStyle(.secondary)
                     } else {
                         Picker("Beneficiary", selection: $viewModel.selectedBeneficiaryId) {
@@ -102,7 +102,7 @@ struct WalletTransactView: View {
     private var amountCard: some View {
         CardContainer {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Amount")
+                Text("Step 2: Amount & Currencies")
                     .font(.headline)
 
                 TextField("Amount", text: $viewModel.amountText)
@@ -220,13 +220,13 @@ struct WalletTransactView: View {
     private var actionTitle: String {
         switch viewModel.destinationType {
         case .wallet:
-            return "Send to Wallet"
+            return "Send to App User Wallet"
         case .card:
-            return "Send to Card"
+            return "Send to App User Card"
         case .bank:
-            return "Send to Bank"
+            return "Send to App User Bank"
         case .beneficiary:
-            return "Send to Beneficiary"
+            return "Send to Beneficiary Mobile Money"
         }
     }
 

@@ -63,6 +63,7 @@ final class OrganizerWalletRepository {
         let amount = data.double(keys: ["amount", "transactionAmount", "value", "netAmount"]) ?? 0
         let status = data.string(keys: ["status", "state"]) ?? "unknown"
         let type = data.string(keys: ["type", "transactionType", "source"]) ?? "transaction"
+        let source = data.string(keys: ["source", "fundingSourceType", "destinationType"])
         let note = data.string(keys: ["description", "note", "memo", "message", "reason"])
         let title = data.string(keys: ["title", "label", "name"]) ?? type
         let date = data.date(keys: ["timestamp", "createdAt", "lastUpdatedAt", "processedAt", "updatedAt"])
@@ -73,6 +74,7 @@ final class OrganizerWalletRepository {
             type: type,
             amount: amount,
             status: status,
+            source: source,
             createdAt: date,
             note: note
         )

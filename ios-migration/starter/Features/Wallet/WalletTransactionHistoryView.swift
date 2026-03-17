@@ -23,7 +23,7 @@ struct WalletTransactionHistoryView: View {
                 .pickerStyle(.segmented)
             }
 
-            Section("Transactions") {
+            Section("Receipts & Activity") {
                 if viewModel.isLoading && viewModel.filteredItems.isEmpty {
                     ProgressView("Loading transactions...")
                 } else if viewModel.filteredItems.isEmpty {
@@ -59,7 +59,7 @@ struct WalletTransactionHistoryView: View {
                 }
             }
         }
-        .navigationTitle("History")
+        .navigationTitle("Receipts & Activity")
         .task { await viewModel.refresh(uid: user.uid) }
         .refreshable { await viewModel.refresh(uid: user.uid) }
         .alert("Error", isPresented: Binding(

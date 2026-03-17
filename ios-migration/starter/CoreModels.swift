@@ -5,6 +5,7 @@ import FirebaseFirestoreSwift
 enum AppUserRole: String, Codable {
     case user
     case volunteer
+    case agent
     case organizer
     case employer
     case owner
@@ -184,6 +185,7 @@ struct WalletTransactionRecord: Identifiable {
     let type: String
     let amount: Double
     let status: String
+    let source: String?
     let createdAt: Date?
     let note: String?
 }
@@ -751,6 +753,18 @@ struct WalletQuoteRecord {
     let sourceAmount: Double
     let sourceCurrency: String
     let targetCurrency: String
+}
+
+struct AgentCashOutFeeRecord {
+    let rate: Double
+    let fee: Double
+    let totalDebit: Double
+}
+
+struct AgentWithdrawalCodeRecord {
+    let code: String
+    let expiresAt: Date
+    let fee: AgentCashOutFeeRecord
 }
 
 struct UserProfileRecord {

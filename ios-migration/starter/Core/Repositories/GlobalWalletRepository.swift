@@ -160,6 +160,235 @@ final class GlobalWalletRepository {
         return try await fetchPaymentMethods(uid: recipientId, limit: limit)
     }
 
+    func authorizeAgent() async throws -> String {
+        let map = try await FunctionsService.shared.callMap(function: .payForAgentRole)
+        let data = (map["data"] as? [String: Any]) ?? map
+        return data.string(keys: ["message"]) ?? map.string(keys: ["message"]) ?? "Success! You are now an agent."
+    }
+
+    func completeAgentCashOut(secretCode: String) async throws -> String {
+        let cleanCode = secretCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanCode.isEmpty else {
+            throw WalletTransferError.transferFailed(reason: "Secret code is required.")
+        }
+        let map = try await FunctionsService.shared.callMap(
+            function: .processAgentPayout,
+            data: ["secretCode": cleanCode]
+        )
+        let data = (map["data"] as? [String: Any]) ?? map
+        let success = data.bool(keys: ["success"], fallback: true)
+        let message = data.string(keys: ["message", "error"]) ?? "Operation finished."
+        if !success {
+            throw WalletTransferError.transferFailed(reason: message)
+        }
+        return message
+    }
+
+    func cashOutAgentEarnings() async throws -> String {
+        let map = try await FunctionsService.shared.callMap(function: .cashOutAgentEarnings)
+        let data = (map["data"] as? [String: Any]) ?? map
+        return data.string(keys: ["message"]) ?? map.string(keys: ["message"]) ?? "Earnings cash-out completed."
+    }
+
+    func calculateAgentCashOutFee(amount: Double) -> AgentCashOutFeeRecord {
+        let rate: Double
+        switch amount {
+        case ..<1: rate = 0.09
+        case ..<2: rate = 0.09
+        case ..<5: rate = 0.05
+        case ..<20: rate = 0.026
+        case ..<40: rate = 0.0164
+        case ..<200: rate = 0.013
+        case ..<600: rate = 0.008
+        case ..<1200: rate = 0.00475
+        default: rate = 0.00314
+        }
+        let fee = ((amount * rate) * 100).rounded() / 100
+        let totalDebit = ((amount + fee) * 100).rounded() / 100
+        return AgentCashOutFeeRecord(rate: rate, fee: fee, totalDebit: totalDebit)
+    }
+
+    func generateAgentWithdrawalCode(
+        uid: String,
+        amount: Double,
+        currency: String,
+        currentBalance: Double
+    ) async throws -> AgentWithdrawalCodeRecord {
+        guard amount > 0 else {
+            throw WalletTransferError.transferFailed(reason: "Amount must be positive.")
+        }
+
+        let fee = calculateAgentCashOutFee(amount: amount)
+        guard currentBalance >= fee.totalDebit else {
+            throw WalletTransferError.transferFailed(reason: "Insufficient funds (including fee).")
+        }
+
+        let code = String(Int.random(in: 100000...999999))
+        let expiresAt = Date(timeIntervalSinceNow: 15 * 60)
+
+        let requestData: [String: Any] = [
+            "senderId": uid,
+            "amount": amount,
+            "currency": currency,
+            "secretCode": code,
+            "status": "PENDING",
+            "createdAt": FieldValue.serverTimestamp(),
+            "expiresAt": expiresAt
+        ]
+
+        _ = try await db.collection(FirestoreCollection.payoutRequests.rawValue).addDocument(data: requestData)
+        return AgentWithdrawalCodeRecord(code: code, expiresAt: expiresAt, fee: fee)
+    }
+
+    func depositWithMobileMoney(
+        uid: String,
+        amount: Double,
+        currency: String,
+        phone: String,
+        network: String,
+        country: String,
+        dialCode: String,
+        localCurrency: String,
+        paymentMethodId: String?,
+        localAmount: Double?
+    ) async throws -> String {
+        guard amount > 0 else {
+            throw WalletTransferError.transferFailed(reason: "Amount must be positive.")
+        }
+
+        let requestData: [String: Any] = [
+            "senderId": uid,
+            "amount": amount,
+            "currency": currency,
+            "phone": phone,
+            "network": network,
+            "country": country,
+            "dialCode": dialCode,
+            "localCurrency": localCurrency,
+            "localAmount": localAmount as Any,
+            "paymentMethodId": paymentMethodId ?? "",
+            "type": "CASH_IN",
+            "status": "PENDING",
+            "timestamp": FieldValue.serverTimestamp()
+        ]
+
+        _ = try await db.collection(FirestoreCollection.payoutRequests.rawValue).addDocument(data: requestData)
+        return "Deposit request sent. Approve on your phone. Wallet credit posts in \(currency) after provider confirmation."
+    }
+
+    func withdrawToMobileMoney(
+        uid: String,
+        amount: Double,
+        currency: String,
+        phone: String,
+        network: String,
+        country: String,
+        dialCode: String,
+        localCurrency: String,
+        paymentMethodId: String?,
+        localAmount: Double?
+    ) async throws -> String {
+        guard amount > 0 else {
+            throw WalletTransferError.transferFailed(reason: "Amount must be positive.")
+        }
+
+        let userRef = db.collection(FirestoreCollection.users.rawValue).document(uid)
+        let requestRef = db.collection(FirestoreCollection.payoutRequests.rawValue).document()
+
+        _ = try await db.runTransaction { transaction, errorPointer in
+            do {
+                let snapshot = try transaction.getDocument(userRef)
+                let data = snapshot.data() ?? [:]
+                let wallet = data["wallet"] as? [String: Any] ?? [:]
+                let balance = wallet.double(keys: ["balance", "availableBalance", "currentBalance"])
+                    ?? data.double(keys: ["walletBalance", "balance"])
+                    ?? 0.0
+                if balance < amount {
+                    throw WalletTransferError.transferFailed(reason: "Insufficient balance.")
+                }
+
+                transaction.updateData(
+                    ["wallet.balance": FieldValue.increment(-amount)],
+                    forDocument: userRef
+                )
+
+                let requestData: [String: Any] = [
+                    "senderId": uid,
+                    "amount": amount,
+                    "currency": currency,
+                    "phone": phone,
+                    "network": network,
+                    "country": country,
+                    "dialCode": dialCode,
+                    "localCurrency": localCurrency,
+                    "localAmount": localAmount as Any,
+                    "paymentMethodId": paymentMethodId ?? "",
+                    "type": "CASH_OUT",
+                    "status": "PENDING",
+                    "timestamp": FieldValue.serverTimestamp()
+                ]
+                transaction.setData(requestData, forDocument: requestRef)
+            } catch {
+                errorPointer?.pointee = error as NSError
+            }
+            return nil
+        }
+
+        return "Withdrawal to your mobile money has been initiated."
+    }
+
+    func depositFromExternalSource(
+        uid: String,
+        amount: Double,
+        paymentMethodId: String,
+        walletCurrency: String
+    ) async throws -> String {
+        guard amount > 0 else {
+            throw WalletTransferError.transferFailed(reason: "Deposit amount must be positive.")
+        }
+
+        let methodRef = db.collection(FirestoreCollection.users.rawValue)
+            .document(uid)
+            .collection(FirestoreSubcollection.paymentMethods.rawValue)
+            .document(paymentMethodId)
+        let methodSnap = try await methodRef.getDocument()
+        guard methodSnap.exists else {
+            throw WalletTransferError.transferFailed(reason: "Selected payment method was not found.")
+        }
+
+        let methodData = methodSnap.data() ?? [:]
+        let methodType = (methodData.string(keys: ["type", "methodType"]) ?? "").uppercased()
+        let isCard = methodType == "CARD"
+        let isAchEnabledBank = methodType == "BANK" &&
+            (methodData.bool(keys: ["achDebitEnabled"], fallback: false) ||
+                (methodData.string(keys: ["chargeSourceId"])?.isEmpty == false))
+
+        if !isCard && !isAchEnabledBank {
+            throw WalletTransferError.transferFailed(
+                reason: "This funding source is not enabled for deposits. Use a linked card or ACH-enabled bank account."
+            )
+        }
+        if isAchEnabledBank && !walletCurrency.uppercased().elementsEqual("USD") {
+            throw WalletTransferError.transferFailed(reason: "ACH deposits are currently available for USD wallets only.")
+        }
+
+        let depositRequest: [String: Any] = [
+            "userId": uid,
+            "amount": amount,
+            "currency": walletCurrency,
+            "paymentMethodId": paymentMethodId,
+            "status": "PENDING",
+            "type": "DEPOSIT",
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+        _ = try await db.collection(FirestoreCollection.depositRequests.rawValue).addDocument(data: depositRequest)
+
+        if isCard {
+            return "Deposit submitted from your card. It should reflect shortly."
+        }
+        return "ACH deposit initiated from your bank account. Settlement is pending and may take 1-3 business days."
+    }
+
     func getQuote(
         amount: Double,
         fromCurrency: String,
@@ -342,6 +571,7 @@ final class GlobalWalletRepository {
         let amount = data.double(keys: ["amount", "transactionAmount", "value", "netAmount"]) ?? 0
         let status = data.string(keys: ["status", "state"]) ?? "unknown"
         let type = data.string(keys: ["type", "transactionType", "source"]) ?? "transaction"
+        let source = data.string(keys: ["source", "fundingSourceType", "destinationType"])
         let note = data.string(keys: ["description", "note", "memo", "message", "reason"])
         let title = data.string(keys: ["title", "label", "name"]) ?? type
         let createdAt = data.date(keys: ["timestamp", "createdAt", "lastUpdatedAt", "processedAt", "updatedAt"])
@@ -352,6 +582,7 @@ final class GlobalWalletRepository {
             type: type,
             amount: amount,
             status: status,
+            source: source,
             createdAt: createdAt,
             note: note
         )

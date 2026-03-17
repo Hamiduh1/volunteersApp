@@ -3,13 +3,23 @@ import Combine
 
 enum WalletTransactionFilter: String, CaseIterable, Identifiable {
     case all
-    case credit
-    case debit
+    case deposit
+    case withdrawals
+    case mobileMoney
 
     var id: String { rawValue }
 
     var title: String {
-        rawValue.capitalized
+        switch self {
+        case .all:
+            return "All"
+        case .deposit:
+            return "Deposit"
+        case .withdrawals:
+            return "Withdrawals"
+        case .mobileMoney:
+            return "Mobile Money"
+        }
     }
 }
 
@@ -27,10 +37,12 @@ final class WalletTransactionHistoryViewModel: ObservableObject {
         switch filter {
         case .all:
             return items
-        case .credit:
-            return items.filter(isCredit)
-        case .debit:
-            return items.filter(isDebit)
+        case .deposit:
+            return items.filter(isDeposit)
+        case .withdrawals:
+            return items.filter(isWithdrawal)
+        case .mobileMoney:
+            return items.filter(isMobileMoney)
         }
     }
 
@@ -48,26 +60,44 @@ final class WalletTransactionHistoryViewModel: ObservableObject {
         }
     }
 
-    private func isCredit(_ transaction: WalletTransactionRecord) -> Bool {
-        if transaction.amount > 0 { return true }
+    private func isDeposit(_ transaction: WalletTransactionRecord) -> Bool {
+        if isMobileMoney(transaction) { return false }
+        let normalizedTitle = transaction.title.lowercased()
         let normalizedType = transaction.type.lowercased()
-        let normalizedStatus = transaction.status.lowercased()
-        return normalizedType.contains("credit")
+        let normalizedSource = (transaction.source ?? "").lowercased()
+        return normalizedTitle.contains("deposit")
+            || normalizedType.contains("credit")
             || normalizedType.contains("deposit")
             || normalizedType.contains("receive")
             || normalizedType.contains("refund")
-            || normalizedStatus.contains("credit")
+            || normalizedSource.contains("deposit")
     }
 
-    private func isDebit(_ transaction: WalletTransactionRecord) -> Bool {
-        if transaction.amount < 0 { return true }
+    private func isWithdrawal(_ transaction: WalletTransactionRecord) -> Bool {
+        if isMobileMoney(transaction) { return false }
+        let normalizedTitle = transaction.title.lowercased()
         let normalizedType = transaction.type.lowercased()
-        let normalizedStatus = transaction.status.lowercased()
-        return normalizedType.contains("debit")
+        let normalizedSource = (transaction.source ?? "").lowercased()
+        return normalizedTitle.contains("withdraw")
+            || normalizedTitle.contains("cash-out")
+            || normalizedTitle.contains("cash out")
+            || normalizedType.contains("debit")
             || normalizedType.contains("withdraw")
             || normalizedType.contains("cashout")
             || normalizedType.contains("sent")
-            || normalizedStatus.contains("debit")
+            || normalizedSource.contains("withdraw")
+    }
+
+    private func isMobileMoney(_ transaction: WalletTransactionRecord) -> Bool {
+        let normalizedTitle = transaction.title.lowercased()
+        let normalizedType = transaction.type.lowercased()
+        let normalizedSource = (transaction.source ?? "").lowercased()
+        let normalizedNote = (transaction.note ?? "").lowercased()
+        return normalizedSource.contains("mobile")
+            || normalizedSource.contains("beneficiary")
+            || normalizedTitle.contains("mobile money")
+            || normalizedType.contains("mobile")
+            || normalizedNote.contains("mobile money")
     }
 }
 

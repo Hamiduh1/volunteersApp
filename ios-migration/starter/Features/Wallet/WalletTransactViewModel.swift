@@ -11,10 +11,10 @@ enum WalletDestinationType: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .wallet: return "App Wallet"
-        case .card: return "App Card"
-        case .bank: return "App Bank"
-        case .beneficiary: return "Beneficiary"
+        case .wallet: return "App User Wallet"
+        case .card: return "App User Card"
+        case .bank: return "App User Bank"
+        case .beneficiary: return "Beneficiary Mobile Money"
         }
     }
 

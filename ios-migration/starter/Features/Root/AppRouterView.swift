@@ -19,7 +19,7 @@ struct AppRouterView: View {
             LoginView()
         case .signedIn(let user):
             switch user.role {
-            case .volunteer, .user:
+            case .volunteer, .user, .agent:
                 VolunteerHomeTabView(user: user)
             case .organizer:
                 OrganizerHomeTabView(user: user)

@@ -77,6 +77,28 @@ struct GlobalWalletHomeView: View {
                     }
                 }
 
+                HStack(spacing: 10) {
+                    NavigationLink {
+                        WalletOperationsView(user: user, initialTab: .mobileMoney)
+                    } label: {
+                        quickActionButton(
+                            title: "Mobile Money",
+                            subtitle: "Cash In / Cash Out",
+                            icon: "iphone.gen3.radiowaves.left.and.right"
+                        )
+                    }
+
+                    NavigationLink {
+                        WalletOperationsView(user: user, initialTab: .agent)
+                    } label: {
+                        quickActionButton(
+                            title: "Agent",
+                            subtitle: "Codes / Cashout",
+                            icon: "person.badge.shield.checkmark"
+                        )
+                    }
+                }
+
                 NavigationLink {
                     PaymentMethodsView(user: user)
                 } label: {
@@ -99,21 +121,51 @@ struct GlobalWalletHomeView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Services")
                     .font(.headline)
-                serviceRow(
-                    title: "Send Money",
-                    subtitle: "Transfer to app wallet, card, bank, or beneficiary",
-                    icon: "paperplane"
-                )
-                serviceRow(
-                    title: "Transaction History",
-                    subtitle: "Track recent receipts and statuses",
-                    icon: "list.bullet.rectangle"
-                )
-                serviceRow(
-                    title: "Payment Methods",
-                    subtitle: "Manage cards, banks, and payout setup",
-                    icon: "wallet.pass"
-                )
+                NavigationLink {
+                    WalletTransactView(user: user)
+                } label: {
+                    serviceRow(
+                        title: "Send Money",
+                        subtitle: "App user wallet, card, bank, or beneficiary mobile money",
+                        icon: "paperplane"
+                    )
+                }
+                NavigationLink {
+                    WalletOperationsView(user: user, initialTab: .mobileMoney)
+                } label: {
+                    serviceRow(
+                        title: "Mobile Money",
+                        subtitle: "Deposit and withdraw with linked mobile money",
+                        icon: "iphone.gen3.radiowaves.left.and.right"
+                    )
+                }
+                NavigationLink {
+                    WalletOperationsView(user: user, initialTab: .agent)
+                } label: {
+                    serviceRow(
+                        title: "Agent Portal",
+                        subtitle: "Authorize, generate payout code, and complete agent payout",
+                        icon: "person.badge.shield.checkmark"
+                    )
+                }
+                NavigationLink {
+                    WalletTransactionHistoryView(user: user)
+                } label: {
+                    serviceRow(
+                        title: "Transaction History",
+                        subtitle: "Track receipts by all, deposit, withdrawals, and mobile money",
+                        icon: "list.bullet.rectangle"
+                    )
+                }
+                NavigationLink {
+                    PaymentMethodsView(user: user)
+                } label: {
+                    serviceRow(
+                        title: "Payment Methods",
+                        subtitle: "Manage cards, banks, mobile money, and payout setup",
+                        icon: "wallet.pass"
+                    )
+                }
             }
         }
     }
