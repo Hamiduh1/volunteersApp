@@ -279,6 +279,9 @@ final class CommunityRepository {
         }
 
         let (displayName, _) = try await fetchUserIdentity(user: user)
+        let sponsorName = displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Volunteer App Partner"
+            : displayName
         var imageUrls: [String] = []
         var mediaPayload: [[String: String]] = []
         for item in media {
@@ -304,7 +307,7 @@ final class CommunityRepository {
             "ownerPhone": cleanOwnerPhone,
             "mediaUrls": imageUrls,
             "media": mediaPayload,
-            "sponsor": displayName,
+            "sponsor": sponsorName,
             "ownerId": user.uid,
             "timestamp": FieldValue.serverTimestamp()
         ]
@@ -318,6 +321,73 @@ final class CommunityRepository {
         ]
 
         try await runAdvertisementPostingTransaction(userUid: user.uid, adData: adData, historyData: historyData, adCost: adCost)
+    }
+
+    func updateAdvertisement(
+        user: AppSessionUser,
+        adId: String,
+        title: String,
+        description: String,
+        targetUrl: String,
+        ownerPhone: String,
+        newMedia: [CommunityAttachmentDraft]
+    ) async throws {
+        let cleanAdId = adId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanAdId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9010,
+                userInfo: [NSLocalizedDescriptionKey: "Advertisement ID is missing."]
+            )
+        }
+
+        var updates: [String: Any] = [
+            "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
+            "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+            "targetUrl": targetUrl.trimmingCharacters(in: .whitespacesAndNewlines),
+            "ownerPhone": ownerPhone.trimmingCharacters(in: .whitespacesAndNewlines)
+        ]
+
+        if !newMedia.isEmpty {
+            var imageUrls: [String] = []
+            var mediaPayload: [[String: String]] = []
+            for item in newMedia {
+                let uploadedUrl = try await uploadGenericAttachment(
+                    ownerUid: user.uid,
+                    attachment: item,
+                    rootFolder: StorageFolder.ads.rawValue
+                )
+                mediaPayload.append([
+                    "url": uploadedUrl,
+                    "type": item.type.storageType,
+                    "name": item.fileName
+                ])
+                if item.type == .image {
+                    imageUrls.append(uploadedUrl)
+                }
+            }
+            updates["mediaUrls"] = imageUrls
+            updates["media"] = mediaPayload
+        }
+
+        try await db.collection(FirestoreCollection.advertisements.rawValue)
+            .document(cleanAdId)
+            .updateData(updates)
+    }
+
+    func deleteAdvertisement(adId: String) async throws {
+        let cleanAdId = adId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanAdId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9011,
+                userInfo: [NSLocalizedDescriptionKey: "Advertisement ID is missing."]
+            )
+        }
+
+        try await db.collection(FirestoreCollection.advertisements.rawValue)
+            .document(cleanAdId)
+            .delete()
     }
 
     func fetchGarageSales(limit: Int = 120) async throws -> [GarageSaleRecord] {
@@ -392,6 +462,100 @@ final class CommunityRepository {
                 "ownerId": user.uid,
                 "timestamp": FieldValue.serverTimestamp()
             ])
+    }
+
+    func submitGarageSalePayment(
+        buyerUid: String,
+        sellerUid: String,
+        garageSaleId: String,
+        amount: Double
+    ) async throws {
+        let cleanBuyerUid = buyerUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanSellerUid = sellerUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanGarageSaleId = garageSaleId.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanBuyerUid.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9012,
+                userInfo: [NSLocalizedDescriptionKey: "You must be logged in."]
+            )
+        }
+        guard !cleanSellerUid.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9013,
+                userInfo: [NSLocalizedDescriptionKey: "Seller information is missing."]
+            )
+        }
+        guard !cleanGarageSaleId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9014,
+                userInfo: [NSLocalizedDescriptionKey: "Garage sale ID is missing."]
+            )
+        }
+        guard amount > 0 else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9015,
+                userInfo: [NSLocalizedDescriptionKey: "Enter a valid amount."]
+            )
+        }
+
+        try await db.collection(FirestoreCollection.garageSalePayments.rawValue)
+            .document()
+            .setData([
+                "buyerId": cleanBuyerUid,
+                "sellerId": cleanSellerUid,
+                "garageSaleId": cleanGarageSaleId,
+                "amount": amount,
+                "status": "pending",
+                "timestamp": FieldValue.serverTimestamp()
+            ])
+    }
+
+    func sendSponsoredChatInvitation(
+        sender: AppSessionUser,
+        recipientId: String,
+        contextLabel: String,
+        duplicateMessage: String
+    ) async throws -> String {
+        let cleanRecipientId = recipientId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanRecipientId.isEmpty else {
+            throw NSError(
+                domain: "CommunityRepository",
+                code: 9016,
+                userInfo: [NSLocalizedDescriptionKey: "Recipient information is missing."]
+            )
+        }
+
+        let invitationRef = db.collection(FirestoreCollection.users.rawValue)
+            .document(cleanRecipientId)
+            .collection(FirestoreSubcollection.invitations.rawValue)
+            .document(sender.uid)
+
+        let existing = try await invitationRef.getDocument()
+        if existing.exists {
+            return duplicateMessage
+        }
+
+        let (senderName, senderProfileImageUrl) = try await fetchUserIdentity(user: sender)
+
+        try await invitationRef.setData(
+            [
+                "senderId": sender.uid,
+                "senderName": senderName,
+                "senderProfilePicUrl": senderProfileImageUrl ?? "",
+                "senderProfileImageUrl": senderProfileImageUrl ?? "",
+                "status": "pending",
+                "timestamp": FieldValue.serverTimestamp(),
+                "context": contextLabel
+            ],
+            merge: true
+        )
+
+        return "Chat invitation sent!"
     }
 
     private func runAdvertisementPostingTransaction(

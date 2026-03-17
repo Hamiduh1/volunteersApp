@@ -701,6 +701,7 @@ struct AdvertisementRecord: Codable, Identifiable {
     var sponsor: String?
     var ownerPhone: String?
     var mediaUrls: [String]?
+    var media: [GarageSaleMediaRecord]?
     var targetUrl: String?
     var ownerId: String?
     var timestamp: Timestamp?
@@ -770,6 +771,16 @@ struct GarageSaleRecord: Codable, Identifiable {
     var longitude: Double?
     var media: [GarageSaleMediaRecord]?
     var ownerId: String?
+    var timestamp: Timestamp?
+}
+
+struct GarageSalePaymentRecord: Codable, Identifiable {
+    @DocumentID var id: String?
+    var buyerId: String?
+    var sellerId: String?
+    var garageSaleId: String?
+    var amount: Double?
+    var status: String?
     var timestamp: Timestamp?
 }
 

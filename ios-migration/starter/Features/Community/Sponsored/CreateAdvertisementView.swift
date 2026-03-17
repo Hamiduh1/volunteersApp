@@ -6,23 +6,49 @@ import UIKit
 struct CreateAdvertisementView: View {
     let user: AppSessionUser
     @ObservedObject var viewModel: SponsoredContentViewModel
+    let existingAd: AdvertisementRecord?
     let onClose: () -> Void
 
-    @State private var title = ""
-    @State private var description = ""
-    @State private var targetUrl = ""
-    @State private var ownerPhone = ""
+    @State private var title: String
+    @State private var description: String
+    @State private var targetUrl: String
+    @State private var ownerPhone: String
     @State private var attachments: [CommunityAttachmentDraft] = []
 
     @State private var imageItems: [PhotosPickerItem] = []
     @State private var videoItems: [PhotosPickerItem] = []
     @State private var showDocImporter = false
 
+    init(
+        user: AppSessionUser,
+        viewModel: SponsoredContentViewModel,
+        existingAd: AdvertisementRecord? = nil,
+        onClose: @escaping () -> Void
+    ) {
+        self.user = user
+        self.viewModel = viewModel
+        self.existingAd = existingAd
+        self.onClose = onClose
+        _title = State(initialValue: existingAd?.title ?? "")
+        _description = State(initialValue: existingAd?.description ?? "")
+        _targetUrl = State(initialValue: existingAd?.targetUrl ?? "")
+        _ownerPhone = State(initialValue: existingAd?.ownerPhone ?? "")
+    }
+
+    private var existingMedia: [GarageSaleMediaRecord] {
+        guard let existingAd else { return [] }
+        if let media = existingAd.media, !media.isEmpty {
+            return media
+        }
+        let urls = existingAd.mediaUrls ?? []
+        return urls.map { GarageSaleMediaRecord(url: $0, type: "image", name: "Image") }
+    }
+
     private var isFormValid: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         && !targetUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        && !attachments.isEmpty
+        && (!attachments.isEmpty || !existingMedia.isEmpty)
     }
 
     var body: some View {
@@ -38,21 +64,34 @@ struct CreateAdvertisementView: View {
 
                 Button {
                     Task {
-                        let success = await viewModel.createAdvertisement(
-                            user: user,
-                            title: title,
-                            description: description,
-                            targetUrl: targetUrl,
-                            ownerPhone: ownerPhone,
-                            media: attachments
-                        )
+                        let success: Bool
+                        if let adId = existingAd?.id, !adId.isEmpty {
+                            success = await viewModel.updateAdvertisement(
+                                user: user,
+                                adId: adId,
+                                title: title,
+                                description: description,
+                                targetUrl: targetUrl,
+                                ownerPhone: ownerPhone,
+                                media: attachments
+                            )
+                        } else {
+                            success = await viewModel.createAdvertisement(
+                                user: user,
+                                title: title,
+                                description: description,
+                                targetUrl: targetUrl,
+                                ownerPhone: ownerPhone,
+                                media: attachments
+                            )
+                        }
                         if success { onClose() }
                     }
                 } label: {
                     if viewModel.isSubmittingAd {
                         ProgressView()
                     } else {
-                        Text("PUBLISH AD")
+                        Text(existingAd == nil ? "PUBLISH AD" : "UPDATE AD")
                             .fontWeight(.black)
                     }
                 }
@@ -63,7 +102,7 @@ struct CreateAdvertisementView: View {
             }
             .padding(20)
         }
-        .navigationTitle("Create Ad")
+        .navigationTitle(existingAd == nil ? "Create Ad" : "Edit Ad")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -115,6 +154,11 @@ struct CreateAdvertisementView: View {
     private var mediaSection: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
+                if attachments.isEmpty {
+                    ForEach(Array(existingMedia.enumerated()), id: \.offset) { _, media in
+                        existingMediaAttachmentCard(media)
+                    }
+                }
                 ForEach(attachments) { attachment in
                     mediaAttachmentCard(attachment)
                 }
@@ -123,6 +167,45 @@ struct CreateAdvertisementView: View {
             .padding(.horizontal, 2)
         }
         .frame(height: 170)
+    }
+
+    @ViewBuilder
+    private func existingMediaAttachmentCard(_ media: GarageSaleMediaRecord) -> some View {
+        ZStack {
+            if (media.type ?? "").lowercased() == "image",
+               let raw = media.url,
+               let url = URL(string: raw) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .empty:
+                        ProgressView()
+                    default:
+                        fallbackExistingMediaCard(media: media)
+                    }
+                }
+            } else {
+                fallbackExistingMediaCard(media: media)
+            }
+        }
+        .frame(width: 160, height: 160)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder
+    private func fallbackExistingMediaCard(media: GarageSaleMediaRecord) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: (media.type ?? "").lowercased() == "video" ? "video.fill" : "doc.fill")
+                .font(.system(size: 30, weight: .semibold))
+            Text((media.name ?? "").isEmpty ? "Attachment" : (media.name ?? "Attachment"))
+                .font(.caption2)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.horizontal, 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .secondarySystemBackground))
     }
 
     @ViewBuilder

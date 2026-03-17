@@ -69,6 +69,52 @@ final class SponsoredContentViewModel: ObservableObject {
     }
 
     @discardableResult
+    func updateAdvertisement(
+        user: AppSessionUser,
+        adId: String,
+        title: String,
+        description: String,
+        targetUrl: String,
+        ownerPhone: String,
+        media: [CommunityAttachmentDraft]
+    ) async -> Bool {
+        isSubmittingAd = true
+        errorMessage = nil
+        statusMessage = nil
+        defer { isSubmittingAd = false }
+
+        do {
+            try await repository.updateAdvertisement(
+                user: user,
+                adId: adId,
+                title: title,
+                description: description,
+                targetUrl: targetUrl,
+                ownerPhone: ownerPhone,
+                newMedia: media
+            )
+            await refresh()
+            statusMessage = "Advertisement updated."
+            return true
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+            return false
+        }
+    }
+
+    func deleteAdvertisement(adId: String) async {
+        errorMessage = nil
+        statusMessage = nil
+        do {
+            try await repository.deleteAdvertisement(adId: adId)
+            await refresh()
+            statusMessage = "Ad deleted successfully."
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
+    @discardableResult
     func createGarageSale(
         user: AppSessionUser,
         title: String,
@@ -111,6 +157,71 @@ final class SponsoredContentViewModel: ObservableObject {
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
             return false
+        }
+    }
+
+    func submitGarageSalePayment(
+        buyer: AppSessionUser,
+        sellerId: String,
+        garageSaleId: String,
+        amount: Double
+    ) async {
+        errorMessage = nil
+        statusMessage = nil
+        do {
+            try await repository.submitGarageSalePayment(
+                buyerUid: buyer.uid,
+                sellerUid: sellerId,
+                garageSaleId: garageSaleId,
+                amount: amount
+            )
+            statusMessage = "Payment submitted. Processing now."
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
+    func sendAdChatInvitation(user: AppSessionUser, ad: AdvertisementRecord) async {
+        errorMessage = nil
+        statusMessage = nil
+        let ownerId = (ad.ownerId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ownerId.isEmpty else {
+            errorMessage = "Recipient info missing."
+            return
+        }
+
+        do {
+            let message = try await repository.sendSponsoredChatInvitation(
+                sender: user,
+                recipientId: ownerId,
+                contextLabel: "Ad: \(ad.title ?? "Advertisement")",
+                duplicateMessage: "Invitation already sent to advertiser!"
+            )
+            statusMessage = message
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
+    func sendGarageSaleChatInvitation(user: AppSessionUser, sale: GarageSaleRecord) async {
+        errorMessage = nil
+        statusMessage = nil
+        let ownerId = (sale.ownerId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ownerId.isEmpty else {
+            errorMessage = "Recipient info missing."
+            return
+        }
+
+        do {
+            let message = try await repository.sendSponsoredChatInvitation(
+                sender: user,
+                recipientId: ownerId,
+                contextLabel: "Garage Sale: \(sale.title ?? "Listing")",
+                duplicateMessage: "Invitation already sent to seller!"
+            )
+            statusMessage = message
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
         }
     }
 }

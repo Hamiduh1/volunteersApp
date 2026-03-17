@@ -13,6 +13,12 @@ struct SponsoredContentView: View {
     @State private var selectedSection: SponsoredSection = .ads
     @State private var showCreateAd = false
     @State private var showCreateGarageSale = false
+    @State private var editingAd: AdvertisementRecord?
+    @State private var pendingDeleteAd: AdvertisementRecord?
+    @State private var expandedAdIds: Set<String> = []
+    @State private var expandedGarageIds: Set<String> = []
+    @State private var paymentTargetSale: GarageSaleRecord?
+    @State private var payAmountText = ""
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -71,6 +77,65 @@ struct SponsoredContentView: View {
                 }
             }
         }
+        .sheet(isPresented: Binding(
+            get: { editingAd != nil },
+            set: { if !$0 { editingAd = nil } }
+        )) {
+            if let ad = editingAd {
+                NavigationStack {
+                    CreateAdvertisementView(user: user, viewModel: viewModel, existingAd: ad) {
+                        editingAd = nil
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Delete Advertisement", isPresented: Binding(
+            get: { pendingDeleteAd != nil },
+            set: { if !$0 { pendingDeleteAd = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                guard let adId = pendingDeleteAd?.id, !adId.isEmpty else {
+                    pendingDeleteAd = nil
+                    return
+                }
+                Task {
+                    await viewModel.deleteAdvertisement(adId: adId)
+                    pendingDeleteAd = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteAd = nil }
+        }
+        .sheet(isPresented: Binding(
+            get: { paymentTargetSale != nil },
+            set: { if !$0 { paymentTargetSale = nil; payAmountText = "" } }
+        )) {
+            if let sale = paymentTargetSale {
+                NavigationStack {
+                    GarageSalePaymentSheet(
+                        saleTitle: sale.title ?? "Garage Sale",
+                        amountText: $payAmountText,
+                        onCancel: {
+                            paymentTargetSale = nil
+                            payAmountText = ""
+                        },
+                        onPayNow: {
+                            let amount = Double(payAmountText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+                            guard amount > 0, let saleId = sale.id, !saleId.isEmpty else { return }
+                            Task {
+                                await viewModel.submitGarageSalePayment(
+                                    buyer: user,
+                                    sellerId: sale.ownerId ?? "",
+                                    garageSaleId: saleId,
+                                    amount: amount
+                                )
+                                paymentTargetSale = nil
+                                payAmountText = ""
+                            }
+                        }
+                    )
+                }
+            }
+        }
         .task { await viewModel.refresh() }
         .refreshable { await viewModel.refresh() }
         .alert("Error", isPresented: Binding(
@@ -93,58 +158,102 @@ struct SponsoredContentView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(viewModel.advertisements) { ad in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(ad.title ?? "Ad")
-                            .font(.headline)
-                        Text(ad.description ?? "")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-
-                        if let mediaUrl = ad.mediaUrls?.first,
-                           let url = URL(string: mediaUrl) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                case .empty:
-                                    ProgressView()
-                                default:
-                                    Image(systemName: "photo")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .frame(height: 180)
-                            .frame(maxWidth: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-
-                        if let sponsor = ad.sponsor, !sponsor.isEmpty {
-                            Text("Sponsor: \(sponsor)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        HStack(spacing: 8) {
-                            if let target = ad.targetUrl, let url = URL(string: target) {
-                                Link("Open", destination: url)
-                                    .font(.subheadline)
-                            }
-                            if let phone = ad.ownerPhone, let url = telURL(from: phone) {
-                                Button("Call") { openURL(url) }
-                                    .buttonStyle(.bordered)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Color(uiColor: .secondarySystemBackground))
-                    )
-                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                    .listRowSeparator(.hidden)
+                    adCard(ad)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func adCard(_ ad: AdvertisementRecord) -> some View {
+        let adId = ad.id ?? "ad-\(ad.title ?? "untitled")-\(ad.timestamp?.seconds ?? 0)"
+        let isOwner = (ad.ownerId ?? "") == user.uid
+        let isExpanded = expandedAdIds.contains(adId)
+
+        VStack(alignment: .leading, spacing: 10) {
+            adMediaPager(ad)
+
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(ad.title ?? "Ad")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text("Sponsored by \(ad.sponsor ?? "Volunteer App Partner")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isOwner {
+                    Menu {
+                        Button("Edit") { editingAd = ad }
+                        Button("Delete", role: .destructive) { pendingDeleteAd = ad }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                    }
+                }
+                Button {
+                    toggleExpanded(id: adId, ads: true)
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.callout.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if isExpanded {
+                Text(ad.description ?? "")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    if let target = ad.targetUrl, let url = URL(string: target) {
+                        Button("Learn More") { openURL(url) }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    if !isOwner {
+                        Button("Chat") {
+                            Task { await viewModel.sendAdChatInvitation(user: user, ad: ad) }
+                        }
+                        .buttonStyle(.bordered)
+
+                        if let phone = ad.ownerPhone, let tel = telURL(from: phone) {
+                            Button("Call") { openURL(tel) }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
+        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+        .listRowSeparator(.hidden)
+    }
+
+    @ViewBuilder
+    private func adMediaPager(_ ad: AdvertisementRecord) -> some View {
+        let media = normalizedAdMedia(ad)
+        if media.isEmpty {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(height: 180)
+        } else {
+            TabView {
+                ForEach(Array(media.enumerated()), id: \.offset) { _, item in
+                    mediaPreview(item)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -158,56 +267,184 @@ struct SponsoredContentView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(viewModel.garageSales) { sale in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(sale.title ?? "Garage Sale")
-                            .font(.headline)
-                        Text(sale.description ?? "")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-
-                        if let mediaUrl = sale.media?.first?.url,
-                           let url = URL(string: mediaUrl) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                case .empty:
-                                    ProgressView()
-                                default:
-                                    Image(systemName: "photo")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .frame(height: 180)
-                            .frame(maxWidth: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-
-                        Text("\(sale.city ?? "") \(sale.state ?? "")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 8) {
-                            if let phone = sale.contactPhone, let url = telURL(from: phone) {
-                                Button("Call") { openURL(url) }
-                                    .buttonStyle(.bordered)
-                            }
-                            if let email = sale.contactEmail, let url = emailURL(from: email) {
-                                Button("Email") { openURL(url) }
-                                    .buttonStyle(.bordered)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Color(uiColor: .secondarySystemBackground))
-                    )
-                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                    .listRowSeparator(.hidden)
+                    garageSaleCard(sale)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func garageSaleCard(_ sale: GarageSaleRecord) -> some View {
+        let saleId = sale.id ?? "sale-\(sale.title ?? "untitled")-\(sale.timestamp?.seconds ?? 0)"
+        let isExpanded = expandedGarageIds.contains(saleId)
+
+        VStack(alignment: .leading, spacing: 10) {
+            garageMediaPager(sale)
+
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(sale.title ?? "Garage Sale")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text("Garage sale listing")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    toggleExpanded(id: saleId, ads: false)
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.callout.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if isExpanded {
+                Text(sale.description ?? "")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Contact")
+                        .font(.subheadline.weight(.semibold))
+                    Text(sale.contactName ?? "Contact not listed")
+                    if let phone = sale.contactPhone, !phone.isEmpty {
+                        Text("Phone: \(phone)")
+                    }
+                    if let email = sale.contactEmail, !email.isEmpty {
+                        Text("Email: \(email)")
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Address")
+                        .font(.subheadline.weight(.semibold))
+                    Text(addressLine(for: sale).isEmpty ? "Address not listed" : addressLine(for: sale))
+                }
+
+                HStack(spacing: 8) {
+                    Button("Chat") {
+                        Task { await viewModel.sendGarageSaleChatInvitation(user: user, sale: sale) }
+                    }
+                    .buttonStyle(.bordered)
+
+                    if let phone = sale.contactPhone, let tel = telURL(from: phone) {
+                        Button("Call") { openURL(tel) }
+                            .buttonStyle(.bordered)
+                    }
+                    if let email = sale.contactEmail, let emailURL = emailURL(from: email) {
+                        Button("Email") { openURL(emailURL) }
+                            .buttonStyle(.bordered)
+                    }
+                    if let mapURL = mapURL(for: sale) {
+                        Button("Map") { openURL(mapURL) }
+                            .buttonStyle(.bordered)
+                    }
+                }
+
+                Button("Pay Total Sales") {
+                    paymentTargetSale = sale
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
+        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+        .listRowSeparator(.hidden)
+    }
+
+    @ViewBuilder
+    private func garageMediaPager(_ sale: GarageSaleRecord) -> some View {
+        let media = sale.media ?? []
+        if media.isEmpty {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(height: 180)
+        } else {
+            TabView {
+                ForEach(Array(media.enumerated()), id: \.offset) { _, item in
+                    mediaPreview(item)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    @ViewBuilder
+    private func mediaPreview(_ media: GarageSaleMediaRecord) -> some View {
+        let type = (media.type ?? "image").lowercased()
+        if type == "image", let raw = media.url, let url = URL(string: raw) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .empty:
+                    ProgressView()
+                default:
+                    fallbackMediaPreview(type: type, name: media.name ?? "Attachment")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            fallbackMediaPreview(type: type, name: media.name ?? "Attachment")
+                .onTapGesture {
+                    if let raw = media.url, let url = URL(string: raw) {
+                        openURL(url)
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func fallbackMediaPreview(type: String, name: String) -> some View {
+        let icon = type == "video" ? "video.fill" : "doc.fill"
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 30, weight: .semibold))
+            Text(name)
+                .font(.caption)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.horizontal, 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .tertiarySystemFill))
+    }
+
+    private func normalizedAdMedia(_ ad: AdvertisementRecord) -> [GarageSaleMediaRecord] {
+        if let media = ad.media, !media.isEmpty {
+            return media
+        }
+        return (ad.mediaUrls ?? []).map {
+            GarageSaleMediaRecord(url: $0, type: "image", name: "Image")
+        }
+    }
+
+    private func toggleExpanded(id: String, ads: Bool) {
+        if ads {
+            if expandedAdIds.contains(id) {
+                expandedAdIds.remove(id)
+            } else {
+                expandedAdIds.insert(id)
+            }
+            return
+        }
+
+        if expandedGarageIds.contains(id) {
+            expandedGarageIds.remove(id)
+        } else {
+            expandedGarageIds.insert(id)
         }
     }
 
@@ -221,5 +458,84 @@ struct SponsoredContentView: View {
         let email = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !email.isEmpty else { return nil }
         return URL(string: "mailto:\(email)")
+    }
+
+    private func addressLine(for sale: GarageSaleRecord) -> String {
+        [sale.address, sale.city, sale.state, sale.postalCode]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+
+    private func mapURL(for sale: GarageSaleRecord) -> URL? {
+        if let lat = sale.latitude, let lng = sale.longitude {
+            return URL(string: "http://maps.apple.com/?ll=\(lat),\(lng)")
+        }
+        let address = addressLine(for: sale)
+        guard !address.isEmpty else { return nil }
+        let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? address
+        return URL(string: "http://maps.apple.com/?q=\(encoded)")
+    }
+
+}
+
+private struct GarageSalePaymentSheet: View {
+    let saleTitle: String
+    @Binding var amountText: String
+    let onCancel: () -> Void
+    let onPayNow: () -> Void
+
+    private var amount: Double {
+        Double(amountText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+    }
+
+    private var platformFee: Double { amount * 0.02 }
+    private var sellerNet: Double { max(0, amount - platformFee) }
+
+    var body: some View {
+        Form {
+            Section("Garage Sale") {
+                Text(saleTitle)
+                    .font(.headline)
+            }
+
+            Section("Payment Amount") {
+                TextField("Total sales amount", text: $amountText)
+                    .keyboardType(.decimalPad)
+            }
+
+            if amount > 0 {
+                Section("Breakdown") {
+                    HStack {
+                        Text("Platform fee (2%)")
+                        Spacer()
+                        Text(currency(platformFee))
+                    }
+                    HStack {
+                        Text("Seller net")
+                        Spacer()
+                        Text(currency(sellerNet))
+                    }
+                }
+            }
+        }
+        .navigationTitle("Pay Garage Sale")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Cancel") { onCancel() }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Pay Now") { onPayNow() }
+                    .disabled(amount <= 0)
+            }
+        }
+    }
+
+    private func currency(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "$%.2f", value)
     }
 }
