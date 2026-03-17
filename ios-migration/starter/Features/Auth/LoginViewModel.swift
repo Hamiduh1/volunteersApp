@@ -79,6 +79,10 @@ final class LoginViewModel: ObservableObject {
             errorMessage = "Email is required."
             return
         }
+        guard cleanEmail.contains("@") else {
+            errorMessage = "Enter a valid email address."
+            return
+        }
         guard !password.isEmpty else {
             errorMessage = "Password is required."
             return

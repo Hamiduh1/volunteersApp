@@ -33,8 +33,13 @@ struct LoginView: View {
                 Section("Sign In") {
                     TextField("Email", text: $viewModel.email)
                         .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
                         .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .submitLabel(.next)
                     SecureField("Password", text: $viewModel.password)
+                        .textContentType(.password)
+                        .submitLabel(.go)
                 }
 
                 Section(viewModel.showStaffRoles ? "Staff login" : "Log in as") {

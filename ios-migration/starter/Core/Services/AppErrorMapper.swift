@@ -19,6 +19,10 @@ enum AppErrorMapper {
                 return "Password is too weak. Use at least 6 characters."
             case .networkError:
                 return "Network unavailable. Check your connection and try again."
+            case .tooManyRequests:
+                return "Too many attempts. Please wait a moment and try again."
+            case .internalError:
+                return "Authentication service is temporarily unavailable. Please try again."
             default:
                 break
             }
@@ -44,6 +48,9 @@ enum AppErrorMapper {
         }
         if lower.contains("network") || lower.contains("offline") || lower.contains("unable to resolve host") {
             return "Network unavailable. Check your connection and try again."
+        }
+        if lower.contains("internal error") || lower.contains("internalerror") {
+            return "Authentication service is temporarily unavailable. Please try again."
         }
         if lower.contains("app check") {
             return "Security validation failed. Reopen the app and try again."

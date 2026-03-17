@@ -29,9 +29,13 @@ struct SignUpView: View {
 
             Section("Profile Details") {
                 TextField("Full name", text: $viewModel.name)
+                    .textContentType(.name)
+                    .autocorrectionDisabled(true)
                 TextField("Email", text: $viewModel.email)
                     .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
                     .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
                 Picker("Country", selection: countryBinding) {
                     ForEach(viewModel.countryOptions, id: \.self) { option in
                         Text(option).tag(option)
@@ -56,7 +60,9 @@ struct SignUpView: View {
                 }
 
                 SecureField("Password", text: $viewModel.password)
+                    .textContentType(.newPassword)
                 SecureField("Confirm password", text: $viewModel.confirmPassword)
+                    .textContentType(.newPassword)
             }
 
             Section {

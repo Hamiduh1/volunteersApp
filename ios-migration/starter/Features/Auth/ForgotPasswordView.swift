@@ -8,7 +8,10 @@ struct ForgotPasswordView: View {
             Section("Reset Password") {
                 TextField("Email", text: $viewModel.email)
                     .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
                     .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
+                    .submitLabel(.send)
             }
 
             Section {
