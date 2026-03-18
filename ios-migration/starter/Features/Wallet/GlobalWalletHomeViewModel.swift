@@ -72,12 +72,14 @@ final class GlobalWalletHomeViewModel: ObservableObject {
 
     func fundingEligibleMethods(for direction: WalletFundingDirection) -> [PaymentMethodRecord] {
         paymentMethods.filter { method in
+            let hasIdentifier = !methodIdentifier(method).isEmpty
+            guard hasIdentifier else { return false }
             if isMobileMoneyMethod(method) { return true }
             if isCardMethod(method) { return true }
             if isBankMethod(method) {
                 switch direction {
                 case .deposit:
-                    return isAchDepositEnabled(method)
+                    return summary.currency.uppercased() == "USD" && isAchDepositEnabled(method)
                 case .withdraw:
                     return true
                 }
@@ -214,6 +216,16 @@ final class GlobalWalletHomeViewModel: ObservableObject {
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
         }
+    }
+
+    func prepareFunding(for direction: WalletFundingDirection) {
+        let eligible = fundingEligibleMethods(for: direction)
+        if selectedFundingMethod == nil || !eligible.contains(where: { methodIdentifier($0) == selectedFundingMethodId }) {
+            selectedFundingMethodId = eligible.first.map(methodIdentifier) ?? ""
+        }
+        fundingAmountText = ""
+        statusMessage = nil
+        errorMessage = nil
     }
 
     func deleteBeneficiary(_ beneficiary: BeneficiaryRecord) async {

@@ -3,7 +3,6 @@ import SwiftUI
 struct GlobalWalletHomeView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = GlobalWalletHomeViewModel()
-    @State private var fundingDirection: WalletFundingDirection = .deposit
     @State private var showBeneficiaryManager = false
     @State private var beneficiaryToDelete: BeneficiaryRecord?
 
@@ -12,16 +11,17 @@ struct GlobalWalletHomeView: View {
             VStack(spacing: 14) {
                 heroBalanceCard
                 globalCalculatorCard
-                fundingCard
-                quickActionCard
-                servicesCard
-                beneficiariesCard
+                walletActionsCard
+                accountToolsCard
+                if user.role == .volunteer || user.role == .user {
+                    becomeAgentCard
+                }
                 recentTransactionsCard
             }
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("Wallet")
+        .navigationTitle("My Global Wallet")
         .task { await viewModel.refresh(uid: user.uid) }
         .refreshable { await viewModel.refresh(uid: user.uid) }
         .sheet(isPresented: $showBeneficiaryManager) {
@@ -57,7 +57,7 @@ struct GlobalWalletHomeView: View {
     @ViewBuilder
     private var heroBalanceCard: some View {
         CardContainer(background: .blue.opacity(0.92)) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Total Balance (\(viewModel.summary.currency))")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.8))
@@ -72,6 +72,28 @@ struct GlobalWalletHomeView: View {
                     Text("Card deposits are usually quick. ACH bank deposits can take 1-3 business days.")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.86))
+                }
+
+                HStack(spacing: 10) {
+                    NavigationLink {
+                        WalletFundingView(direction: .deposit, viewModel: viewModel)
+                    } label: {
+                        walletHeroButton(
+                            title: "Deposit",
+                            icon: "arrow.down.circle.fill",
+                            isFilled: true
+                        )
+                    }
+
+                    NavigationLink {
+                        WalletFundingView(direction: .withdraw, viewModel: viewModel)
+                    } label: {
+                        walletHeroButton(
+                            title: "Withdraw",
+                            icon: "arrow.up.circle.fill",
+                            isFilled: false
+                        )
+                    }
                 }
             }
         }
@@ -157,57 +179,82 @@ struct GlobalWalletHomeView: View {
     }
 
     @ViewBuilder
-    private var fundingCard: some View {
-        let eligibleMethods = viewModel.fundingEligibleMethods(for: fundingDirection)
-
+    private var walletActionsCard: some View {
         CardContainer {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Deposit / Withdraw")
+                Text("Services")
                     .font(.headline)
 
-                Picker("Direction", selection: $fundingDirection) {
-                    Text("Deposit").tag(WalletFundingDirection.deposit)
-                    Text("Withdraw").tag(WalletFundingDirection.withdraw)
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: fundingDirection) { _, newValue in
-                    let first = viewModel.fundingEligibleMethods(for: newValue).first.map(viewModel.methodIdentifier) ?? ""
-                    if !first.isEmpty {
-                        viewModel.selectedFundingMethodId = first
-                    }
+                NavigationLink {
+                    WalletTransactView(user: user)
+                } label: {
+                    walletActionRow(
+                        title: "Send Money",
+                        subtitle: "Clearly separated App User and Mobile Money flow",
+                        icon: "paperplane.fill"
+                    )
                 }
 
-                TextField("Amount", text: $viewModel.fundingAmountText)
-                    .keyboardType(.decimalPad)
-                    .textFieldStyle(.roundedBorder)
+                NavigationLink {
+                    WalletOperationsView(user: user, initialTab: .agent)
+                } label: {
+                    walletActionRow(
+                        title: "Agent Cash-Out",
+                        subtitle: "Authorize, generate code, and complete payouts",
+                        icon: "person.badge.shield.checkmark.fill"
+                    )
+                }
 
-                if eligibleMethods.isEmpty {
-                    Text("No eligible payment methods found for this action.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Picker("Funding method", selection: $viewModel.selectedFundingMethodId) {
-                        ForEach(eligibleMethods, id: \.id) { method in
-                            Text(viewModel.methodLabel(method))
-                                .tag(viewModel.methodIdentifier(method))
-                        }
-                    }
+                NavigationLink {
+                    WalletTransactionHistoryView(user: user)
+                } label: {
+                    walletActionRow(
+                        title: "History",
+                        subtitle: "View receipts and wallet activity",
+                        icon: "clock.arrow.circlepath"
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var accountToolsCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Account Tools")
+                    .font(.headline)
+
+                NavigationLink {
+                    PaymentMethodsView(user: user)
+                } label: {
+                    walletActionRow(
+                        title: "Payment Methods",
+                        subtitle: "Manage cards, banks, mobile money, and payout setup",
+                        icon: "creditcard.fill"
+                    )
                 }
 
                 Button {
-                    Task { await viewModel.submitFunding(fundingDirection) }
+                    showBeneficiaryManager = true
                 } label: {
-                    if viewModel.isSubmittingFunding {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text(fundingDirection == .deposit ? "Submit Deposit" : "Submit Withdrawal")
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                    }
+                    walletActionRow(
+                        title: "Manage Beneficiaries",
+                        subtitle: "Review and delete saved recipients",
+                        icon: "person.2.fill"
+                    )
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isSubmittingFunding || eligibleMethods.isEmpty)
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    WalletOperationsView(user: user, initialTab: .mobileMoney)
+                } label: {
+                    walletActionRow(
+                        title: "Mobile Money",
+                        subtitle: "Cash in / cash out using linked mobile wallets",
+                        icon: "iphone.gen3.radiowaves.left.and.right"
+                    )
+                }
 
                 if let status = viewModel.statusMessage, !status.isEmpty {
                     Text(status)
@@ -219,179 +266,22 @@ struct GlobalWalletHomeView: View {
     }
 
     @ViewBuilder
-    private var quickActionCard: some View {
-        CardContainer {
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    NavigationLink {
-                        WalletTransactView(user: user)
-                    } label: {
-                        quickActionButton(
-                            title: "Send",
-                            subtitle: "Wallet/Card/Bank",
-                            icon: "paperplane.fill"
-                        )
-                    }
-
-                    NavigationLink {
-                        WalletTransactionHistoryView(user: user)
-                    } label: {
-                        quickActionButton(
-                            title: "History",
-                            subtitle: "Receipts",
-                            icon: "clock.arrow.circlepath"
-                        )
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    NavigationLink {
-                        WalletOperationsView(user: user, initialTab: .mobileMoney)
-                    } label: {
-                        quickActionButton(
-                            title: "Mobile Money",
-                            subtitle: "Cash In / Cash Out",
-                            icon: "iphone.gen3.radiowaves.left.and.right"
-                        )
-                    }
-
-                    NavigationLink {
-                        WalletOperationsView(user: user, initialTab: .agent)
-                    } label: {
-                        quickActionButton(
-                            title: "Agent",
-                            subtitle: "Codes / Cashout",
-                            icon: "person.badge.shield.checkmark"
-                        )
-                    }
-                }
-
-                NavigationLink {
-                    PaymentMethodsView(user: user)
-                } label: {
-                    HStack {
-                        Label("Payment Methods & Payout", systemImage: "creditcard.and.123")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.subheadline.weight(.semibold))
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var servicesCard: some View {
-        CardContainer {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Services")
-                    .font(.headline)
-                NavigationLink {
-                    WalletTransactView(user: user)
-                } label: {
-                    serviceRow(
-                        title: "Send Money",
-                        subtitle: "App user wallet, card, bank, or beneficiary mobile money",
-                        icon: "paperplane"
-                    )
-                }
-                NavigationLink {
-                    WalletOperationsView(user: user, initialTab: .mobileMoney)
-                } label: {
-                    serviceRow(
-                        title: "Mobile Money",
-                        subtitle: "Deposit and withdraw with linked mobile money",
-                        icon: "iphone.gen3.radiowaves.left.and.right"
-                    )
-                }
-                NavigationLink {
-                    WalletOperationsView(user: user, initialTab: .agent)
-                } label: {
-                    serviceRow(
-                        title: "Agent Portal",
-                        subtitle: "Authorize, generate payout code, and complete agent payout",
-                        icon: "person.badge.shield.checkmark"
-                    )
-                }
-                NavigationLink {
-                    WalletTransactionHistoryView(user: user)
-                } label: {
-                    serviceRow(
-                        title: "Transaction History",
-                        subtitle: "Track receipts by all, deposit, withdrawals, and mobile money",
-                        icon: "list.bullet.rectangle"
-                    )
-                }
-                NavigationLink {
-                    PaymentMethodsView(user: user)
-                } label: {
-                    serviceRow(
-                        title: "Payment Methods",
-                        subtitle: "Manage cards, banks, mobile money, and payout setup",
-                        icon: "wallet.pass"
-                    )
-                }
-
-                if user.role == .volunteer || user.role == .user {
-                    Divider()
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Earn as an Agent")
-                                .font(.subheadline.weight(.semibold))
-                            Text("Facilitate cash transactions and earn commissions.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Authorize") {
-                            Task { await viewModel.authorizeAgent() }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.isSubmittingFunding)
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var beneficiariesCard: some View {
-        CardContainer {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Beneficiaries")
-                        .font(.headline)
-                    Spacer()
-                    Button("Manage") {
-                        showBeneficiaryManager = true
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                if viewModel.beneficiaries.isEmpty {
-                    Text("No beneficiaries saved yet.")
-                        .font(.footnote)
+    private var becomeAgentCard: some View {
+        CardContainer(background: Color.orange.opacity(0.12)) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Earn as an Agent")
+                        .font(.subheadline.weight(.bold))
+                    Text("Facilitate cash transactions and earn commissions.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.beneficiaries.prefix(3)) { beneficiary in
-                        let name = beneficiary.name ?? "Beneficiary"
-                        let details = [beneficiary.network, beneficiary.phone]
-                            .compactMap { $0 }
-                            .joined(separator: " - ")
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(name)
-                                .font(.subheadline.weight(.semibold))
-                            if !details.isEmpty {
-                                Text(details)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 3)
-                    }
                 }
+                Spacer()
+                Button("Authorize") {
+                    Task { await viewModel.authorizeAgent() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isSubmittingFunding)
             }
         }
     }
@@ -483,6 +373,50 @@ struct GlobalWalletHomeView: View {
         .presentationDetents([.large])
     }
 
+    @ViewBuilder
+    private func walletHeroButton(title: String, icon: String, isFilled: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+            Text(title)
+                .fontWeight(.semibold)
+        }
+        .font(.subheadline)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .foregroundStyle(isFilled ? .black : .white)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isFilled ? Color.white : Color.white.opacity(0.1))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(isFilled ? 0 : 0.6), lineWidth: isFilled ? 0 : 1)
+        )
+    }
+
+    @ViewBuilder
+    private func walletActionRow(title: String, subtitle: String, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+
     private var balanceText: String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
@@ -495,37 +429,91 @@ struct GlobalWalletHomeView: View {
         let sign = amount >= 0 ? "+" : "-"
         return "\(sign)\(String(format: "%.2f", abs(amount)))"
     }
+}
 
-    @ViewBuilder
-    private func quickActionButton(title: String, subtitle: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Image(systemName: icon)
-                .font(.title3)
-            Text(title)
-                .font(.subheadline.weight(.bold))
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
-        .padding(10)
-        .background(Color(.tertiarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
+private struct WalletFundingView: View {
+    let direction: WalletFundingDirection
+    @ObservedObject var viewModel: GlobalWalletHomeViewModel
 
-    @ViewBuilder
-    private func serviceRow(title: String, subtitle: String, icon: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text(subtitle)
-                    .font(.caption)
+    var body: some View {
+        Form {
+            Section("Flow") {
+                Text(direction == .deposit ? "Deposit to Wallet" : "Withdraw from Wallet")
+                    .font(.headline)
+                Text(directionDescription)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+
+            Section("Amount") {
+                TextField("Amount", text: $viewModel.fundingAmountText)
+                    .keyboardType(.decimalPad)
+            }
+
+            Section("Funding Method") {
+                if eligibleMethods.isEmpty {
+                    Text("No eligible methods available.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Method", selection: $viewModel.selectedFundingMethodId) {
+                        ForEach(Array(eligibleMethods.enumerated()), id: \.offset) { _, method in
+                            Text(viewModel.methodLabel(method))
+                                .tag(viewModel.methodIdentifier(method))
+                        }
+                    }
+                }
+            }
+
+            if let selectedMethod = viewModel.selectedFundingMethod,
+               let type = selectedMethod.type?.uppercased(),
+               type.contains("MOBILE") {
+                Section("Mobile Money") {
+                    Text("Mobile money flows use the linked network and phone number.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await viewModel.submitFunding(direction) }
+                } label: {
+                    if viewModel.isSubmittingFunding {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text(direction == .deposit ? "Submit Deposit" : "Submit Withdrawal")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isSubmittingFunding || eligibleMethods.isEmpty || viewModel.parsedFundingAmount <= 0)
+            }
+
+            if let status = viewModel.statusMessage, !status.isEmpty {
+                Section {
+                    Text(status)
+                        .foregroundStyle(.green)
+                        .font(.footnote)
+                }
+            }
+        }
+        .navigationTitle(direction == .deposit ? "Deposit" : "Withdraw")
+        .onAppear {
+            viewModel.prepareFunding(for: direction)
+        }
+    }
+
+    private var eligibleMethods: [PaymentMethodRecord] {
+        viewModel.fundingEligibleMethods(for: direction)
+    }
+
+    private var directionDescription: String {
+        switch direction {
+        case .deposit:
+            return "Add money from card, ACH-enabled bank, or mobile money."
+        case .withdraw:
+            return "Move wallet funds to linked card, bank, or mobile money."
         }
     }
 }
