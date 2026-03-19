@@ -1,6 +1,14 @@
 ﻿import SwiftUI
 
 struct PaymentMethodsView: View {
+    private enum SectionAnchor {
+        static let dashboard = "payment_dashboard"
+        static let payout = "payment_payout_setup"
+        static let cards = "payment_cards"
+        static let banks = "payment_banks"
+        static let mobileMoney = "payment_mobile_money"
+    }
+
     let user: AppSessionUser
     @StateObject private var viewModel = PaymentMethodsViewModel()
 
@@ -12,61 +20,143 @@ struct PaymentMethodsView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                payoutSetupCard
-                if hasCardRelinkRequirement {
-                    relinkWarningCard
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 14) {
+                    dashboardHomeCard(proxy: proxy)
+                        .id(SectionAnchor.dashboard)
+
+                    payoutSetupCard
+                        .id(SectionAnchor.payout)
+
+                    if hasCardRelinkRequirement {
+                        relinkWarningCard
+                    }
+
+                    methodsSection(
+                        title: "Cards",
+                        methods: viewModel.cardMethods,
+                        icon: "creditcard.fill"
+                    )
+                    .id(SectionAnchor.cards)
+
+                    methodsSection(
+                        title: "Bank Accounts",
+                        methods: viewModel.bankMethods,
+                        icon: "building.columns.fill"
+                    )
+                    .id(SectionAnchor.banks)
+
+                    methodsSection(
+                        title: "Mobile Money",
+                        methods: viewModel.mobileMoneyMethods,
+                        icon: "iphone.gen3.radiowaves.left.and.right"
+                    )
+                    .id(SectionAnchor.mobileMoney)
                 }
-                methodsSection(title: "Cards", methods: viewModel.cardMethods, icon: "creditcard.fill")
-                methodsSection(title: "Bank Accounts", methods: viewModel.bankMethods, icon: "building.columns.fill")
-                methodsSection(title: "Mobile Money", methods: viewModel.mobileMoneyMethods, icon: "iphone.gen3.radiowaves.left.and.right")
+                .padding(16)
             }
-            .padding(16)
-        }
-        .background(Color(.systemGroupedBackground))
-        .navigationTitle("Payment Methods")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showAddOptions = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Payment Methods")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showAddOptions = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
                 }
             }
+            .task { await viewModel.refresh(user: user) }
+            .refreshable { await viewModel.refresh(user: user) }
+            .confirmationDialog("Add Payment Method", isPresented: $showAddOptions, titleVisibility: .visible) {
+                Button("Card") { showAddCardSheet = true }
+                Button("Bank Account") { showAddBankSheet = true }
+                Button("Mobile Money") { showAddMobileMoneySheet = true }
+                Button("Cancel", role: .cancel) {}
+            }
+            .sheet(isPresented: $showAddCardSheet) {
+                AddCardSheet(viewModel: viewModel, isPresented: $showAddCardSheet)
+            }
+            .sheet(isPresented: $showAddBankSheet) {
+                AddBankSheet(viewModel: viewModel, isPresented: $showAddBankSheet)
+            }
+            .sheet(isPresented: $showAddMobileMoneySheet) {
+                AddMobileMoneySheet(viewModel: viewModel, isPresented: $showAddMobileMoneySheet)
+            }
+            .alert("Error", isPresented: Binding(
+                get: { viewModel.errorMessage != nil },
+                set: { if !$0 { viewModel.errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.errorMessage ?? "Unknown error")
+            }
+            .alert("Status", isPresented: Binding(
+                get: { viewModel.statusMessage != nil },
+                set: { if !$0 { viewModel.statusMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.statusMessage ?? "")
+            }
         }
-        .task { await viewModel.refresh(user: user) }
-        .refreshable { await viewModel.refresh(user: user) }
-        .confirmationDialog("Add Payment Method", isPresented: $showAddOptions, titleVisibility: .visible) {
-            Button("Card") { showAddCardSheet = true }
-            Button("Bank Account") { showAddBankSheet = true }
-            Button("Mobile Money") { showAddMobileMoneySheet = true }
-            Button("Cancel", role: .cancel) {}
-        }
-        .sheet(isPresented: $showAddCardSheet) {
-            AddCardSheet(viewModel: viewModel, isPresented: $showAddCardSheet)
-        }
-        .sheet(isPresented: $showAddBankSheet) {
-            AddBankSheet(viewModel: viewModel, isPresented: $showAddBankSheet)
-        }
-        .sheet(isPresented: $showAddMobileMoneySheet) {
-            AddMobileMoneySheet(viewModel: viewModel, isPresented: $showAddMobileMoneySheet)
-        }
-        .alert("Error", isPresented: Binding(
-            get: { viewModel.errorMessage != nil },
-            set: { if !$0 { viewModel.errorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(viewModel.errorMessage ?? "Unknown error")
-        }
-        .alert("Status", isPresented: Binding(
-            get: { viewModel.statusMessage != nil },
-            set: { if !$0 { viewModel.statusMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(viewModel.statusMessage ?? "")
+    }
+
+    @ViewBuilder
+    private func dashboardHomeCard(proxy: ScrollViewProxy) -> some View {
+        PaymentCardContainer {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Dashboard Home")
+                    .font(.headline)
+
+                Text("Android-style quick navigation and method setup.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    dashboardMetric(value: "\(viewModel.cardMethods.count)", label: "Cards")
+                    dashboardMetric(value: "\(viewModel.bankMethods.count)", label: "Banks")
+                    dashboardMetric(value: "\(viewModel.mobileMoneyMethods.count)", label: "Mobile")
+                }
+
+                Text("Quick Add")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    quickAddTile(title: "Card", icon: "creditcard.fill") {
+                        showAddCardSheet = true
+                    }
+                    quickAddTile(title: "Bank", icon: "building.columns.fill") {
+                        showAddBankSheet = true
+                    }
+                    quickAddTile(title: "Mobile", icon: "iphone.gen3.radiowaves.left.and.right") {
+                        showAddMobileMoneySheet = true
+                    }
+                }
+
+                Divider()
+
+                Text("Section Navigation")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    dashboardNavButton("Payout") {
+                        withAnimation { proxy.scrollTo(SectionAnchor.payout, anchor: .top) }
+                    }
+                    dashboardNavButton("Cards") {
+                        withAnimation { proxy.scrollTo(SectionAnchor.cards, anchor: .top) }
+                    }
+                    dashboardNavButton("Banks") {
+                        withAnimation { proxy.scrollTo(SectionAnchor.banks, anchor: .top) }
+                    }
+                    dashboardNavButton("Mobile") {
+                        withAnimation { proxy.scrollTo(SectionAnchor.mobileMoney, anchor: .top) }
+                    }
+                }
+            }
         }
     }
 
@@ -270,6 +360,52 @@ struct PaymentMethodsView: View {
 
     private var hasCardRelinkRequirement: Bool {
         viewModel.cardMethods.contains { $0.requiresRelinkForCharges == true }
+    }
+
+    @ViewBuilder
+    private func dashboardMetric(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func quickAddTile(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.subheadline)
+                    .foregroundStyle(.blue)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func dashboardNavButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .font(.caption.weight(.semibold))
     }
 }
 
