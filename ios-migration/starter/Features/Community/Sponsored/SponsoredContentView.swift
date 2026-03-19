@@ -8,6 +8,13 @@ private enum SponsoredSection: String, CaseIterable, Identifiable {
 }
 
 struct SponsoredContentView: View {
+    private enum SectionAnchor {
+        static let dashboard = "sponsored_dashboard"
+        static let sectionPicker = "sponsored_picker"
+        static let ads = "sponsored_ads"
+        static let garage = "sponsored_garage"
+    }
+
     let user: AppSessionUser
     @StateObject private var viewModel = SponsoredContentViewModel()
     @State private var selectedSection: SponsoredSection = .ads
@@ -22,28 +29,38 @@ struct SponsoredContentView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        List {
-            if let status = viewModel.statusMessage, !status.isEmpty {
+        ScrollViewReader { proxy in
+            List {
                 Section {
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    dashboardHomeSection(proxy: proxy)
                 }
-            }
+                .id(SectionAnchor.dashboard)
 
-            Section {
-                Picker("Section", selection: $selectedSection) {
-                    ForEach(SponsoredSection.allCases) { section in
-                        Text(section.rawValue).tag(section)
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Section {
+                        Text(status)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .pickerStyle(.segmented)
-            }
 
-            if selectedSection == .ads {
-                sponsoredAdsSection
-            } else {
-                garageSalesSection
+                Section {
+                    Picker("Section", selection: $selectedSection) {
+                        ForEach(SponsoredSection.allCases) { section in
+                            Text(section.rawValue).tag(section)
+                        }
+                    }
+                }
+                .id(SectionAnchor.sectionPicker)
+                .pickerStyle(.segmented)
+
+                if selectedSection == .ads {
+                    sponsoredAdsSection
+                        .id(SectionAnchor.ads)
+                } else {
+                    garageSalesSection
+                        .id(SectionAnchor.garage)
+                }
             }
         }
         .listStyle(.plain)
@@ -146,6 +163,126 @@ struct SponsoredContentView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+    }
+
+    @ViewBuilder
+    private func dashboardHomeSection(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dashboard Home")
+                .font(.headline)
+
+            Text("Android-style sponsored control center for ads and garage sales.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                dashboardMetric(value: "\(viewModel.advertisements.count)", label: "Ads")
+                dashboardMetric(value: "\(viewModel.garageSales.count)", label: "Garage")
+                dashboardMetric(value: "\(viewModel.isLoading ? "..." : "Ready")", label: "Status")
+            }
+
+            HStack(spacing: 10) {
+                dashboardTile(
+                    title: "Post Ad",
+                    icon: "megaphone.fill"
+                ) {
+                    selectedSection = .ads
+                    showCreateAd = true
+                }
+                dashboardTile(
+                    title: "Post Garage",
+                    icon: "storefront.fill"
+                ) {
+                    selectedSection = .garage
+                    showCreateGarageSale = true
+                }
+                dashboardTile(
+                    title: "Refresh",
+                    icon: "arrow.clockwise.circle.fill"
+                ) {
+                    Task { await viewModel.refresh() }
+                }
+            }
+
+            HStack(spacing: 8) {
+                dashboardQuickButton("Picker") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.sectionPicker, anchor: .top) }
+                }
+                dashboardQuickButton("Ads") {
+                    selectedSection = .ads
+                    withAnimation { proxy.scrollTo(SectionAnchor.ads, anchor: .top) }
+                }
+                dashboardQuickButton("Garage") {
+                    selectedSection = .garage
+                    withAnimation { proxy.scrollTo(SectionAnchor.garage, anchor: .top) }
+                }
+            }
+
+            HStack(spacing: 8) {
+                NavigationLink {
+                    CommunityHubView(user: user)
+                } label: {
+                    Label("Community Dashboard", systemImage: "square.grid.2x2.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+
+                NavigationLink {
+                    AIAssistantView()
+                } label: {
+                    Label("AI Assistant", systemImage: "sparkles")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dashboardMetric(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func dashboardTile(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.subheadline)
+                    .foregroundStyle(.blue)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func dashboardQuickButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .font(.caption.weight(.semibold))
     }
 
     @ViewBuilder

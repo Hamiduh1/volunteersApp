@@ -9,76 +9,95 @@ enum SocialInboxTab: String, CaseIterable, Identifiable {
 }
 
 struct ConversationsListView: View {
+    private enum SectionAnchor {
+        static let dashboard = "social_dashboard"
+        static let filters = "social_filters"
+        static let chats = "social_chats"
+        static let invitations = "social_invitations"
+        static let calls = "social_calls"
+    }
+
     let user: AppSessionUser
     @StateObject private var viewModel = ConversationsListViewModel()
     @StateObject private var callsViewModel = CallHistoryViewModel()
     @State private var selectedTab: SocialInboxTab = .chats
 
     var body: some View {
-        List {
-            Section {
-                Picker("Inbox", selection: $selectedTab) {
-                    Text("Chats").tag(SocialInboxTab.chats)
-                    Text("Invitations (\(viewModel.pendingInvitationCount))").tag(SocialInboxTab.invitations)
-                    Text("Calls (\(callsViewModel.missedCount) missed)").tag(SocialInboxTab.calls)
+        ScrollViewReader { proxy in
+            List {
+                Section {
+                    dashboardHomeSection(proxy: proxy)
                 }
-                .pickerStyle(.segmented)
+                .id(SectionAnchor.dashboard)
 
-                searchField
-
-                if selectedTab == .invitations {
-                    Picker("Invitation Status", selection: $viewModel.invitationFilter) {
-                        ForEach(InvitationStatusFilter.allCases) { filter in
-                            Text(filter.title).tag(filter)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                if selectedTab == .calls {
-                    Picker("Type", selection: $callsViewModel.selectedFilter) {
-                        ForEach(CallHistoryFilter.allCases) { filter in
-                            Text(filter.title).tag(filter)
-                        }
+                Section {
+                    Picker("Inbox", selection: $selectedTab) {
+                        Text("Chats").tag(SocialInboxTab.chats)
+                        Text("Invitations (\(viewModel.pendingInvitationCount))").tag(SocialInboxTab.invitations)
+                        Text("Calls (\(callsViewModel.missedCount) missed)").tag(SocialInboxTab.calls)
                     }
                     .pickerStyle(.segmented)
 
-                    Picker("Direction", selection: $callsViewModel.directionFilter) {
-                        ForEach(CallDirectionFilter.allCases) { filter in
-                            Text(filter.title).tag(filter)
+                    searchField
+
+                    if selectedTab == .invitations {
+                        Picker("Invitation Status", selection: $viewModel.invitationFilter) {
+                            ForEach(InvitationStatusFilter.allCases) { filter in
+                                Text(filter.title).tag(filter)
+                            }
                         }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.menu)
-                }
 
-                Text(countSummary)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+                    if selectedTab == .calls {
+                        Picker("Type", selection: $callsViewModel.selectedFilter) {
+                            ForEach(CallHistoryFilter.allCases) { filter in
+                                Text(filter.title).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.segmented)
 
-            if let status = viewModel.statusMessage, !status.isEmpty {
-                Section {
-                    Text(status)
-                        .font(.footnote)
+                        Picker("Direction", selection: $callsViewModel.directionFilter) {
+                            ForEach(CallDirectionFilter.allCases) { filter in
+                                Text(filter.title).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    Text(countSummary)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-            }
+                .id(SectionAnchor.filters)
 
-            if let status = callsViewModel.statusMessage, !status.isEmpty, selectedTab == .calls {
-                Section {
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Section {
+                        Text(status)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
 
-            switch selectedTab {
-            case .chats:
-                chatsSection
-            case .invitations:
-                invitationsSection
-            case .calls:
-                callsSection
+                if let status = callsViewModel.statusMessage, !status.isEmpty, selectedTab == .calls {
+                    Section {
+                        Text(status)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                switch selectedTab {
+                case .chats:
+                    chatsSection
+                        .id(SectionAnchor.chats)
+                case .invitations:
+                    invitationsSection
+                        .id(SectionAnchor.invitations)
+                case .calls:
+                    callsSection
+                        .id(SectionAnchor.calls)
+                }
             }
         }
         .navigationTitle("Social Inbox")
@@ -112,6 +131,141 @@ struct ConversationsListView: View {
         } message: {
             Text(activeErrorMessage ?? "Unknown error")
         }
+    }
+
+    @ViewBuilder
+    private func dashboardHomeSection(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dashboard Home")
+                .font(.headline)
+
+            Text("Android-style Social Inbox navigation for chats, invitations, and calls.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                dashboardMetric(value: "\(viewModel.conversations.count)", label: "Chats")
+                dashboardMetric(value: "\(viewModel.pendingInvitationCount)", label: "Pending")
+                dashboardMetric(value: "\(callsViewModel.missedCount)", label: "Missed")
+            }
+
+            HStack(spacing: 10) {
+                dashboardTile(title: "Chats", icon: "bubble.left.and.bubble.right.fill") {
+                    // Keep existing route pattern and open User Directory from dashboard.
+                    selectedTab = .chats
+                    DispatchQueue.main.async {
+                        withAnimation { proxy.scrollTo(SectionAnchor.chats, anchor: .top) }
+                    }
+                }
+                NavigationLink {
+                    UserDirectoryView(user: user)
+                } label: {
+                    dashboardTileLabel(title: "Directory", icon: "person.crop.circle.badge.plus")
+                }
+                .buttonStyle(.plain)
+                dashboardTile(title: "Refresh", icon: "arrow.clockwise.circle.fill") {
+                    Task {
+                        async let conv = viewModel.refresh(user: user)
+                        async let calls = callsViewModel.refresh(user: user)
+                        _ = await (conv, calls)
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                dashboardQuickButton("Filters") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.filters, anchor: .top) }
+                }
+                dashboardQuickButton("Chats") {
+                    selectedTab = .chats
+                    DispatchQueue.main.async {
+                        withAnimation { proxy.scrollTo(SectionAnchor.chats, anchor: .top) }
+                    }
+                }
+                dashboardQuickButton("Invites") {
+                    selectedTab = .invitations
+                    DispatchQueue.main.async {
+                        withAnimation { proxy.scrollTo(SectionAnchor.invitations, anchor: .top) }
+                    }
+                }
+                dashboardQuickButton("Calls") {
+                    selectedTab = .calls
+                    DispatchQueue.main.async {
+                        withAnimation { proxy.scrollTo(SectionAnchor.calls, anchor: .top) }
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                NavigationLink {
+                    CommunityHubView(user: user)
+                } label: {
+                    Label("Community Dashboard", systemImage: "square.grid.2x2.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+
+                NavigationLink {
+                    AIAssistantView()
+                } label: {
+                    Label("AI Assistant", systemImage: "sparkles")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dashboardMetric(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func dashboardTile(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            dashboardTileLabel(title: title, icon: icon)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func dashboardTileLabel(title: String, icon: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.subheadline)
+                .foregroundStyle(.blue)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func dashboardQuickButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .font(.caption.weight(.semibold))
     }
 
     private var searchField: some View {

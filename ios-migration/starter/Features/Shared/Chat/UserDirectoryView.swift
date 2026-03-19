@@ -1,38 +1,53 @@
 import SwiftUI
 
 struct UserDirectoryView: View {
+    private enum SectionAnchor {
+        static let dashboard = "directory_dashboard"
+        static let search = "directory_search"
+        static let list = "directory_list"
+    }
+
     let user: AppSessionUser
     @StateObject private var viewModel = UserDirectoryViewModel()
 
     var body: some View {
-        List {
-            Section {
-                TextField("Search by name, email, username, phone", text: $viewModel.searchQuery)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Text("Showing \(viewModel.filteredUsers.count) user(s)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let status = viewModel.statusMessage, !status.isEmpty {
+        ScrollViewReader { proxy in
+            List {
                 Section {
-                    Text(status)
-                        .font(.footnote)
+                    dashboardHomeSection(proxy: proxy)
+                }
+                .id(SectionAnchor.dashboard)
+
+                Section {
+                    TextField("Search by name, email, username, phone", text: $viewModel.searchQuery)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text("Showing \(viewModel.filteredUsers.count) user(s)")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-            }
+                .id(SectionAnchor.search)
 
-            Section("Directory") {
-                if viewModel.isLoading && viewModel.filteredUsers.isEmpty {
-                    ProgressView("Loading users...")
-                } else if viewModel.filteredUsers.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(viewModel.filteredUsers) { directoryUser in
-                        directoryRow(directoryUser)
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Section {
+                        Text(status)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
+
+                Section("Directory") {
+                    if viewModel.isLoading && viewModel.filteredUsers.isEmpty {
+                        ProgressView("Loading users...")
+                    } else if viewModel.filteredUsers.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(viewModel.filteredUsers) { directoryUser in
+                            directoryRow(directoryUser)
+                        }
+                    }
+                }
+                .id(SectionAnchor.list)
             }
         }
         .navigationTitle("Find People")
@@ -46,6 +61,118 @@ struct UserDirectoryView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+    }
+
+    @ViewBuilder
+    private func dashboardHomeSection(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dashboard Home")
+                .font(.headline)
+
+            Text("Android-style user directory navigation with invite workflow controls.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                dashboardMetric(value: "\(viewModel.allUsers.count)", label: "Users")
+                dashboardMetric(value: "\(viewModel.filteredUsers.count)", label: "Visible")
+                dashboardMetric(value: "\(viewModel.sentInvitationUserIds.count)", label: "Invites Sent")
+            }
+
+            HStack(spacing: 10) {
+                dashboardTile(title: "Refresh", icon: "arrow.clockwise.circle.fill") {
+                    Task { await viewModel.refresh(currentUser: user) }
+                }
+                dashboardTile(title: "Clear Search", icon: "xmark.circle.fill") {
+                    viewModel.searchQuery = ""
+                }
+                NavigationLink {
+                    ConversationsListView(user: user)
+                } label: {
+                    dashboardTileLabel(title: "Social Inbox", icon: "bubble.left.and.bubble.right.fill")
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 8) {
+                dashboardQuickButton("Search") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.search, anchor: .top) }
+                }
+                dashboardQuickButton("Directory") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.list, anchor: .top) }
+                }
+            }
+
+            HStack(spacing: 8) {
+                NavigationLink {
+                    CommunityHubView(user: user)
+                } label: {
+                    Label("Community Dashboard", systemImage: "square.grid.2x2.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+
+                NavigationLink {
+                    AIAssistantView()
+                } label: {
+                    Label("AI Assistant", systemImage: "sparkles")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dashboardMetric(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func dashboardTile(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            dashboardTileLabel(title: title, icon: icon)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func dashboardTileLabel(title: String, icon: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.subheadline)
+                .foregroundStyle(.blue)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func dashboardQuickButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .font(.caption.weight(.semibold))
     }
 
     @ViewBuilder
