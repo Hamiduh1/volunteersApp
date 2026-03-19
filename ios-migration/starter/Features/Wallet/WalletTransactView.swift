@@ -23,6 +23,7 @@ struct WalletTransactView: View {
         ScrollView {
             VStack(spacing: 14) {
                 balanceCard
+                dashboardHomeCard
                 destinationCard
                 amountCard
                 quoteCard
@@ -46,6 +47,81 @@ struct WalletTransactView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
+        }
+    }
+
+    @ViewBuilder
+    private var dashboardHomeCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Dashboard Home")
+                    .font(.headline)
+
+                HStack(alignment: .top, spacing: 10) {
+                    Text("To receive card or bank payouts, recipient setup must be completed in Payment Methods.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    NavigationLink {
+                        PaymentMethodsView(user: user)
+                    } label: {
+                        Text("Open")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+
+                Text("Transfer Lane")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    laneTile(
+                        title: "App User",
+                        subtitle: "Wallet, card, or bank",
+                        icon: "person.crop.circle.badge.checkmark",
+                        selected: recipientLane == .appUser
+                    ) {
+                        recipientLane = .appUser
+                        if viewModel.destinationType == .beneficiary {
+                            viewModel.destinationType = .wallet
+                        }
+                    }
+
+                    laneTile(
+                        title: "Mobile Money",
+                        subtitle: "Saved beneficiaries",
+                        icon: "iphone.gen3.radiowaves.left.and.right",
+                        selected: recipientLane == .mobileMoney
+                    ) {
+                        recipientLane = .mobileMoney
+                        viewModel.destinationType = .beneficiary
+                    }
+                }
+
+                Divider()
+
+                HStack(spacing: 10) {
+                    NavigationLink {
+                        UserDirectoryView(user: user)
+                    } label: {
+                        quickActionTile(
+                            title: "Find User",
+                            icon: "person.2.fill"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        WalletTransactionHistoryView(user: user)
+                    } label: {
+                        quickActionTile(
+                            title: "History",
+                            icon: "clock.arrow.circlepath"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
@@ -74,22 +150,9 @@ struct WalletTransactView: View {
                 Text("Step 1: Recipient")
                     .font(.headline)
 
-                Picker("Recipient Type", selection: $recipientLane) {
-                    ForEach(WalletRecipientLane.allCases) { lane in
-                        Text(lane.title).tag(lane)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: recipientLane) { _, lane in
-                    switch lane {
-                    case .appUser:
-                        if viewModel.destinationType == .beneficiary {
-                            viewModel.destinationType = .wallet
-                        }
-                    case .mobileMoney:
-                        viewModel.destinationType = .beneficiary
-                    }
-                }
+                Text("Lane: \(recipientLane.title)")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
                 if recipientLane == .appUser {
                     Text("App User Destination")
@@ -150,6 +213,61 @@ struct WalletTransactView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func laneTile(
+        title: String,
+        subtitle: String,
+        icon: String,
+        selected: Bool,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 7) {
+                Image(systemName: icon)
+                    .font(.headline)
+                    .foregroundStyle(selected ? .blue : .secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill((selected ? Color.blue : Color.secondary).opacity(0.14)))
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(selected ? Color.blue.opacity(0.09) : Color(.secondarySystemGroupedBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(selected ? Color.blue.opacity(0.35) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func quickActionTile(title: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.blue)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
     }
 
     @ViewBuilder
