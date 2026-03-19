@@ -1,10 +1,16 @@
 import SwiftUI
 
 struct GlobalWalletHomeView: View {
+    private enum BeneficiarySectionAnchor {
+        static let dashboard = "beneficiary_dashboard"
+        static let list = "beneficiary_list"
+    }
+
     let user: AppSessionUser
     @StateObject private var viewModel = GlobalWalletHomeViewModel()
     @State private var showBeneficiaryManager = false
     @State private var beneficiaryToDelete: BeneficiaryRecord?
+    @State private var beneficiarySearchQuery = ""
 
     var body: some View {
         ScrollView {
@@ -365,44 +371,146 @@ struct GlobalWalletHomeView: View {
     @ViewBuilder
     private var beneficiaryManagerSheet: some View {
         NavigationStack {
-            List {
-                if viewModel.beneficiaries.isEmpty {
-                    Text("No beneficiaries found.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.beneficiaries) { beneficiary in
-                        let name = beneficiary.name ?? "Beneficiary"
-                        let details = [beneficiary.network, beneficiary.phone]
-                            .compactMap { $0 }
-                            .joined(separator: " - ")
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(name)
-                                    .font(.headline)
-                                if !details.isEmpty {
-                                    Text(details)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+            ScrollViewReader { proxy in
+                List {
+                    Section {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Dashboard Home")
+                                .font(.headline)
+
+                            Text("Android-style beneficiary management and quick navigation.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            HStack(spacing: 8) {
+                                beneficiaryMetricTile(value: "\(viewModel.beneficiaries.count)", label: "Total")
+                                beneficiaryMetricTile(value: "\(filteredBeneficiaries.count)", label: "Filtered")
+                                beneficiaryMetricTile(value: "\(uniqueBeneficiaryNetworks)", label: "Networks")
                             }
-                            Spacer()
-                            Button(role: .destructive) {
-                                beneficiaryToDelete = beneficiary
+
+                            HStack(spacing: 8) {
+                                Button("Saved List") {
+                                    withAnimation {
+                                        proxy.scrollTo(BeneficiarySectionAnchor.list, anchor: .top)
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button("Clear Search") {
+                                    beneficiarySearchQuery = ""
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(beneficiarySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+
+                            NavigationLink {
+                                WalletTransactView(user: user)
                             } label: {
-                                Image(systemName: "trash")
+                                Label("Open Send Money", systemImage: "paperplane.fill")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+
+                            if let status = viewModel.statusMessage, !status.isEmpty {
+                                Text(status)
+                                    .font(.footnote)
+                                    .foregroundStyle(.green)
                             }
                         }
                     }
+                    .id(BeneficiarySectionAnchor.dashboard)
+
+                    Section("Saved Beneficiaries") {
+                        if filteredBeneficiaries.isEmpty {
+                            Text(viewModel.beneficiaries.isEmpty ? "No beneficiaries found." : "No beneficiaries match your search.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(filteredBeneficiaries) { beneficiary in
+                                let name = beneficiary.name ?? "Beneficiary"
+                                let details = [beneficiary.network, beneficiary.phone]
+                                    .compactMap { $0 }
+                                    .joined(separator: " - ")
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(name)
+                                            .font(.headline)
+                                        if !details.isEmpty {
+                                            Text(details)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Button(role: .destructive) {
+                                        beneficiaryToDelete = beneficiary
+                                    } label: {
+                                        Image(systemName: "trash")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .id(BeneficiarySectionAnchor.list)
                 }
+                .searchable(
+                    text: $beneficiarySearchQuery,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Search by name, phone, or network"
+                )
             }
             .navigationTitle("Manage Beneficiaries")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { showBeneficiaryManager = false }
+                    Button("Done") {
+                        beneficiarySearchQuery = ""
+                        showBeneficiaryManager = false
+                    }
                 }
             }
         }
         .presentationDetents([.large])
+    }
+
+    @ViewBuilder
+    private func beneficiaryMetricTile(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    private var filteredBeneficiaries: [BeneficiaryRecord] {
+        let query = beneficiarySearchQuery
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        guard !query.isEmpty else { return viewModel.beneficiaries }
+
+        return viewModel.beneficiaries.filter { beneficiary in
+            let name = beneficiary.name?.lowercased() ?? ""
+            let phone = beneficiary.phone?.lowercased() ?? ""
+            let network = beneficiary.network?.lowercased() ?? ""
+            return name.contains(query) || phone.contains(query) || network.contains(query)
+        }
+    }
+
+    private var uniqueBeneficiaryNetworks: Int {
+        Set(
+            viewModel.beneficiaries.compactMap { beneficiary in
+                beneficiary.network?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+            }
+        ).count
     }
 
     @ViewBuilder
