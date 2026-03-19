@@ -10,6 +10,13 @@ private struct MindLoomCreatorItem: Identifiable {
 }
 
 struct MindLoomFeedView: View {
+    private enum SectionAnchor {
+        static let dashboard = "mindloom_dashboard"
+        static let creators = "mindloom_creators"
+        static let scope = "mindloom_scope"
+        static let feed = "mindloom_feed"
+    }
+
     let user: AppSessionUser
     @StateObject private var viewModel = MindLoomFeedViewModel()
     @State private var showComposer = false
@@ -37,88 +44,99 @@ struct MindLoomFeedView: View {
     }
 
     var body: some View {
-        List {
-            if let status = viewModel.statusMessage, !status.isEmpty {
+        ScrollViewReader { proxy in
+            List {
                 Section {
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.82))
+                    dashboardHomeSection(proxy: proxy)
                 }
+                .id(SectionAnchor.dashboard)
                 .listRowBackground(Color.black)
-            }
 
-            if !creatorItems.isEmpty {
-                Section {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(creatorItems) { creator in
-                                NavigationLink {
-                                    MindLoomProfileView(authorId: creator.id, currentUserId: user.uid, currentUser: user)
-                                } label: {
-                                    VStack(spacing: 6) {
-                                        AsyncImage(url: URL(string: creator.profileUrl ?? "")) { phase in
-                                            switch phase {
-                                            case .success(let image):
-                                                image.resizable().scaledToFill()
-                                            default:
-                                                Circle()
-                                                    .fill(Color.white.opacity(0.15))
-                                                    .overlay(
-                                                        Image(systemName: "person.fill")
-                                                            .foregroundStyle(.white.opacity(0.75))
-                                                    )
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Section {
+                        Text(status)
+                            .font(.footnote)
+                            .foregroundStyle(.white.opacity(0.82))
+                    }
+                    .listRowBackground(Color.black)
+                }
+
+                if !creatorItems.isEmpty {
+                    Section {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(creatorItems) { creator in
+                                    NavigationLink {
+                                        MindLoomProfileView(authorId: creator.id, currentUserId: user.uid, currentUser: user)
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            AsyncImage(url: URL(string: creator.profileUrl ?? "")) { phase in
+                                                switch phase {
+                                                case .success(let image):
+                                                    image.resizable().scaledToFill()
+                                                default:
+                                                    Circle()
+                                                        .fill(Color.white.opacity(0.15))
+                                                        .overlay(
+                                                            Image(systemName: "person.fill")
+                                                                .foregroundStyle(.white.opacity(0.75))
+                                                        )
+                                                }
                                             }
-                                        }
-                                        .frame(width: 58, height: 58)
-                                        .clipShape(Circle())
+                                            .frame(width: 58, height: 58)
+                                            .clipShape(Circle())
 
-                                        Text(creator.name.isEmpty ? "User" : creator.name)
-                                            .font(.caption2)
-                                            .lineLimit(1)
-                                            .foregroundStyle(.white)
+                                            Text(creator.name.isEmpty ? "User" : creator.name)
+                                                .font(.caption2)
+                                                .lineLimit(1)
+                                                .foregroundStyle(.white)
+                                        }
+                                        .frame(width: 70)
                                     }
-                                    .frame(width: 70)
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
+                            .padding(.horizontal, 2)
                         }
-                        .padding(.horizontal, 2)
+                    }
+                    .id(SectionAnchor.creators)
+                    .listRowBackground(Color.black)
+                }
+
+                Section {
+                    Picker("Feed", selection: $viewModel.selectedScope) {
+                        ForEach(MindLoomFeedScope.allCases) { scope in
+                            Text(scope.rawValue).tag(scope)
+                        }
                     }
                 }
+                .id(SectionAnchor.scope)
+                .pickerStyle(.segmented)
+                .listRowBackground(Color.black)
+
+                Section {
+                    if viewModel.isLoading && viewModel.posts.isEmpty {
+                        ProgressView("Loading feed...")
+                            .foregroundStyle(.white)
+                    } else if viewModel.displayedPosts.isEmpty {
+                        Text(
+                            viewModel.selectedScope == .following
+                                ? "No posts yet from people you follow."
+                                : "No posts yet."
+                        )
+                        .foregroundStyle(.white.opacity(0.75))
+                    } else {
+                        ForEach(viewModel.displayedPosts) { post in
+                            postCard(post)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.black)
+                        }
+                    }
+                }
+                .id(SectionAnchor.feed)
                 .listRowBackground(Color.black)
             }
-
-            Section {
-                Picker("Feed", selection: $viewModel.selectedScope) {
-                    ForEach(MindLoomFeedScope.allCases) { scope in
-                        Text(scope.rawValue).tag(scope)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            .listRowBackground(Color.black)
-
-            Section {
-                if viewModel.isLoading && viewModel.posts.isEmpty {
-                    ProgressView("Loading feed...")
-                        .foregroundStyle(.white)
-                } else if viewModel.displayedPosts.isEmpty {
-                    Text(
-                        viewModel.selectedScope == .following
-                            ? "No posts yet from people you follow."
-                            : "No posts yet."
-                    )
-                    .foregroundStyle(.white.opacity(0.75))
-                } else {
-                    ForEach(viewModel.displayedPosts) { post in
-                        postCard(post)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.black)
-                    }
-                }
-            }
-            .listRowBackground(Color.black)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
@@ -214,6 +232,116 @@ struct MindLoomFeedView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+    }
+
+    @ViewBuilder
+    private func dashboardHomeSection(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dashboard Home")
+                .font(.headline)
+                .foregroundStyle(.white)
+
+            Text("Android-style MindLoom navigation and creator controls.")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.72))
+
+            HStack(spacing: 8) {
+                dashboardMetric(value: "\(viewModel.posts.count)", label: "Total")
+                dashboardMetric(value: "\(viewModel.displayedPosts.count)", label: "Visible")
+                dashboardMetric(value: "\(creatorItems.count)", label: "Creators")
+            }
+
+            HStack(spacing: 10) {
+                dashboardTile(title: "Create", icon: "plus.circle.fill") {
+                    showComposer = true
+                }
+                dashboardTile(title: "Refresh", icon: "arrow.clockwise.circle.fill") {
+                    Task { await viewModel.refresh(for: user) }
+                }
+                NavigationLink {
+                    LiveSessionsView(user: user)
+                } label: {
+                    dashboardTileLabel(title: "Go Live", icon: "dot.radiowaves.left.and.right")
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 8) {
+                dashboardQuickButton("Creators") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.creators, anchor: .top) }
+                }
+                dashboardQuickButton("Feed Type") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.scope, anchor: .top) }
+                }
+                dashboardQuickButton("Posts") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.feed, anchor: .top) }
+                }
+            }
+
+            NavigationLink {
+                CommunityHubView(user: user)
+            } label: {
+                Label("Community Dashboard", systemImage: "square.grid.2x2.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.bordered)
+            .tint(.white)
+        }
+    }
+
+    @ViewBuilder
+    private func dashboardMetric(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.72))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white.opacity(0.09))
+        )
+    }
+
+    @ViewBuilder
+    private func dashboardTile(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            dashboardTileLabel(title: title, icon: icon)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func dashboardTileLabel(title: String, icon: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.subheadline)
+                .foregroundStyle(.white)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white.opacity(0.09))
+        )
+    }
+
+    @ViewBuilder
+    private func dashboardQuickButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .tint(.white)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
     }
 
     @ViewBuilder
