@@ -294,22 +294,40 @@ struct LiveSessionRecord: Codable, Identifiable {
 }
 
 struct PaymentMethodRecord: Codable, Identifiable {
-    @DocumentID var id: String?
-    var type: String?
-    var brand: String?
-    var last4: String?
-    var holderName: String?
-    var status: String?
-    var bankName: String?
-    var network: String?
-    var country: String?
-    var phoneNumber: String?
-    var externalAccountId: String?
-    var stripePaymentMethodId: String?
-    var chargeSourceId: String?
-    var achDebitEnabled: Bool?
-    var achCreditEnabled: Bool?
-    var phoneOwnershipVerified: Bool?
+    @DocumentID var id: String? = nil
+    var type: String? = nil
+    var label: String? = nil
+    var isDefault: Bool? = nil
+    var brand: String? = nil
+    var last4: String? = nil
+    var holderName: String? = nil
+    var cardHolderName: String? = nil
+    var cardNumber: String? = nil
+    var expiryDate: String? = nil
+    var status: String? = nil
+    var accountHolderName: String? = nil
+    var bankName: String? = nil
+    var accountNumber: String? = nil
+    var routingNumber: String? = nil
+    var network: String? = nil
+    var country: String? = nil
+    var dialCode: String? = nil
+    var currency: String? = nil
+    var registeredName: String? = nil
+    var phoneNumber: String? = nil
+    var verificationStatus: String? = nil
+    var verificationMethod: String? = nil
+    var lastVerificationError: String? = nil
+    var externalAccountId: String? = nil
+    var chargePaymentMethodId: String? = nil
+    var stripePaymentMethodId: String? = nil
+    var chargeSourceId: String? = nil
+    var chargeCustomerId: String? = nil
+    var chargeSourceStatus: String? = nil
+    var achDebitEnabled: Bool? = nil
+    var achCreditEnabled: Bool? = nil
+    var requiresRelinkForCharges: Bool? = nil
+    var phoneOwnershipVerified: Bool? = nil
 }
 
 struct PayoutSetupStatusRecord {
