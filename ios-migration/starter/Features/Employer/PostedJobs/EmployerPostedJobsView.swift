@@ -63,7 +63,7 @@ struct EmployerPostedJobsView: View {
                     }
                 }
             }
-            .navigationTitle("Posted Jobs")
+            .navigationTitle("My Posted Jobs")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

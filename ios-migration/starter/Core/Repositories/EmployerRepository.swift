@@ -279,12 +279,15 @@ final class EmployerRepository {
         let cleanCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
 
         try await ref.setData([
+            "postingId": ref.documentID,
             "title": cleanOpportunity,
+            "eventName": cleanOpportunity,
             "organizationName": cleanOrganization,
             "jobTitle": cleanRole,
             "description": cleanDescription,
             "locationString": cleanLocation,
             "locationName": cleanLocation,
+            "location": cleanLocation,
             "category": cleanCategory,
             "jobType": "Volunteer",
             "salaryOrCompensation": "",
@@ -304,6 +307,7 @@ final class EmployerRepository {
             "employerName": employerName,
             "createdBy": uid,
             "isActive": true,
+            "timestamp": FieldValue.serverTimestamp(),
             "createdAt": FieldValue.serverTimestamp(),
             "lastUpdatedAt": FieldValue.serverTimestamp()
         ], merge: true)
@@ -339,12 +343,15 @@ final class EmployerRepository {
         let cleanCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
 
         try await ref.setData([
+            "postingId": jobId,
             "title": cleanOpportunity,
+            "eventName": cleanOpportunity,
             "organizationName": cleanOrganization,
             "jobTitle": cleanRole,
             "description": cleanDescription,
             "locationString": cleanLocation,
             "locationName": cleanLocation,
+            "location": cleanLocation,
             "category": cleanCategory,
             "jobType": "Volunteer",
             "salaryOrCompensation": "",
@@ -359,6 +366,7 @@ final class EmployerRepository {
             "employerUid": uid,
             "employerId": uid,
             "employerName": employerName,
+            "timestamp": FieldValue.serverTimestamp(),
             "lastUpdatedAt": FieldValue.serverTimestamp()
         ], merge: true)
     }

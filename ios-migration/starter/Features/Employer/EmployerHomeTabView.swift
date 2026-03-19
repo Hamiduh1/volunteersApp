@@ -1,63 +1,59 @@
 import SwiftUI
 
+enum EmployerHomeTab: Hashable {
+    case home
+    case jobs
+    case applications
+    case profile
+}
+
 struct EmployerHomeTabView: View {
     let user: AppSessionUser
+    @State private var selectedTab: EmployerHomeTab = .home
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
+            EmployerDashboardView(user: user) { tab in
+                selectedTab = tab
+            }
+            .tabItem {
+                BrandTabLabel(
+                    title: "Home",
+                    assetName: BrandAsset.tabDashboard,
+                    fallbackSystemName: "house.fill"
+                )
+            }
+            .tag(EmployerHomeTab.home)
+
             EmployerPostedJobsView(user: user)
                 .tabItem {
                     BrandTabLabel(
-                        title: "Posted Jobs",
+                        title: "Jobs",
                         assetName: BrandAsset.tabPostedJobs,
-                        fallbackSystemName: "briefcase"
+                        fallbackSystemName: "briefcase.fill"
                     )
                 }
+                .tag(EmployerHomeTab.jobs)
 
             EmployerApplicationsReviewView(user: user)
                 .tabItem {
                     BrandTabLabel(
                         title: "Applications",
                         assetName: BrandAsset.tabApplications,
-                        fallbackSystemName: "person.3"
+                        fallbackSystemName: "person.3.fill"
                     )
                 }
-
-            GlobalWalletHomeView(user: user)
-                .tabItem {
-                    BrandTabLabel(
-                        title: "Wallet",
-                        assetName: BrandAsset.tabWallet,
-                        fallbackSystemName: "wallet.pass"
-                    )
-                }
-
-            CommunityHubView(user: user)
-                .tabItem {
-                    BrandTabLabel(
-                        title: "Community",
-                        assetName: BrandAsset.tabCommunity,
-                        fallbackSystemName: "person.3.sequence"
-                    )
-                }
-
-            AdvancedToolsHomeView(user: user)
-                .tabItem {
-                    BrandTabLabel(
-                        title: "Tools",
-                        assetName: BrandAsset.tabTools,
-                        fallbackSystemName: "sparkles"
-                    )
-                }
+                .tag(EmployerHomeTab.applications)
 
             EmployerProfileSetupView(user: user)
-            .tabItem {
-                BrandTabLabel(
-                    title: "Profile",
-                    assetName: BrandAsset.tabProfile,
-                    fallbackSystemName: "person"
-                )
-            }
+                .tabItem {
+                    BrandTabLabel(
+                        title: "Profile",
+                        assetName: BrandAsset.tabProfile,
+                        fallbackSystemName: "person.crop.circle"
+                    )
+                }
+                .tag(EmployerHomeTab.profile)
         }
     }
 }
