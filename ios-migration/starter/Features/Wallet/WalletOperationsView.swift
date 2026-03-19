@@ -1,6 +1,14 @@
 import SwiftUI
 
 struct WalletOperationsView: View {
+    private enum SectionAnchor {
+        static let dashboard = "wallet_ops_dashboard"
+        static let flow = "wallet_ops_flow"
+        static let mobile = "wallet_ops_mobile"
+        static let agent = "wallet_ops_agent"
+        static let status = "wallet_ops_status"
+    }
+
     let user: AppSessionUser
     @StateObject private var viewModel: WalletOperationsViewModel
 
@@ -10,30 +18,113 @@ struct WalletOperationsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                balanceCard
-                tabCard
-                if viewModel.selectedTab == .mobileMoney {
-                    mobileMoneyCard
-                } else {
-                    agentCard
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 14) {
+                    balanceCard
+                    dashboardHomeCard(proxy: proxy)
+                        .id(SectionAnchor.dashboard)
+                    tabCard
+                        .id(SectionAnchor.flow)
+                    if viewModel.selectedTab == .mobileMoney {
+                        mobileMoneyCard
+                            .id(SectionAnchor.mobile)
+                    } else {
+                        agentCard
+                            .id(SectionAnchor.agent)
+                    }
+                    actionCard
+                        .id(SectionAnchor.status)
                 }
-                actionCard
+                .padding(16)
             }
-            .padding(16)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Wallet Operations")
+            .task { await viewModel.refresh(user: user) }
+            .refreshable { await viewModel.refresh(user: user) }
+            .alert("Error", isPresented: Binding(
+                get: { viewModel.errorMessage != nil },
+                set: { if !$0 { viewModel.errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.errorMessage ?? "Unknown error")
+            }
         }
-        .background(Color(.systemGroupedBackground))
-        .navigationTitle("Wallet Operations")
-        .task { await viewModel.refresh(user: user) }
-        .refreshable { await viewModel.refresh(user: user) }
-        .alert("Error", isPresented: Binding(
-            get: { viewModel.errorMessage != nil },
-            set: { if !$0 { viewModel.errorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(viewModel.errorMessage ?? "Unknown error")
+    }
+
+    @ViewBuilder
+    private func dashboardHomeCard(proxy: ScrollViewProxy) -> some View {
+        WalletOpsCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Dashboard Home")
+                    .font(.headline)
+
+                Text("Android-style agent and mobile money navigation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    laneTile(
+                        title: "Mobile Money",
+                        subtitle: "Cash in / cash out",
+                        icon: "iphone.gen3.radiowaves.left.and.right",
+                        selected: viewModel.selectedTab == .mobileMoney
+                    ) {
+                        viewModel.selectedTab = .mobileMoney
+                        withAnimation { proxy.scrollTo(SectionAnchor.mobile, anchor: .top) }
+                    }
+
+                    laneTile(
+                        title: "Agent Portal",
+                        subtitle: "Code and payout flow",
+                        icon: "person.badge.shield.checkmark.fill",
+                        selected: viewModel.selectedTab == .agent
+                    ) {
+                        viewModel.selectedTab = .agent
+                        withAnimation { proxy.scrollTo(SectionAnchor.agent, anchor: .top) }
+                    }
+                }
+
+                if viewModel.selectedTab == .agent {
+                    Text("Agent Quick Actions")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 8) {
+                        Button("Authorize") {
+                            Task { await viewModel.authorizeAgent() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(viewModel.isWorking)
+
+                        Button("Generate Code") {
+                            withAnimation { proxy.scrollTo(SectionAnchor.agent, anchor: .top) }
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Status") {
+                            withAnimation { proxy.scrollTo(SectionAnchor.status, anchor: .top) }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button("Flow") {
+                        withAnimation { proxy.scrollTo(SectionAnchor.flow, anchor: .top) }
+                    }
+                    .buttonStyle(.bordered)
+
+                    NavigationLink {
+                        WalletTransactionHistoryView(user: user)
+                    } label: {
+                        Label("History", systemImage: "clock.arrow.circlepath")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
         }
     }
 
@@ -220,6 +311,43 @@ struct WalletOperationsView: View {
         let network = method.network ?? method.brand ?? "Mobile Money"
         let phone = method.phoneNumber ?? "No phone"
         return "\(network) - \(phone)"
+    }
+
+    @ViewBuilder
+    private func laneTile(
+        title: String,
+        subtitle: String,
+        icon: String,
+        selected: Bool,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 7) {
+                Image(systemName: icon)
+                    .font(.headline)
+                    .foregroundStyle(selected ? .blue : .secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill((selected ? Color.blue : Color.secondary).opacity(0.14)))
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(selected ? Color.blue.opacity(0.09) : Color(.secondarySystemGroupedBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(selected ? Color.blue.opacity(0.35) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
