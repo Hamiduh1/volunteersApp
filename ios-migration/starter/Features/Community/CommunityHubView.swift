@@ -1,12 +1,12 @@
 ﻿import SwiftUI
 
 private enum CommunityFeatureRoute: String, CaseIterable, Identifiable {
+    case marketplace
+    case dating
+    case mindLoom
+    case sponsored
     case socialInbox
     case userDirectory
-    case mindLoom
-    case dating
-    case marketplace
-    case sponsored
 
     var id: String { rawValue }
 
@@ -45,12 +45,12 @@ private enum CommunityFeatureRoute: String, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .socialInbox: return Color(red: 0.13, green: 0.59, blue: 0.95)
-        case .userDirectory: return Color(red: 0.30, green: 0.69, blue: 0.31)
-        case .mindLoom: return Color(red: 1.00, green: 0.76, blue: 0.03)
-        case .dating: return Color(red: 0.91, green: 0.12, blue: 0.39)
-        case .marketplace: return Color(red: 0.61, green: 0.15, blue: 0.69)
-        case .sponsored: return Color(red: 1.00, green: 0.34, blue: 0.13)
+        case .marketplace: return Color(red: 0.98, green: 0.55, blue: 0.00)
+        case .dating: return Color(red: 0.90, green: 0.22, blue: 0.21)
+        case .mindLoom: return Color(red: 1.00, green: 0.70, blue: 0.00)
+        case .sponsored: return Color(red: 0.43, green: 0.30, blue: 0.25)
+        case .socialInbox: return Color(red: 0.56, green: 0.14, blue: 0.67)
+        case .userDirectory: return Color(red: 0.12, green: 0.53, blue: 0.90)
         }
     }
 }
@@ -63,11 +63,12 @@ struct CommunityHubView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Community Hub")
-                    .font(.title2.weight(.bold))
-                Text("Connect, share, and discover across the full community loop.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                dashboardHomeCard
+                quickNavigationCard
+
+                Text("Community Features")
+                    .font(.headline.weight(.bold))
+                    .padding(.top, 4)
 
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(CommunityFeatureRoute.allCases) { route in
@@ -83,6 +84,8 @@ struct CommunityHubView: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
+        .navigationTitle("Community Hub")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     @ViewBuilder
@@ -101,6 +104,63 @@ struct CommunityHubView: View {
         case .sponsored:
             SponsoredContentView(user: user)
         }
+    }
+
+    @ViewBuilder
+    private var dashboardHomeCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Dashboard Home")
+                .font(.title3.weight(.heavy))
+                .foregroundStyle(.white)
+            Text("Connect, share, and explore your loop.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.84))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.08, green: 0.12, blue: 0.19), Color(red: 0.14, green: 0.23, blue: 0.33)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+    }
+
+    @ViewBuilder
+    private var quickNavigationCard: some View {
+        HStack(spacing: 8) {
+            quickNavButton(.marketplace)
+            quickNavButton(.mindLoom)
+            quickNavButton(.socialInbox)
+        }
+    }
+
+    @ViewBuilder
+    private func quickNavButton(_ route: CommunityFeatureRoute) -> some View {
+        NavigationLink {
+            destination(for: route)
+        } label: {
+            VStack(spacing: 5) {
+                Image(systemName: route.iconName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(route.color)
+                Text(route.title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

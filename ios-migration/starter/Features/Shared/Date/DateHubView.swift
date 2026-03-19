@@ -4,6 +4,19 @@ import UniformTypeIdentifiers
 import UIKit
 
 struct DateHubView: View {
+    private enum DateSectionAnchor {
+        static let dashboard = "date_dashboard"
+        static let tabs = "date_tabs"
+        static let datingProfile = "date_dating_profile"
+        static let datingBrowse = "date_dating_browse"
+        static let blindStatus = "date_blind_status"
+        static let blindJoin = "date_blind_join"
+        static let blindFind = "date_blind_find"
+        static let blindPending = "date_blind_pending"
+        static let blindSent = "date_blind_sent"
+        static let blindTimeline = "date_blind_timeline"
+    }
+
     let user: AppSessionUser
     @StateObject private var viewModel: DateHubViewModel
 
@@ -24,32 +37,40 @@ struct DateHubView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                Picker("Section", selection: $viewModel.selectedTab) {
-                    ForEach(DateHubTab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
+        ScrollViewReader { proxy in
+            List {
+                Section {
+                    dashboardHomeSection(proxy: proxy)
+                }
+                .id(DateSectionAnchor.dashboard)
+
+                Section {
+                    Picker("Section", selection: $viewModel.selectedTab) {
+                        ForEach(DateHubTab.allCases) { tab in
+                            Text(tab.rawValue).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .id(DateSectionAnchor.tabs)
+
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Section {
+                        Text(status)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .pickerStyle(.segmented)
-            }
 
-            if let status = viewModel.statusMessage, !status.isEmpty {
-                Section {
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                switch viewModel.selectedTab {
+                case .datingLoop:
+                    datingLoopSection
+                case .blindDate:
+                    blindDateSection
                 }
             }
-
-            switch viewModel.selectedTab {
-            case .datingLoop:
-                datingLoopSection
-            case .blindDate:
-                blindDateSection
-            }
         }
-        .navigationTitle("Dating Loop")
+        .navigationTitle(viewModel.selectedTab.rawValue)
         .task { await viewModel.refresh() }
         .refreshable { await viewModel.refresh() }
         .onChange(of: datingPhotoItems) { _, items in
@@ -120,6 +141,75 @@ struct DateHubView: View {
     }
 
     @ViewBuilder
+    private func dashboardHomeSection(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dashboard Home")
+                .font(.headline)
+
+            Text("Android-style dating and blind date navigation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                dashboardLaneTile(
+                    title: "Dating Loop",
+                    subtitle: "Profile and discovery",
+                    icon: "heart.circle.fill",
+                    selected: viewModel.selectedTab == .datingLoop
+                ) {
+                    viewModel.selectedTab = .datingLoop
+                    withAnimation { proxy.scrollTo(DateSectionAnchor.datingProfile, anchor: .top) }
+                }
+
+                dashboardLaneTile(
+                    title: "Blind Date",
+                    subtitle: "Join and invite flow",
+                    icon: "person.2.circle.fill",
+                    selected: viewModel.selectedTab == .blindDate
+                ) {
+                    viewModel.selectedTab = .blindDate
+                    withAnimation { proxy.scrollTo(DateSectionAnchor.blindStatus, anchor: .top) }
+                }
+            }
+
+            if viewModel.selectedTab == .datingLoop {
+                HStack(spacing: 8) {
+                    dashboardQuickButton("Profile") {
+                        withAnimation { proxy.scrollTo(DateSectionAnchor.datingProfile, anchor: .top) }
+                    }
+                    dashboardQuickButton("Browse") {
+                        withAnimation { proxy.scrollTo(DateSectionAnchor.datingBrowse, anchor: .top) }
+                    }
+                    dashboardQuickButton("Try Blind Date") {
+                        viewModel.selectedTab = .blindDate
+                        withAnimation { proxy.scrollTo(DateSectionAnchor.blindStatus, anchor: .top) }
+                    }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    dashboardQuickButton("Status") {
+                        withAnimation { proxy.scrollTo(DateSectionAnchor.blindStatus, anchor: .top) }
+                    }
+                    dashboardQuickButton("Join") {
+                        withAnimation { proxy.scrollTo(DateSectionAnchor.blindJoin, anchor: .top) }
+                    }
+                    dashboardQuickButton("Find") {
+                        withAnimation { proxy.scrollTo(DateSectionAnchor.blindFind, anchor: .top) }
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                metricTile(value: "\(viewModel.datingProfiles.count)", label: "Dating")
+                metricTile(value: "\(viewModel.blindProfiles.count)", label: "Blind")
+                metricTile(value: "\(viewModel.receivedInvitations.count)", label: "Pending")
+                metricTile(value: "\(viewModel.invitationTimeline.count)", label: "Timeline")
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
     private var datingLoopSection: some View {
         Section("Dating Profile") {
             TextField("Name", text: $viewModel.profileName)
@@ -180,6 +270,7 @@ struct DateHubView: View {
                 .disabled(viewModel.isLoading)
             }
         }
+        .id(DateSectionAnchor.datingProfile)
 
         Section("Browse Profiles") {
             if viewModel.datingProfiles.isEmpty && viewModel.isLoading {
@@ -209,6 +300,7 @@ struct DateHubView: View {
                 }
             }
         }
+        .id(DateSectionAnchor.datingBrowse)
     }
 
     @ViewBuilder
@@ -226,6 +318,7 @@ struct DateHubView: View {
                 }
             }
         }
+        .id(DateSectionAnchor.blindStatus)
 
         if viewModel.canJoinBlindDate {
             Section("Join Blind Date") {
@@ -263,6 +356,7 @@ struct DateHubView: View {
                 }
                 .disabled(viewModel.isLoading || viewModel.blindBio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || blindMediaDrafts.isEmpty)
             }
+            .id(DateSectionAnchor.blindJoin)
         } else {
             Section("Blind Date Actions") {
                 Button(viewModel.isLoading ? "Rejoining..." : "Rejoin Loop") {
@@ -270,6 +364,7 @@ struct DateHubView: View {
                 }
                 .disabled(viewModel.isLoading)
             }
+            .id(DateSectionAnchor.blindJoin)
         }
 
         Section("Find People") {
@@ -311,6 +406,7 @@ struct DateHubView: View {
                 }
             }
         }
+        .id(DateSectionAnchor.blindFind)
 
         if !viewModel.receivedInvitations.isEmpty {
             Section("Pending Invitations") {
@@ -336,6 +432,7 @@ struct DateHubView: View {
                     .padding(.vertical, 4)
                 }
             }
+            .id(DateSectionAnchor.blindPending)
         }
 
         if !viewModel.sentInvitations.isEmpty {
@@ -351,6 +448,7 @@ struct DateHubView: View {
                     .padding(.vertical, 2)
                 }
             }
+            .id(DateSectionAnchor.blindSent)
         }
 
         if !viewModel.invitationTimeline.isEmpty {
@@ -371,7 +469,70 @@ struct DateHubView: View {
                     .padding(.vertical, 2)
                 }
             }
+            .id(DateSectionAnchor.blindTimeline)
         }
+    }
+
+    @ViewBuilder
+    private func dashboardLaneTile(
+        title: String,
+        subtitle: String,
+        icon: String,
+        selected: Bool,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 7) {
+                Image(systemName: icon)
+                    .font(.headline)
+                    .foregroundStyle(selected ? .blue : .secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill((selected ? Color.blue : Color.secondary).opacity(0.14)))
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(selected ? Color.blue.opacity(0.09) : Color(.secondarySystemGroupedBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(selected ? Color.blue.opacity(0.35) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func dashboardQuickButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .font(.caption.weight(.semibold))
+    }
+
+    @ViewBuilder
+    private func metricTile(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
     }
 
     private func blindStatusTitle(_ status: BlindDateUserStatusRecord) -> String {
