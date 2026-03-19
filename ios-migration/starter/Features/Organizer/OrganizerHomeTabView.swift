@@ -1,11 +1,21 @@
 import SwiftUI
 
+enum OrganizerHomeTab: Hashable {
+    case home
+    case events
+    case requests
+    case summary
+}
+
 struct OrganizerHomeTabView: View {
     let user: AppSessionUser
+    @State private var selectedTab: OrganizerHomeTab = .home
 
     var body: some View {
-        TabView {
-            OrganizerDashboardView(user: user)
+        TabView(selection: $selectedTab) {
+            OrganizerDashboardView(user: user) { tab in
+                selectedTab = tab
+            }
                 .tabItem {
                     BrandTabLabel(
                         title: "Home",
@@ -13,6 +23,7 @@ struct OrganizerHomeTabView: View {
                         fallbackSystemName: "house.fill"
                     )
                 }
+                .tag(OrganizerHomeTab.home)
 
             OrganizerHostedEventsView(user: user)
                 .tabItem {
@@ -22,15 +33,17 @@ struct OrganizerHomeTabView: View {
                         fallbackSystemName: "calendar.badge.clock"
                     )
                 }
+                .tag(OrganizerHomeTab.events)
 
             OrganizerApplicationsReviewView(user: user)
                 .tabItem {
                     BrandTabLabel(
-                        title: "Applications",
+                        title: "Requests",
                         assetName: BrandAsset.tabApplications,
                         fallbackSystemName: "person.2"
                     )
                 }
+                .tag(OrganizerHomeTab.requests)
 
             OrganizerSummaryView(user: user)
                 .tabItem {
@@ -40,15 +53,7 @@ struct OrganizerHomeTabView: View {
                         fallbackSystemName: "chart.bar"
                     )
                 }
-
-            OrganizerWalletView(user: user)
-                .tabItem {
-                    BrandTabLabel(
-                        title: "Wallet",
-                        assetName: BrandAsset.tabWallet,
-                        fallbackSystemName: "wallet.pass"
-                    )
-                }
+                .tag(OrganizerHomeTab.summary)
         }
     }
 }

@@ -2,7 +2,12 @@ import SwiftUI
 
 struct OrganizerDashboardView: View {
     let user: AppSessionUser
+    let onOpenTab: (OrganizerHomeTab) -> Void
     @StateObject private var viewModel = OrganizerDashboardViewModel()
+    @State private var showingComposer = false
+    @State private var showingWallet = false
+    @State private var showingProfile = false
+    @State private var showingLive = false
 
     var body: some View {
         NavigationStack {
@@ -15,9 +20,48 @@ struct OrganizerDashboardView: View {
                 .padding(16)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Organizer Dashboard")
+            .navigationTitle("Dashboard")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("My Wallet", systemImage: "wallet.pass.fill") {
+                            showingWallet = true
+                        }
+                        Button("Organizer Profile", systemImage: "person.crop.circle") {
+                            showingProfile = true
+                        }
+                        if viewModel.snapshot.canGoLive {
+                            Button("Go Live", systemImage: "video.fill") {
+                                showingLive = true
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
+                    }
+                }
+            }
             .task { await viewModel.refresh(uid: user.uid) }
             .refreshable { await viewModel.refresh(uid: user.uid) }
+            .sheet(isPresented: $showingComposer) {
+                OrganizerEventComposerView(user: user) {
+                    Task { await viewModel.refresh(uid: user.uid) }
+                }
+            }
+            .sheet(isPresented: $showingWallet) {
+                NavigationStack {
+                    OrganizerWalletView(user: user)
+                }
+            }
+            .sheet(isPresented: $showingProfile) {
+                NavigationStack {
+                    OrganizerProfileSetupView(user: user)
+                }
+            }
+            .sheet(isPresented: $showingLive) {
+                NavigationStack {
+                    LiveSessionsView(user: user)
+                }
+            }
             .alert("Error", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
                 set: { if !$0 { viewModel.errorMessage = nil } }
@@ -64,42 +108,55 @@ struct OrganizerDashboardView: View {
                 Text("Quick Actions")
                     .font(.headline)
 
-                NavigationLink {
-                    OrganizerHostedEventsView(user: user)
+                Button {
+                    showingComposer = true
                 } label: {
-                    actionRow(title: "Manage Events", subtitle: "Create, edit, and review applicants", icon: "calendar.badge.clock")
+                    actionRow(title: "Create New Event", subtitle: "Host a new volunteer event", icon: "plus.circle.fill")
                 }
+                .buttonStyle(.plain)
 
-                NavigationLink {
-                    OrganizerApplicationsReviewView(user: user)
+                Button {
+                    onOpenTab(.events)
+                } label: {
+                    actionRow(title: "Manage Events", subtitle: "View and edit hosted events", icon: "calendar.badge.clock")
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    onOpenTab(.requests)
                 } label: {
                     actionRow(title: "Review Applications", subtitle: "All, pending, approved, and rejected", icon: "person.crop.rectangle.stack")
                 }
+                .buttonStyle(.plain)
 
-                NavigationLink {
-                    OrganizerSummaryView(user: user)
+                Button {
+                    onOpenTab(.summary)
                 } label: {
                     actionRow(title: "Event Summary", subtitle: "Hosted and active volunteer metrics", icon: "chart.bar.xaxis")
                 }
+                .buttonStyle(.plain)
 
-                NavigationLink {
-                    OrganizerWalletView(user: user)
+                Button {
+                    showingWallet = true
                 } label: {
                     actionRow(title: "Organizer Wallet", subtitle: "Balance, tracked income, and history", icon: "wallet.pass")
                 }
+                .buttonStyle(.plain)
 
-                NavigationLink {
-                    OrganizerProfileSetupView(user: user)
+                Button {
+                    showingProfile = true
                 } label: {
                     actionRow(title: "Organizer Profile", subtitle: "Organization name, bio, and location", icon: "person.crop.circle")
                 }
+                .buttonStyle(.plain)
 
                 if viewModel.snapshot.canGoLive {
-                    NavigationLink {
-                        LiveSessionsView(user: user)
+                    Button {
+                        showingLive = true
                     } label: {
                         actionRow(title: "Go Live", subtitle: "Start or monitor live sessions", icon: "video")
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
