@@ -69,7 +69,7 @@ extension ApplicationStatus {
     }
 
     var isPendingLike: Bool {
-        self == .pending || self == .viewed
+        self == .pending || self == .viewed || self == .waitlisted
     }
 
     var isApprovedLike: Bool {

@@ -7,6 +7,7 @@ struct EmployerPostedJobsView: View {
     @State private var showingComposer = false
     @State private var editingJob: JobRecord?
     @State private var reviewingApplicantsForJob: JobRecord?
+    @State private var selectedDetailsJob: JobRecord?
 
     var body: some View {
         NavigationStack {
@@ -44,6 +45,9 @@ struct EmployerPostedJobsView: View {
                                         onManageApplicants: {
                                             guard let jobId = job.id, !jobId.isEmpty else { return }
                                             reviewingApplicantsForJob = job
+                                        },
+                                        onDetails: {
+                                            selectedDetailsJob = job
                                         },
                                         onEdit: {
                                             editingJob = job
@@ -92,6 +96,9 @@ struct EmployerPostedJobsView: View {
                     jobTitle: job.title
                 )
             }
+            .sheet(item: $selectedDetailsJob) { job in
+                EmployerJobDetailView(job: job)
+            }
             .alert("Error", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
                 set: { if !$0 { viewModel.errorMessage = nil } }
@@ -136,6 +143,7 @@ private struct EmployerPostedJobRow: View {
     let applicantsCount: Int
     let pendingCount: Int
     let onManageApplicants: () -> Void
+    let onDetails: () -> Void
     let onEdit: () -> Void
     let onToggleStatus: () -> Void
     let onDelete: () -> Void
@@ -188,6 +196,9 @@ private struct EmployerPostedJobRow: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .disabled((job.id ?? "").isEmpty)
+                Button("Details", action: onDetails)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 Button("Edit", action: onEdit)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -204,5 +215,51 @@ private struct EmployerPostedJobRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct EmployerJobDetailView: View {
+    let job: JobRecord
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Overview") {
+                    detailRow("Title", job.title ?? "Untitled")
+                    detailRow("Role", job.jobTitle ?? "N/A")
+                    detailRow("Organization", job.organizationName ?? job.employerName ?? "N/A")
+                    detailRow("Status", ((job.status ?? "open").uppercased()))
+                }
+
+                Section("Schedule & Location") {
+                    detailRow("Date", job.date ?? "TBD")
+                    detailRow("Time", job.time ?? "TBD")
+                    detailRow("Location", job.locationName ?? job.locationString ?? "N/A")
+                    detailRow("Category", job.category ?? "General")
+                }
+
+                Section("Capacity") {
+                    detailRow("Volunteers Needed", "\(job.volunteersNeeded ?? job.totalSlots ?? 0)")
+                    detailRow("Slots Filled", "\(job.slotsFilled ?? 0)")
+                    detailRow("Applicants", "\(job.applicantsCount ?? 0)")
+                }
+
+                Section("Description") {
+                    Text(job.description?.isEmpty == false ? job.description! : "No description provided.")
+                }
+            }
+            .navigationTitle("Job Details")
+        }
+    }
+
+    @ViewBuilder
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
     }
 }

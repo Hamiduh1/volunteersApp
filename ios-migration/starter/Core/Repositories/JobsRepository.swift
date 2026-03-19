@@ -38,7 +38,9 @@ final class JobsRepository {
             .collection(FirestoreSubcollection.applications.rawValue)
             .document(uid)
             .getDocument()
-        return subSnap.exists
+        if subSnap.exists { return true }
+
+        return try await hasRootApplicationByQuery(jobId: normalizedJobId, uid: uid)
     }
 
     func fetchJob(jobId: String) async throws -> JobRecord? {
@@ -124,6 +126,10 @@ final class JobsRepository {
             }
         }
 
+        if let fallbackRoot = try await fetchLatestRootApplication(jobId: normalizedJobId, uid: uid) {
+            return fallbackRoot
+        }
+
         let subSnap = try await db.collection(FirestoreCollection.jobs.rawValue)
             .document(normalizedJobId)
             .collection(FirestoreSubcollection.applications.rawValue)
@@ -139,6 +145,87 @@ final class JobsRepository {
             id: subSnap.documentID,
             applicationId: data.firstNonEmptyString(keys: ["applicationId", "id"]) ?? subSnap.documentID,
             jobId: data.firstNonEmptyString(keys: ["jobId"]) ?? normalizedJobId,
+            jobTitle: data.firstNonEmptyString(keys: ["jobTitle", "title"]),
+            userId: data.firstNonEmptyString(keys: ["userId", "volunteerUid", "volunteerId"]),
+            volunteerUid: data.firstNonEmptyString(keys: ["volunteerUid", "userId", "volunteerId"]),
+            volunteerName: data.firstNonEmptyString(keys: ["volunteerName", "name"]),
+            volunteerEmail: data.firstNonEmptyString(keys: ["volunteerEmail", "email"]),
+            employerUid: data.firstNonEmptyString(keys: ["employerUid", "employerId"]),
+            employerId: data.firstNonEmptyString(keys: ["employerId", "employerUid"]),
+            status: ApplicationStatus(rawValue: (data.firstNonEmptyString(keys: ["status"]) ?? "UNKNOWN").uppercased()) ?? .unknown,
+            appliedAt: data.firstTimestamp(keys: ["appliedAt", "appliedDate", "createdAt", "timestamp"]),
+            appliedDate: data.firstTimestamp(keys: ["appliedDate", "appliedAt", "createdAt", "timestamp"]),
+            lastUpdatedAt: data.firstTimestamp(keys: ["lastUpdatedAt", "updatedAt"])
+        )
+    }
+
+    private func hasRootApplicationByQuery(jobId: String, uid: String) async throws -> Bool {
+        let queries: [Query] = [
+            db.collection(FirestoreCollection.applications.rawValue)
+                .whereField("userId", isEqualTo: uid)
+                .limit(to: 120),
+            db.collection(FirestoreCollection.applications.rawValue)
+                .whereField("volunteerUid", isEqualTo: uid)
+                .limit(to: 120),
+            db.collection(FirestoreCollection.applications.rawValue)
+                .whereField("volunteerId", isEqualTo: uid)
+                .limit(to: 120)
+        ]
+
+        for query in queries {
+            guard let snapshot = try? await query.getDocuments() else { continue }
+            for doc in snapshot.documents {
+                let normalized = normalizeDocumentId(doc.data().firstNonEmptyString(keys: ["jobId"]) ?? "")
+                if normalized == jobId {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func fetchLatestRootApplication(jobId: String, uid: String) async throws -> JobApplicationRecord? {
+        let queries: [Query] = [
+            db.collection(FirestoreCollection.applications.rawValue)
+                .whereField("userId", isEqualTo: uid)
+                .limit(to: 160),
+            db.collection(FirestoreCollection.applications.rawValue)
+                .whereField("volunteerUid", isEqualTo: uid)
+                .limit(to: 160),
+            db.collection(FirestoreCollection.applications.rawValue)
+                .whereField("volunteerId", isEqualTo: uid)
+                .limit(to: 160)
+        ]
+
+        var newest: QueryDocumentSnapshot?
+        var newestDate = Date.distantPast
+
+        for query in queries {
+            guard let snapshot = try? await query.getDocuments() else { continue }
+            for doc in snapshot.documents {
+                let data = doc.data()
+                let normalized = normalizeDocumentId(data.firstNonEmptyString(keys: ["jobId"]) ?? "")
+                if normalized != jobId { continue }
+                let candidateDate = data.firstDate(
+                    keys: ["lastUpdatedAt", "updatedAt", "appliedAt", "appliedDate", "createdAt", "timestamp"]
+                ) ?? .distantPast
+                if newest == nil || candidateDate > newestDate {
+                    newest = doc
+                    newestDate = candidateDate
+                }
+            }
+        }
+
+        guard let newest else { return nil }
+        if let decoded = try? newest.data(as: JobApplicationRecord.self) {
+            return decoded
+        }
+
+        let data = newest.data()
+        return JobApplicationRecord(
+            id: newest.documentID,
+            applicationId: data.firstNonEmptyString(keys: ["applicationId", "id"]) ?? newest.documentID,
+            jobId: data.firstNonEmptyString(keys: ["jobId"]) ?? jobId,
             jobTitle: data.firstNonEmptyString(keys: ["jobTitle", "title"]),
             userId: data.firstNonEmptyString(keys: ["userId", "volunteerUid", "volunteerId"]),
             volunteerUid: data.firstNonEmptyString(keys: ["volunteerUid", "userId", "volunteerId"]),
@@ -201,5 +288,9 @@ private extension Dictionary where Key == String, Value == Any {
             }
         }
         return nil
+    }
+
+    func firstDate(keys: [String]) -> Date? {
+        firstTimestamp(keys: keys)?.dateValue()
     }
 }

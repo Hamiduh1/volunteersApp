@@ -142,7 +142,9 @@ final class MyActivityRepository {
                 ?? jobsById[jobId]?.title
                 ?? "Job"
             let status = parseStatus(data: data)
-            let appliedDate = data.firstDate(keys: ["appliedAt", "appliedDate", "createdAt", "timestamp"])
+            let appliedDate = data.firstDate(
+                keys: ["lastUpdatedAt", "updatedAt", "appliedAt", "appliedDate", "createdAt", "timestamp"]
+            )
             let subtitle = data.firstNonEmptyString(keys: ["organizationName", "employerName", "employerUid", "employerId"])
                 ?? "Job application"
 
@@ -164,12 +166,32 @@ final class MyActivityRepository {
                 let candidateDate = item.appliedAt ?? .distantPast
                 if candidateDate > existingDate {
                     bestByJobId[item.referenceId] = item
+                } else if candidateDate == existingDate && statusRank(item.status) > statusRank(existing.status) {
+                    // Prefer a decisive status if timestamps are equal.
+                    bestByJobId[item.referenceId] = item
                 }
             } else {
                 bestByJobId[item.referenceId] = item
             }
         }
         return Array(bestByJobId.values)
+    }
+
+    private func statusRank(_ status: ApplicationStatus) -> Int {
+        switch status {
+        case .completed, .attended:
+            return 5
+        case .approved, .accepted:
+            return 4
+        case .rejected, .rejectedByEmployer, .withdrawn:
+            return 3
+        case .waitlisted, .viewed:
+            return 2
+        case .pending:
+            return 1
+        case .unknown:
+            return 0
+        }
     }
 
     private func fetchEventsById(_ eventIds: [String]) async throws -> [String: EventRecord] {

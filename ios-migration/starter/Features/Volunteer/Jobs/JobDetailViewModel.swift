@@ -15,6 +15,40 @@ final class JobDetailViewModel: ObservableObject {
         application != nil
     }
 
+    enum ApplicationActionState: Equatable {
+        case canApply
+        case appliedPending
+        case approved
+        case rejected
+        case jobClosed
+        case checking
+    }
+
+    var actionState: ApplicationActionState {
+        if isApplying {
+            return .checking
+        }
+
+        let normalizedJobStatus = (job?.status ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if normalizedJobStatus == "closed" || normalizedJobStatus == "completed" {
+            return .jobClosed
+        }
+
+        guard let status = application?.status else {
+            return .canApply
+        }
+
+        if status.isApprovedLike {
+            return .approved
+        }
+        if status.isRejectedLike {
+            return .rejected
+        }
+        return .appliedPending
+    }
+
     func load(jobId: String, user: AppSessionUser) async {
         isLoading = true
         errorMessage = nil
@@ -30,7 +64,7 @@ final class JobDetailViewModel: ObservableObject {
 
     func apply(jobId: String, user: AppSessionUser) async {
         guard !jobId.isEmpty else { return }
-        guard !isApplied else { return }
+        guard actionState == .canApply else { return }
         guard !isApplying else { return }
         isApplying = true
         defer { isApplying = false }
