@@ -18,6 +18,7 @@ struct WalletTransactView: View {
     let user: AppSessionUser
     @StateObject private var viewModel = WalletTransactViewModel()
     @State private var recipientLane: WalletRecipientLane = .appUser
+    @State private var showAddBeneficiarySheet = false
 
     var body: some View {
         ScrollView {
@@ -39,6 +40,9 @@ struct WalletTransactView: View {
         }
         .onChange(of: viewModel.destinationType) { _, destination in
             recipientLane = destination == .beneficiary ? .mobileMoney : .appUser
+        }
+        .sheet(isPresented: $showAddBeneficiarySheet) {
+            AddBeneficiarySheet(viewModel: viewModel, isPresented: $showAddBeneficiarySheet)
         }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -101,15 +105,27 @@ struct WalletTransactView: View {
                 Divider()
 
                 HStack(spacing: 10) {
-                    NavigationLink {
-                        UserDirectoryView(user: user)
-                    } label: {
-                        quickActionTile(
-                            title: "Find User",
-                            icon: "person.2.fill"
-                        )
+                    if recipientLane == .mobileMoney {
+                        Button {
+                            showAddBeneficiarySheet = true
+                        } label: {
+                            quickActionTile(
+                                title: "Add Beneficiary",
+                                icon: "person.badge.plus.fill"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        NavigationLink {
+                            UserDirectoryView(user: user)
+                        } label: {
+                            quickActionTile(
+                                title: "Find User",
+                                icon: "person.2.fill"
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
                     NavigationLink {
                         WalletTransactionHistoryView(user: user)
@@ -194,12 +210,20 @@ struct WalletTransactView: View {
                     if viewModel.beneficiaries.isEmpty {
                         Text("No beneficiaries found. Add a beneficiary first, then return to send money.")
                             .foregroundStyle(.secondary)
+                        Button("Add Beneficiary") {
+                            showAddBeneficiarySheet = true
+                        }
+                        .buttonStyle(.borderedProminent)
                     } else {
                         Picker("Beneficiary", selection: $viewModel.selectedBeneficiaryId) {
                             ForEach(viewModel.beneficiaries) { item in
                                 Text(beneficiaryLabel(item)).tag(item.id ?? "")
                             }
                         }
+                        Button("Add New Beneficiary") {
+                            showAddBeneficiarySheet = true
+                        }
+                        .buttonStyle(.bordered)
                     }
                     Text("Mobile money uses beneficiary routing with verification.")
                         .font(.footnote)
@@ -427,5 +451,134 @@ private struct CardContainer<Content: View>: View {
             .padding(14)
             .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private struct AddBeneficiarySheet: View {
+    @ObservedObject var viewModel: WalletTransactViewModel
+    @Binding var isPresented: Bool
+
+    @State private var fullName = ""
+    @State private var country = "Ghana"
+    @State private var network = "MTN"
+    @State private var phone = ""
+
+    private let networksByCountry: [String: [String]] = [
+        "Ghana": ["MTN", "AirtelTigo", "Telecel"],
+        "Uganda": ["MTN", "Airtel"],
+        "Kenya": ["M-Pesa", "Airtel Money"],
+        "Rwanda": ["MTN", "Airtel"],
+        "Tanzania": ["M-Pesa", "Airtel Money", "Tigo Pesa", "HaloPesa"]
+    ]
+
+    private var availableCountries: [String] {
+        networksByCountry.keys.sorted()
+    }
+
+    private var availableNetworks: [String] {
+        networksByCountry[country] ?? ["MTN"]
+    }
+
+    private var canSubmit: Bool {
+        !fullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !network.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            phone.filter(\.isNumber).count >= 6 &&
+            !viewModel.isCreatingBeneficiary
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Dashboard Home")
+                            .font(.headline)
+                        Text("Android-style add beneficiary flow for mobile money transfers.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            miniStep(title: "Step 1", subtitle: "Identity")
+                            miniStep(title: "Step 2", subtitle: "Routing")
+                            miniStep(title: "Step 3", subtitle: "Save")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Beneficiary Profile") {
+                    TextField("Full Name", text: $fullName)
+
+                    Picker("Country", selection: $country) {
+                        ForEach(availableCountries, id: \.self) { name in
+                            Text(name).tag(name)
+                        }
+                    }
+                    .onChange(of: country) { _, selected in
+                        let first = networksByCountry[selected]?.first ?? "MTN"
+                        network = first
+                    }
+
+                    Picker("Network", selection: $network) {
+                        ForEach(availableNetworks, id: \.self) { item in
+                            Text(item).tag(item)
+                        }
+                    }
+
+                    TextField("Phone Number", text: $phone)
+                        .keyboardType(.phonePad)
+                }
+
+                Section {
+                    Button {
+                        Task {
+                            await viewModel.addBeneficiary(
+                                name: fullName,
+                                country: country,
+                                network: network,
+                                phone: phone.filter(\.isNumber)
+                            )
+                            if viewModel.errorMessage == nil {
+                                isPresented = false
+                            }
+                        }
+                    } label: {
+                        if viewModel.isCreatingBeneficiary {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text("Save Beneficiary")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .disabled(!canSubmit)
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .navigationTitle("Add Beneficiary")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { isPresented = false }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func miniStep(title: String, subtitle: String) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.primary)
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
     }
 }

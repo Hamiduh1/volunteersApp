@@ -113,6 +113,66 @@ final class GlobalWalletRepository {
             .sorted { ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending }
     }
 
+    func addBeneficiary(
+        uid: String,
+        name: String,
+        country: String,
+        network: String,
+        phone: String
+    ) async throws -> BeneficiaryRecord {
+        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCountry = country.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanNetwork = network.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanUid.isEmpty else {
+            throw WalletTransferError.transferFailed(reason: "You must be logged in.")
+        }
+        guard !cleanName.isEmpty else {
+            throw WalletTransferError.invalidBeneficiary(reason: "Beneficiary name is required.")
+        }
+        guard !cleanCountry.isEmpty else {
+            throw WalletTransferError.invalidBeneficiary(reason: "Beneficiary country is required.")
+        }
+        guard !cleanNetwork.isEmpty else {
+            throw WalletTransferError.invalidBeneficiary(reason: "Network is required.")
+        }
+        guard !cleanPhone.isEmpty else {
+            throw WalletTransferError.invalidBeneficiary(reason: "Phone number is required.")
+        }
+
+        let ref = db.collection(FirestoreCollection.users.rawValue)
+            .document(cleanUid)
+            .collection(FirestoreSubcollection.beneficiaries.rawValue)
+            .document()
+
+        let payload: [String: Any] = [
+            "name": cleanName,
+            "country": cleanCountry,
+            "network": cleanNetwork,
+            "phone": cleanPhone,
+            "accountLast4": String(cleanPhone.suffix(4)),
+            "type": "MOBILE_MONEY",
+            "verificationStatus": "UNVERIFIED",
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        try await ref.setData(payload)
+
+        return BeneficiaryRecord(
+            id: ref.documentID,
+            name: cleanName,
+            country: cleanCountry,
+            network: cleanNetwork,
+            phone: cleanPhone,
+            accountLast4: String(cleanPhone.suffix(4)),
+            type: "MOBILE_MONEY",
+            verificationStatus: "UNVERIFIED"
+        )
+    }
+
     func deleteBeneficiary(uid: String, beneficiaryId: String) async throws {
         let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanBeneficiaryId = beneficiaryId.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -78,6 +78,7 @@ final class WalletTransactViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isFetchingQuote = false
     @Published var isSubmitting = false
+    @Published var isCreatingBeneficiary = false
     @Published var statusMessage: String?
     @Published var errorMessage: String?
 
@@ -310,6 +311,44 @@ final class WalletTransactViewModel: ObservableObject {
             if let refreshedSummary = try? await repository.fetchSummary(uid: currentUserId) {
                 summary = refreshedSummary
             }
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
+    func addBeneficiary(
+        name: String,
+        country: String,
+        network: String,
+        phone: String
+    ) async {
+        guard !currentUserId.isEmpty else {
+            errorMessage = "You must be logged in."
+            return
+        }
+
+        isCreatingBeneficiary = true
+        errorMessage = nil
+        statusMessage = nil
+        defer { isCreatingBeneficiary = false }
+
+        do {
+            let created = try await repository.addBeneficiary(
+                uid: currentUserId,
+                name: name,
+                country: country,
+                network: network,
+                phone: phone
+            )
+
+            beneficiaries = try await repository.fetchBeneficiaries(uid: currentUserId)
+            if let createdId = created.id, !createdId.isEmpty {
+                selectedBeneficiaryId = createdId
+            } else {
+                selectedBeneficiaryId = beneficiaries.first?.id ?? ""
+            }
+            destinationType = .beneficiary
+            statusMessage = "\(created.name ?? "Beneficiary") added successfully."
         } catch {
             errorMessage = AppErrorMapper.message(from: error)
         }
