@@ -10,9 +10,8 @@ struct GlobalWalletHomeView: View {
         ScrollView {
             VStack(spacing: 14) {
                 heroBalanceCard
+                dashboardHomeCard
                 globalCalculatorCard
-                walletActionsCard
-                accountToolsCard
                 if user.role == .volunteer || user.role == .user {
                     becomeAgentCard
                 }
@@ -100,6 +99,117 @@ struct GlobalWalletHomeView: View {
     }
 
     @ViewBuilder
+    private var dashboardHomeCard: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Dashboard Home")
+                    .font(.headline)
+
+                Text("Primary Wallet Navigation")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    NavigationLink {
+                        WalletTransactView(user: user)
+                    } label: {
+                        dashboardTile(
+                            title: "Send Money",
+                            subtitle: "App user or mobile money",
+                            icon: "paperplane.fill"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        PaymentMethodsView(user: user)
+                    } label: {
+                        dashboardTile(
+                            title: "Payment Methods",
+                            subtitle: "Cards, banks, mobile money",
+                            icon: "creditcard.fill"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Divider()
+
+                Text("Operations")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                NavigationLink {
+                    WalletFundingView(direction: .deposit, viewModel: viewModel)
+                } label: {
+                    walletActionRow(
+                        title: "Deposit",
+                        subtitle: "Add money to wallet",
+                        icon: "arrow.down.circle.fill"
+                    )
+                }
+
+                NavigationLink {
+                    WalletFundingView(direction: .withdraw, viewModel: viewModel)
+                } label: {
+                    walletActionRow(
+                        title: "Withdraw",
+                        subtitle: "Transfer wallet funds out",
+                        icon: "arrow.up.circle.fill"
+                    )
+                }
+
+                NavigationLink {
+                    WalletOperationsView(user: user, initialTab: .mobileMoney)
+                } label: {
+                    walletActionRow(
+                        title: "Mobile Money",
+                        subtitle: "Cash in / cash out operations",
+                        icon: "iphone.gen3.radiowaves.left.and.right"
+                    )
+                }
+
+                NavigationLink {
+                    WalletOperationsView(user: user, initialTab: .agent)
+                } label: {
+                    walletActionRow(
+                        title: "Agent Portal",
+                        subtitle: "Code generation and agent payouts",
+                        icon: "person.badge.shield.checkmark.fill"
+                    )
+                }
+
+                NavigationLink {
+                    WalletTransactionHistoryView(user: user)
+                } label: {
+                    walletActionRow(
+                        title: "Transaction History",
+                        subtitle: "View full wallet receipts",
+                        icon: "clock.arrow.circlepath"
+                    )
+                }
+
+                Button {
+                    showBeneficiaryManager = true
+                } label: {
+                    walletActionRow(
+                        title: "Manage Beneficiaries",
+                        subtitle: "Review and delete recipients",
+                        icon: "person.2.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var globalCalculatorCard: some View {
         CardContainer {
             VStack(alignment: .leading, spacing: 10) {
@@ -179,93 +289,6 @@ struct GlobalWalletHomeView: View {
     }
 
     @ViewBuilder
-    private var walletActionsCard: some View {
-        CardContainer {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Services")
-                    .font(.headline)
-
-                NavigationLink {
-                    WalletTransactView(user: user)
-                } label: {
-                    walletActionRow(
-                        title: "Send Money",
-                        subtitle: "Clearly separated App User and Mobile Money flow",
-                        icon: "paperplane.fill"
-                    )
-                }
-
-                NavigationLink {
-                    WalletOperationsView(user: user, initialTab: .agent)
-                } label: {
-                    walletActionRow(
-                        title: "Agent Cash-Out",
-                        subtitle: "Authorize, generate code, and complete payouts",
-                        icon: "person.badge.shield.checkmark.fill"
-                    )
-                }
-
-                NavigationLink {
-                    WalletTransactionHistoryView(user: user)
-                } label: {
-                    walletActionRow(
-                        title: "History",
-                        subtitle: "View receipts and wallet activity",
-                        icon: "clock.arrow.circlepath"
-                    )
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var accountToolsCard: some View {
-        CardContainer {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Account Tools")
-                    .font(.headline)
-
-                NavigationLink {
-                    PaymentMethodsView(user: user)
-                } label: {
-                    walletActionRow(
-                        title: "Payment Methods",
-                        subtitle: "Manage cards, banks, mobile money, and payout setup",
-                        icon: "creditcard.fill"
-                    )
-                }
-
-                Button {
-                    showBeneficiaryManager = true
-                } label: {
-                    walletActionRow(
-                        title: "Manage Beneficiaries",
-                        subtitle: "Review and delete saved recipients",
-                        icon: "person.2.fill"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    WalletOperationsView(user: user, initialTab: .mobileMoney)
-                } label: {
-                    walletActionRow(
-                        title: "Mobile Money",
-                        subtitle: "Cash in / cash out using linked mobile wallets",
-                        icon: "iphone.gen3.radiowaves.left.and.right"
-                    )
-                }
-
-                if let status = viewModel.statusMessage, !status.isEmpty {
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(.green)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
     private var becomeAgentCard: some View {
         CardContainer(background: Color.orange.opacity(0.12)) {
             HStack(spacing: 10) {
@@ -290,8 +313,17 @@ struct GlobalWalletHomeView: View {
     private var recentTransactionsCard: some View {
         CardContainer {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Recent Transactions")
-                    .font(.headline)
+                HStack {
+                    Text("Recent Transactions")
+                        .font(.headline)
+                    Spacer()
+                    NavigationLink {
+                        WalletTransactionHistoryView(user: user)
+                    } label: {
+                        Text("View all")
+                            .font(.caption.weight(.semibold))
+                    }
+                }
 
                 if viewModel.isLoading && viewModel.transactions.isEmpty {
                     ProgressView("Loading wallet...")
@@ -415,6 +447,30 @@ struct GlobalWalletHomeView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func dashboardTile(title: String, subtitle: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .font(.headline)
+                .foregroundStyle(.blue)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(Color.blue.opacity(0.14)))
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
     }
 
     private var balanceText: String {
