@@ -4,7 +4,10 @@ struct WalletOperationsView: View {
     private enum SectionAnchor {
         static let dashboard = "wallet_ops_dashboard"
         static let flow = "wallet_ops_flow"
-        static let mobile = "wallet_ops_mobile"
+        static let mobileDashboard = "wallet_ops_mobile_dashboard"
+        static let mobileAction = "wallet_ops_mobile_action"
+        static let mobileMethod = "wallet_ops_mobile_method"
+        static let mobileSubmit = "wallet_ops_mobile_submit"
         static let agent = "wallet_ops_agent"
         static let status = "wallet_ops_status"
     }
@@ -27,8 +30,14 @@ struct WalletOperationsView: View {
                     tabCard
                         .id(SectionAnchor.flow)
                     if viewModel.selectedTab == .mobileMoney {
-                        mobileMoneyCard
-                            .id(SectionAnchor.mobile)
+                        mobileMoneyDashboardCard(proxy: proxy)
+                            .id(SectionAnchor.mobileDashboard)
+                        mobileMoneyActionCard
+                            .id(SectionAnchor.mobileAction)
+                        mobileMoneyMethodCard
+                            .id(SectionAnchor.mobileMethod)
+                        mobileMoneySubmitCard
+                            .id(SectionAnchor.mobileSubmit)
                     } else {
                         agentCard
                             .id(SectionAnchor.agent)
@@ -72,7 +81,7 @@ struct WalletOperationsView: View {
                         selected: viewModel.selectedTab == .mobileMoney
                     ) {
                         viewModel.selectedTab = .mobileMoney
-                        withAnimation { proxy.scrollTo(SectionAnchor.mobile, anchor: .top) }
+                        withAnimation { proxy.scrollTo(SectionAnchor.mobileDashboard, anchor: .top) }
                     }
 
                     laneTile(
@@ -159,11 +168,92 @@ struct WalletOperationsView: View {
     }
 
     @ViewBuilder
-    private var mobileMoneyCard: some View {
+    private func mobileMoneyDashboardCard(proxy: ScrollViewProxy) -> some View {
         WalletOpsCard {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Mobile Money")
+                Text("Mobile Money Dashboard Home")
                     .font(.headline)
+
+                Text("Android-style mobile money navigation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    laneTile(
+                        title: "Cash In",
+                        subtitle: "Deposit to wallet",
+                        icon: "arrow.down.circle.fill",
+                        selected: viewModel.mobileMoneyFlow == .cashIn
+                    ) {
+                        viewModel.mobileMoneyFlow = .cashIn
+                        withAnimation { proxy.scrollTo(SectionAnchor.mobileAction, anchor: .top) }
+                    }
+
+                    laneTile(
+                        title: "Cash Out",
+                        subtitle: "Withdraw from wallet",
+                        icon: "arrow.up.circle.fill",
+                        selected: viewModel.mobileMoneyFlow == .cashOut
+                    ) {
+                        viewModel.mobileMoneyFlow = .cashOut
+                        withAnimation { proxy.scrollTo(SectionAnchor.mobileAction, anchor: .top) }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button("Action") {
+                        withAnimation { proxy.scrollTo(SectionAnchor.mobileAction, anchor: .top) }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Method") {
+                        withAnimation { proxy.scrollTo(SectionAnchor.mobileMethod, anchor: .top) }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Submit") {
+                        withAnimation { proxy.scrollTo(SectionAnchor.mobileSubmit, anchor: .top) }
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                HStack(spacing: 8) {
+                    NavigationLink {
+                        PaymentMethodsView(user: user)
+                    } label: {
+                        Label("Payment Methods", systemImage: "creditcard.fill")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+
+                    NavigationLink {
+                        WalletTransactionHistoryView(user: user)
+                    } label: {
+                        Label("History", systemImage: "clock.arrow.circlepath")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                if let selected = viewModel.selectedMobileMethod {
+                    Text("Current: \((selected.network ?? selected.brand ?? "Mobile Money")) - \(selected.phoneNumber ?? "No phone")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mobileMoneyActionCard: some View {
+        WalletOpsCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Mobile Action")
+                    .font(.headline)
+
+                Text("Mobile Money")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Picker("Action", selection: $viewModel.mobileMoneyFlow) {
                     ForEach(MobileMoneyFlowType.allCases) { flow in
@@ -175,6 +265,16 @@ struct WalletOperationsView: View {
                 TextField("Amount", text: $viewModel.mobileAmountText)
                     .keyboardType(.decimalPad)
                     .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mobileMoneyMethodCard: some View {
+        WalletOpsCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Mobile Method")
+                    .font(.headline)
 
                 if viewModel.mobileMoneyMethods.isEmpty {
                     Text("No verified mobile money methods found. Add one in Payment Methods.")
@@ -196,12 +296,32 @@ struct WalletOperationsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mobileMoneySubmitCard: some View {
+        WalletOpsCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Confirm")
+                    .font(.headline)
+
+                Text(viewModel.mobileMoneyFlow == .cashIn ? "Submit Cash In request." : "Submit Cash Out request.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
                 Button(viewModel.mobileMoneyFlow == .cashIn ? "Submit Cash In" : "Submit Cash Out") {
                     Task { await viewModel.submitMobileMoney() }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!viewModel.canSubmitMobileMoney)
+
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                }
             }
         }
     }

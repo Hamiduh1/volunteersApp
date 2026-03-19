@@ -596,75 +596,170 @@ struct GlobalWalletHomeView: View {
 }
 
 private struct WalletFundingView: View {
+    private enum FundingSectionAnchor {
+        static let dashboard = "funding_dashboard"
+        static let flow = "funding_flow"
+        static let amount = "funding_amount"
+        static let method = "funding_method"
+        static let mobile = "funding_mobile"
+        static let submit = "funding_submit"
+        static let status = "funding_status"
+    }
+
     let direction: WalletFundingDirection
     @ObservedObject var viewModel: GlobalWalletHomeViewModel
 
     var body: some View {
-        Form {
-            Section("Flow") {
-                Text(direction == .deposit ? "Deposit to Wallet" : "Withdraw from Wallet")
-                    .font(.headline)
-                Text(directionDescription)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+        ScrollViewReader { proxy in
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Dashboard Home")
+                            .font(.headline)
 
-            Section("Amount") {
-                TextField("Amount", text: $viewModel.fundingAmountText)
-                    .keyboardType(.decimalPad)
-            }
+                        Text("Android-style deposit and withdraw navigation.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
-            Section("Funding Method") {
-                if eligibleMethods.isEmpty {
-                    Text("No eligible methods available.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Picker("Method", selection: $viewModel.selectedFundingMethodId) {
-                        ForEach(Array(eligibleMethods.enumerated()), id: \.offset) { _, method in
-                            Text(viewModel.methodLabel(method))
-                                .tag(viewModel.methodIdentifier(method))
+                        HStack(spacing: 8) {
+                            metricTile(value: direction == .deposit ? "Deposit" : "Withdraw", label: "Mode")
+                            metricTile(value: "\(eligibleMethods.count)", label: "Methods")
+                            metricTile(value: "\(viewModel.pendingDepositCount)", label: "Pending")
+                        }
+
+                        HStack(spacing: 8) {
+                            jumpButton("Flow") {
+                                withAnimation { proxy.scrollTo(FundingSectionAnchor.flow, anchor: .top) }
+                            }
+                            jumpButton("Amount") {
+                                withAnimation { proxy.scrollTo(FundingSectionAnchor.amount, anchor: .top) }
+                            }
+                            jumpButton("Method") {
+                                withAnimation { proxy.scrollTo(FundingSectionAnchor.method, anchor: .top) }
+                            }
+                            jumpButton("Submit") {
+                                withAnimation { proxy.scrollTo(FundingSectionAnchor.submit, anchor: .top) }
+                            }
+                        }
+
+                        NavigationLink {
+                            WalletFundingView(direction: oppositeDirection, viewModel: viewModel)
+                        } label: {
+                            Label(
+                                oppositeDirection == .deposit ? "Switch to Deposit" : "Switch to Withdraw",
+                                systemImage: "arrow.left.arrow.right.circle.fill"
+                            )
+                            .font(.subheadline.weight(.semibold))
                         }
                     }
                 }
-            }
+                .id(FundingSectionAnchor.dashboard)
 
-            if let selectedMethod = viewModel.selectedFundingMethod,
-               let type = selectedMethod.type?.uppercased(),
-               type.contains("MOBILE") {
-                Section("Mobile Money") {
-                    Text("Mobile money flows use the linked network and phone number.")
+                Section("Flow") {
+                    Text(direction == .deposit ? "Deposit to Wallet" : "Withdraw from Wallet")
+                        .font(.headline)
+                    Text(directionDescription)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-            }
+                .id(FundingSectionAnchor.flow)
 
-            Section {
-                Button {
-                    Task { await viewModel.submitFunding(direction) }
-                } label: {
-                    if viewModel.isSubmittingFunding {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
+                Section("Amount") {
+                    TextField("Amount", text: $viewModel.fundingAmountText)
+                        .keyboardType(.decimalPad)
+                }
+                .id(FundingSectionAnchor.amount)
+
+                Section("Funding Method") {
+                    if eligibleMethods.isEmpty {
+                        Text("No eligible methods available.")
+                            .foregroundStyle(.secondary)
                     } else {
-                        Text(direction == .deposit ? "Submit Deposit" : "Submit Withdrawal")
-                            .frame(maxWidth: .infinity)
+                        Picker("Method", selection: $viewModel.selectedFundingMethodId) {
+                            ForEach(Array(eligibleMethods.enumerated()), id: \.offset) { _, method in
+                                Text(viewModel.methodLabel(method))
+                                    .tag(viewModel.methodIdentifier(method))
+                            }
+                        }
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isSubmittingFunding || eligibleMethods.isEmpty || viewModel.parsedFundingAmount <= 0)
-            }
+                .id(FundingSectionAnchor.method)
 
-            if let status = viewModel.statusMessage, !status.isEmpty {
+                if let selectedMethod = viewModel.selectedFundingMethod,
+                   let type = selectedMethod.type?.uppercased(),
+                   type.contains("MOBILE") {
+                    Section("Mobile Money") {
+                        Text("Mobile money flows use the linked network and phone number.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .id(FundingSectionAnchor.mobile)
+                }
+
                 Section {
-                    Text(status)
-                        .foregroundStyle(.green)
-                        .font(.footnote)
+                    Button {
+                        Task { await viewModel.submitFunding(direction) }
+                    } label: {
+                        if viewModel.isSubmittingFunding {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text(direction == .deposit ? "Submit Deposit" : "Submit Withdrawal")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isSubmittingFunding || eligibleMethods.isEmpty || viewModel.parsedFundingAmount <= 0)
+                }
+                .id(FundingSectionAnchor.submit)
+
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Section {
+                        Text(status)
+                            .foregroundStyle(.green)
+                            .font(.footnote)
+                    }
+                    .id(FundingSectionAnchor.status)
                 }
             }
+            .onAppear {
+                viewModel.prepareFunding(for: direction)
+            }
+            .navigationTitle(direction == .deposit ? "Deposit" : "Withdraw")
         }
-        .navigationTitle(direction == .deposit ? "Deposit" : "Withdraw")
-        .onAppear {
-            viewModel.prepareFunding(for: direction)
+    }
+
+    @ViewBuilder
+    private func metricTile(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func jumpButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .font(.caption.weight(.semibold))
+    }
+
+    private var oppositeDirection: WalletFundingDirection {
+        switch direction {
+        case .deposit:
+            return .withdraw
+        case .withdraw:
+            return .deposit
         }
     }
 
