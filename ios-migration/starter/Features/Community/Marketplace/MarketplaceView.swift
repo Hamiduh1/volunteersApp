@@ -5,6 +5,13 @@ import UIKit
 import CoreLocation
 
 struct MarketplaceView: View {
+    private enum SectionAnchor {
+        static let dashboard = "marketplace_dashboard"
+        static let filter = "marketplace_filter"
+        static let search = "marketplace_search"
+        static let listings = "marketplace_listings"
+    }
+
     let user: AppSessionUser
     @StateObject private var viewModel = MarketplaceViewModel()
     @StateObject private var locationRequester = MarketplaceLocationRequester()
@@ -17,46 +24,56 @@ struct MarketplaceView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        List {
-            if let status = viewModel.statusMessage, !status.isEmpty {
+        ScrollViewReader { proxy in
+            List {
                 Section {
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    dashboardHomeSection(proxy: proxy)
                 }
-            }
+                .id(SectionAnchor.dashboard)
 
-            Section("Filter") {
-                Picker("Category", selection: $viewModel.selectedCategory) {
-                    ForEach(viewModel.categories, id: \.self) { option in
-                        Text(option).tag(option)
+                if let status = viewModel.statusMessage, !status.isEmpty {
+                    Section {
+                        Text(status)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .pickerStyle(.menu)
-            }
 
-            Section("Search") {
-                TextField("Search listings", text: $viewModel.searchQuery)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
+                Section("Filter") {
+                    Picker("Category", selection: $viewModel.selectedCategory) {
+                        ForEach(viewModel.categories, id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                .id(SectionAnchor.filter)
 
-            Section("Listings") {
-                if viewModel.isLoading && viewModel.filteredItems.isEmpty {
-                    ProgressView("Loading marketplace...")
-                } else if viewModel.filteredItems.isEmpty {
-                    Text("No listings yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.filteredItems) { item in
-                        listingCard(item)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                            .listRowSeparator(.hidden)
+                Section("Search") {
+                    TextField("Search listings", text: $viewModel.searchQuery)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                .id(SectionAnchor.search)
+
+                Section("Listings") {
+                    if viewModel.isLoading && viewModel.filteredItems.isEmpty {
+                        ProgressView("Loading marketplace...")
+                    } else if viewModel.filteredItems.isEmpty {
+                        Text("No listings yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.filteredItems) { item in
+                            listingCard(item)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                                .listRowSeparator(.hidden)
+                        }
                     }
                 }
+                .id(SectionAnchor.listings)
             }
+            .listStyle(.plain)
         }
-        .listStyle(.plain)
         .navigationTitle("Marketplace")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -170,6 +187,113 @@ struct MarketplaceView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+    }
+
+    @ViewBuilder
+    private func dashboardHomeSection(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dashboard Home")
+                .font(.headline)
+
+            Text("Android-style marketplace control center and quick navigation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                dashboardMetric(value: "\(viewModel.items.count)", label: "Total")
+                dashboardMetric(value: "\(viewModel.filteredItems.count)", label: "Visible")
+                dashboardMetric(value: "\(max(viewModel.categories.count - 1, 0))", label: "Categories")
+            }
+
+            HStack(spacing: 10) {
+                dashboardTile(title: "Post Item", icon: "plus.circle.fill") {
+                    showCreateSheet = true
+                }
+                dashboardTile(title: "Refresh", icon: "arrow.clockwise.circle.fill") {
+                    Task { await viewModel.refresh(user: user) }
+                }
+                dashboardTile(title: "Locate", icon: "location.circle.fill") {
+                    locationRequester.requestLocation()
+                }
+            }
+
+            HStack(spacing: 8) {
+                dashboardQuickButton("Filter") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.filter, anchor: .top) }
+                }
+                dashboardQuickButton("Search") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.search, anchor: .top) }
+                }
+                dashboardQuickButton("Listings") {
+                    withAnimation { proxy.scrollTo(SectionAnchor.listings, anchor: .top) }
+                }
+            }
+
+            HStack(spacing: 8) {
+                NavigationLink {
+                    CommunityHubView(user: user)
+                } label: {
+                    Label("Community Dashboard", systemImage: "square.grid.2x2.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+
+                NavigationLink {
+                    AIAssistantView()
+                } label: {
+                    Label("AI Assistant", systemImage: "sparkles")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dashboardMetric(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+
+    @ViewBuilder
+    private func dashboardTile(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.subheadline)
+                    .foregroundStyle(.blue)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func dashboardQuickButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .font(.caption.weight(.semibold))
     }
 
     @ViewBuilder
