@@ -19,6 +19,37 @@ struct SignUpView: View {
 
     var body: some View {
         Form {
+            Section {
+                VStack(spacing: 8) {
+                    HStack(spacing: 10) {
+                        BrandSymbolView(
+                            assetName: BrandAsset.appLogo,
+                            fallbackSystemName: "person.3.sequence.fill",
+                            size: 60,
+                            useTemplate: false
+                        )
+                        BrandSymbolView(
+                            assetName: BrandAsset.companyMark,
+                            fallbackSystemName: "building.2.fill",
+                            size: 30,
+                            useTemplate: false
+                        )
+                    }
+                    Text("Create Account")
+                        .font(.title3.weight(.semibold))
+                    Text("Set up your profile to open the right dashboard")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            Section("Dashboard Home") {
+                Text("Registration supports Volunteer, Organizer, and Employer account dashboards.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Account Type") {
                 Picker("Account type", selection: roleBinding) {
                     ForEach(viewModel.roleOptions) { option in
@@ -78,6 +109,15 @@ struct SignUpView: View {
                     NavigationLink("Enter verification code") {
                         EmailVerificationView(prefilledEmail: viewModel.email)
                     }
+                }
+            }
+
+            Section("Navigation") {
+                NavigationLink("Back to Login") {
+                    LoginView()
+                }
+                NavigationLink("Forgot Password") {
+                    ForgotPasswordView()
                 }
             }
 
