@@ -60,7 +60,7 @@ final class WalletTransactionHistoryViewModel: ObservableObject {
         }
     }
 
-    private func isDeposit(_ transaction: WalletTransactionRecord) -> Bool {
+    func isDeposit(_ transaction: WalletTransactionRecord) -> Bool {
         if isMobileMoney(transaction) { return false }
         let normalizedTitle = transaction.title.lowercased()
         let normalizedType = transaction.type.lowercased()
@@ -73,7 +73,7 @@ final class WalletTransactionHistoryViewModel: ObservableObject {
             || normalizedSource.contains("deposit")
     }
 
-    private func isWithdrawal(_ transaction: WalletTransactionRecord) -> Bool {
+    func isWithdrawal(_ transaction: WalletTransactionRecord) -> Bool {
         if isMobileMoney(transaction) { return false }
         let normalizedTitle = transaction.title.lowercased()
         let normalizedType = transaction.type.lowercased()
@@ -88,7 +88,7 @@ final class WalletTransactionHistoryViewModel: ObservableObject {
             || normalizedSource.contains("withdraw")
     }
 
-    private func isMobileMoney(_ transaction: WalletTransactionRecord) -> Bool {
+    func isMobileMoney(_ transaction: WalletTransactionRecord) -> Bool {
         let normalizedTitle = transaction.title.lowercased()
         let normalizedType = transaction.type.lowercased()
         let normalizedSource = (transaction.source ?? "").lowercased()
