@@ -7631,6 +7631,117 @@ export const bootstrapOwnerSelf = functions.runWith({enforceAppCheck: true})
     };
   });
 
+export const ownerGrantAdminByEmail = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+
+    const callerUid = context.auth.uid;
+    const ownerUserId = getAppConfig().ownerUserId;
+    const callerTokenRole = String(context.auth.token?.role || "").trim().toLowerCase();
+    let isOwnerCaller =
+      context.auth.token?.owner === true ||
+      callerTokenRole === "owner" ||
+      (ownerUserId ? callerUid === ownerUserId : false);
+
+    if (!isOwnerCaller) {
+      const callerSnap = await db.collection("users").doc(callerUid).get();
+      const callerData = (callerSnap.data() || {}) as Record<string, unknown>;
+      const callerRole = asNonEmptyString(
+        callerData.role,
+        callerData.userRole,
+        callerData.userType
+      )?.toLowerCase();
+      isOwnerCaller = callerRole === "owner" || (ownerUserId ? callerUid === ownerUserId : false);
+    }
+
+    if (!isOwnerCaller) {
+      throw new functions.https.HttpsError("permission-denied", "Owner access required.");
+    }
+
+    const payload = (data || {}) as {email?: string; targetEmail?: string};
+    const targetEmail = normalizeEmailLower(payload.email || payload.targetEmail);
+    if (!targetEmail) {
+      throw new functions.https.HttpsError("invalid-argument", "Provide a valid email.");
+    }
+
+    let targetUid = "";
+    const byEmailSnap = await db.collection("users")
+      .where("email", "==", targetEmail)
+      .limit(1)
+      .get();
+    if (!byEmailSnap.empty) {
+      targetUid = byEmailSnap.docs[0].id;
+    } else {
+      try {
+        const authUser = await admin.auth().getUserByEmail(targetEmail);
+        targetUid = authUser.uid;
+      } catch {
+        // no-op: handled by not-found below
+      }
+    }
+
+    if (!targetUid) {
+      throw new functions.https.HttpsError(
+        "not-found",
+        "User account not found for the provided email."
+      );
+    }
+
+    const targetRef = db.collection("users").doc(targetUid);
+    const targetSnap = await targetRef.get();
+    const targetData = (targetSnap.data() || {}) as Record<string, unknown>;
+    const targetRole = String(targetData.role || "").trim().toLowerCase();
+    if (targetRole === "owner") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Owner account role cannot be downgraded to admin."
+      );
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    await targetRef.set({
+      email: targetEmail,
+      role: "admin",
+      userRole: "admin",
+      userType: "admin",
+      staffOnboardingStatus: "ACTIVE",
+      grantedByOwnerId: callerUid,
+      grantedAdminAt: now,
+      updatedAt: now,
+    }, {merge: true});
+
+    try {
+      const authUser = await admin.auth().getUser(targetUid);
+      const existingClaims = authUser.customClaims || {};
+      await admin.auth().setCustomUserClaims(targetUid, {
+        ...existingClaims,
+        admin: true,
+        role: "admin",
+      });
+    } catch (error) {
+      functions.logger.warn("Failed to set custom claims for owner-granted admin role.", {
+        targetUid,
+        error,
+      });
+    }
+
+    const updatedSnap = await targetRef.get();
+    const updatedData = (updatedSnap.data() || {}) as Record<string, unknown>;
+    return {
+      success: true,
+      message: "Admin access granted successfully.",
+      admin: {
+        userId: targetUid,
+        email: asNonEmptyString(updatedData.email) || targetEmail,
+        role: asNonEmptyString(updatedData.role) || "admin",
+        grantedByOwnerId: asNonEmptyString(updatedData.grantedByOwnerId) || callerUid,
+        grantedAdminAtMs: toMillisTimestamp(updatedData.grantedAdminAt),
+      },
+    };
+  });
+
 export const adminAddSupportAssociate = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     const adminUid = await assertAdminCallableAccess(context);
