@@ -6,6 +6,10 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import com.example.volunteersApp.streams.LiveStreamActivity
 import com.example.volunteersApp.ui.main.MainActivity
 import com.example.volunteersApp.ui.theme.VolunteersAppTheme
@@ -16,6 +20,10 @@ import com.example.volunteersApp.ui.theme.VolunteersAppTheme
  */
 class LoginActivity : ComponentActivity() {
 
+    companion object {
+        const val EXTRA_EMAIL_VERIFIED_SUCCESS = "extra_email_verified_success"
+    }
+
     private val viewModel: LoginViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,23 +32,54 @@ class LoginActivity : ComponentActivity() {
         // Handle App Links (e.g. from stream invitations)
         if (handleAppLink(intent)) return
 
+        if (intent.getBooleanExtra(SignUpActivity.EXTRA_SHOW_VERIFY_HINT, false)) {
+            Toast.makeText(
+                this,
+                "Verify your email first. Open the latest email and enter the 6-digit code (check Spam).",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        if (intent.getBooleanExtra(EXTRA_EMAIL_VERIFIED_SUCCESS, false)) {
+            Toast.makeText(
+                this,
+                "Email verified successfully. Please log in.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        val openLoginFormImmediately =
+            intent.getBooleanExtra(SignUpActivity.EXTRA_SHOW_VERIFY_HINT, false) ||
+                intent.getBooleanExtra(EXTRA_EMAIL_VERIFIED_SUCCESS, false)
+
         // Auto-login check if not handling an app link
         viewModel.checkAutoLogin()
 
         setContent {
             VolunteersAppTheme {
-                LoginScreen(
-                    viewModel = viewModel,
-                    onLoginSuccess = { userType ->
-                        navigateToDashboard(userType)
-                    },
-                    onForgotPassword = {
-                        startActivity(Intent(this, ForgotPasswordActivity::class.java))
-                    },
-                    onSignUp = {
-                        startActivity(Intent(this, SignUpActivity::class.java))
-                    }
-                )
+                var showLoginForm by rememberSaveable { mutableStateOf(openLoginFormImmediately) }
+                if (showLoginForm) {
+                    LoginScreen(
+                        viewModel = viewModel,
+                        onLoginSuccess = { userType ->
+                            navigateToDashboard(userType)
+                        },
+                        onForgotPassword = {
+                            startActivity(Intent(this, ForgotPasswordActivity::class.java))
+                        },
+                        onSignUp = {
+                            startActivity(Intent(this, SignUpActivity::class.java))
+                        },
+                        onVerifyEmail = {
+                            startActivity(Intent(this, EmailVerificationActivity::class.java))
+                        }
+                    )
+                } else {
+                    AuthLaunchScreen(
+                        onSignIn = { showLoginForm = true },
+                        onCreateAccount = { startActivity(Intent(this, SignUpActivity::class.java)) },
+                        onVerifyEmail = { startActivity(Intent(this, EmailVerificationActivity::class.java)) },
+                        onForgotPassword = { startActivity(Intent(this, ForgotPasswordActivity::class.java)) }
+                    )
+                }
             }
         }
     }

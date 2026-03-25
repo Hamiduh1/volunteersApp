@@ -15,8 +15,8 @@ import java.util.Locale
 data class Transaction(
     @DocumentId
     val id: String = "",
-    val title: String = "",
-    val amount: Double = 0.0,
+    val title: String = "", // CORRECTED: Title should be a String
+    val amount: Double = 0.0, // CORRECTED: Amount should be a Double
     val fee: Double = 0.0,
     val type: String = "DEBIT", // "DEBIT" or "CREDIT"
     val status: String = "COMPLETED", // "COMPLETED", "PENDING", "FAILED"
@@ -26,10 +26,10 @@ data class Transaction(
 
     // Optional fields for additional context
     val note: String? = null,
-     // @get:JvmName //if you face conflicts, but it's usually not needed.
-   // val formattedDate: String = "",
     val targetCurrency: String? = null, // e.g., "UGX" for a mobile money transfer
-    val creditedAmount: Double = 0.0    // The final amount credited in the target currency
+    val creditedAmount: Double = 0.0,   // The final amount credited in the target currency
+    val payoutRequestId: String? = null,
+    val processedAt: Date? = null
 ) {
     @get:Exclude
     val formattedDate: String
@@ -52,11 +52,14 @@ data class TransactionFees(
 )
 
 data class Beneficiary(
-    val id: String = "",
+    @DocumentId val id: String = "",
     val name: String = "",
     val phone: String = "",
     val network: String = "",
     val country: String = "",
-    val isAppUser: Boolean = false
-    // Removed other fields that were mixing it up with Transaction
+    val isAppUser: Boolean = false,
+    // --- ADD THESE MISSING FIELDS ---
+    val mobileNumber: String? = null,
+    val accountNumber: String? = null,
+    val lastTransferAtMs: Long = 0L
 )
