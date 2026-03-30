@@ -211,6 +211,22 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       throw new functions.https.HttpsError("invalid-argument", "channelName must be 64 characters or fewer.");
     }
 
+    const requestedRole = String(data?.role || "publisher").trim().toLowerCase();
+    if (!["publisher", "subscriber"].includes(requestedRole)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "role must be either 'publisher' or 'subscriber'."
+      );
+    }
+
+    const requestedUid = Number(data?.uid ?? 0);
+    if (!Number.isInteger(requestedUid) || requestedUid < 0 || requestedUid > 4294967295) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "uid must be an integer between 0 and 4294967295."
+      );
+    }
+
     const {appId, appCertificate, ttlSeconds} = getAgoraConfig();
     if (!appId) {
       throw new functions.https.HttpsError(
@@ -220,24 +236,20 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
     }
 
     if (!appCertificate) {
-      // Supports projects where Agora app certificate is disabled (token optional).
-      functions.logger.warn("Agora certificate not configured; returning empty token.", {
-        channelName,
-        uid: context.auth.uid,
-      });
-      return {
-        token: "",
-        tokenRequired: false,
-        expiresInSeconds: ttlSeconds,
-      };
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Agora App Certificate is not configured in Cloud Functions environment."
+      );
     }
+
+    const rtcRole = requestedRole === "subscriber" ? RtcRole.SUBSCRIBER : RtcRole.PUBLISHER;
 
     const token = RtcTokenBuilder.buildTokenWithUid(
       appId,
       appCertificate,
       channelName,
-      0,
-      RtcRole.PUBLISHER,
+      requestedUid,
+      rtcRole,
       ttlSeconds,
       ttlSeconds
     );
@@ -246,6 +258,8 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       token,
       tokenRequired: true,
       expiresInSeconds: ttlSeconds,
+      role: requestedRole,
+      uid: requestedUid,
     };
   });
 
@@ -8211,6 +8225,13 @@ export const requestMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tr
       updatedAt: now,
     }, {merge: true});
 
+    await db.collection("users").doc(uid).set({
+      mobileMoneyPhoneOtpLastSentAtMs: nowMs,
+      mobileMoneyPhoneOtpLastSentPhone: phoneE164,
+      mobileMoneyPhoneOtpLastSentPhoneDigits: phoneDigits,
+      updatedAt: now,
+    }, {merge: true});
+
     return {
       success: true,
       alreadyVerified: false,
@@ -8327,6 +8348,11 @@ export const verifyMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tru
       mobileMoneyPhoneOtpVerifiedAt: now,
       mobileMoneyPhoneOtpVerifiedPhone: phoneE164,
       mobileMoneyPhoneOtpVerifiedPhoneDigits: phoneDigits,
+      phoneVerified: true,
+      phoneVerifiedAt: now,
+      phoneVerifiedNumber: phoneE164,
+      phoneVerifiedDigits: phoneDigits,
+      phoneVerificationMethod: "TWILIO_VERIFY_SMS",
       updatedAt: now,
     }, {merge: true});
 

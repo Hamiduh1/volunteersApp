@@ -7,7 +7,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -34,15 +33,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.volunteersApp.R
 
 
 /**
@@ -75,6 +71,7 @@ fun LoginScreen(
     var showStaffRoles by remember { mutableStateOf(false) }
     var roleDropdownExpanded by remember { mutableStateOf(false) }
     var rememberMe by remember { mutableStateOf(false) }
+    var phoneOtpCode by remember { mutableStateOf("") }
     val primaryRoles = remember {
         listOf(
             "Volunteer" to "volunteer",
@@ -131,31 +128,14 @@ fun LoginScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Logo
-                Image(
-                    painter = painterResource(id = R.drawable.app_logo),
-                    contentDescription = "App Logo",
-                    modifier = Modifier
-                        .size(100.dp)
-                        .padding(bottom = 24.dp)
-                        .scale(1f)
-                )
-
-                // Welcome Header
-                Text(
-                    text = "Welcome Back",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
+                AuthBrandHeader(logoSize = 96.dp)
 
                 Text(
                     text = "Sign in to continue making a difference",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 32.dp)
+                    modifier = Modifier.padding(top = 4.dp, bottom = 32.dp)
                 )
 
                 // Form Card
@@ -410,11 +390,75 @@ fun LoginScreen(
                 }
 
                 Text(
-                    text = "If login says not verified, request a new code here and enter the latest 6-digit code from email.",
+                    text = "If login says not verified, use email code or phone OTP verification below.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth()
                 )
+                val requestPhoneOtpLabel = if (uiState.phoneOtpCooldownSeconds > 0) {
+                    "Send phone OTP (${uiState.phoneOtpCooldownSeconds}s)"
+                } else {
+                    "Send phone OTP"
+                }
+                OutlinedButton(
+                    onClick = { viewModel.requestPhoneVerificationOtp(email, password) },
+                    enabled = !uiState.isLoading &&
+                        !uiState.isRequestingPhoneOtp &&
+                        uiState.phoneOtpCooldownSeconds == 0,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (uiState.isRequestingPhoneOtp) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Sending SMS...")
+                    } else {
+                        Text(requestPhoneOtpLabel)
+                    }
+                }
+                if (!uiState.maskedPhoneForOtp.isNullOrBlank()) {
+                    Text(
+                        text = "Latest phone used: ${uiState.maskedPhoneForOtp}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                OutlinedTextField(
+                    value = phoneOtpCode,
+                    onValueChange = { input ->
+                        phoneOtpCode = input.filter { it.isDigit() }.take(6)
+                    },
+                    label = { Text("Phone OTP code") },
+                    placeholder = { Text("123456") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    enabled = !uiState.isLoading && !uiState.isVerifyingPhoneOtp,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedButton(
+                    onClick = { viewModel.verifyPhoneVerificationOtp(email, password, phoneOtpCode) },
+                    enabled = !uiState.isLoading &&
+                        !uiState.isVerifyingPhoneOtp &&
+                        phoneOtpCode.length == 6,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (uiState.isVerifyingPhoneOtp) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Verifying...")
+                    } else {
+                        Text("Verify phone OTP")
+                    }
+                }
                 TextButton(
                     onClick = onVerifyEmail,
                     modifier = Modifier.align(Alignment.Start),
@@ -449,26 +493,18 @@ fun LoginScreen(
                 }
 
                 Spacer(modifier = Modifier.height(48.dp))
-            }
 
-            // Premium Branding
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
                 Text(
                     text = "LVCA",
-                    fontSize = 18.sp,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 2.sp
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Text(
                     text = "Local Volunteers Coordination Application",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
                 )
             }
         }

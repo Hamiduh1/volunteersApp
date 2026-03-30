@@ -27,7 +27,11 @@ import java.util.*
 data class LoginUiState(
     val isLoading: Boolean = false,
     val isResendingVerification: Boolean = false,
+    val isRequestingPhoneOtp: Boolean = false,
+    val isVerifyingPhoneOtp: Boolean = false,
     val resendCooldownSeconds: Int = 0,
+    val phoneOtpCooldownSeconds: Int = 0,
+    val maskedPhoneForOtp: String? = null,
     val error: String? = null,
     val info: String? = null,
     val loginSuccess: Boolean = false,
@@ -47,6 +51,7 @@ class LoginViewModel : ViewModel() {
     private val TAG = "LoginViewModel"
     private val verificationCooldownSeconds = 120
     private var resendCooldownJob: Job? = null
+    private var phoneOtpCooldownJob: Job? = null
 
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState = _uiState.asStateFlow()
@@ -77,32 +82,33 @@ class LoginViewModel : ViewModel() {
                 val user = authResult.user ?: throw Exception("Login failed: User is null")
                 user.reload().await()
 
-                // --- NEW SECURITY CHECK: Verify if the user's email is validated ---
-                if (!user.isEmailVerified) {
-                    auth.signOut() // Log the user out immediately
-                    val verificationMessage =
-                        "Your email is not verified. Enter the latest 6-digit verification code from your email, then log in again."
-                    throw Exception(verificationMessage)
-                }
-                // --- END OF NEW SECURITY CHECK ---
-
-                runCatching {
-                    db.collection("users").document(user.uid).set(
-                        mapOf(
-                            "emailVerified" to true
-                        ),
-                        SetOptions.merge()
-                    ).await()
-                }.onFailure { error ->
-                    Log.w(TAG, "Failed to sync verified email flag for ${user.uid}", error)
-                }
-
-
                 // 2. Fetch user details from Firestore to verify role and age
                 var userDoc = db.collection("users").document(user.uid).get().await()
                 if (!userDoc.exists()) {
                     auth.signOut()
                     throw Exception("User profile not found in database.")
+                }
+                val phoneVerified = isPhoneVerified(userDoc)
+
+                // Allow account verification with either email verification OR Twilio phone OTP verification.
+                if (!user.isEmailVerified && !phoneVerified) {
+                    auth.signOut()
+                    throw Exception(
+                        "Your account is not verified. Verify using email code or phone OTP, then log in again."
+                    )
+                }
+
+                if (user.isEmailVerified) {
+                    runCatching {
+                        db.collection("users").document(user.uid).set(
+                            mapOf(
+                                "emailVerified" to true
+                            ),
+                            SetOptions.merge()
+                        ).await()
+                    }.onFailure { error ->
+                        Log.w(TAG, "Failed to sync verified email flag for ${user.uid}", error)
+                    }
                 }
 
                 var firestoreUserType = resolveUserType(user.uid, userDoc)
@@ -240,25 +246,31 @@ class LoginViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 currentUser.reload().await()
-                // --- ADDED SECURITY: Ensure auto-login user is also verified ---
-                if (!currentUser.isEmailVerified) {
+                val userDoc = db.collection("users").document(currentUser.uid).get().await()
+                if (!currentUser.isEmailVerified && !isPhoneVerified(userDoc)) {
                     auth.signOut()
-                    _uiState.update { it.copy(isLoading = false, error = "Your session expired. Please log in again and verify your email.") }
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "Your account is not verified. Verify by email code or phone OTP, then log in."
+                        )
+                    }
                     return@launch
                 }
 
-                runCatching {
-                    db.collection("users").document(currentUser.uid).set(
-                        mapOf(
-                            "emailVerified" to true
-                        ),
-                        SetOptions.merge()
-                    ).await()
-                }.onFailure { error ->
-                    Log.w(TAG, "Failed to sync verified email flag during auto-login for ${currentUser.uid}", error)
+                if (currentUser.isEmailVerified) {
+                    runCatching {
+                        db.collection("users").document(currentUser.uid).set(
+                            mapOf(
+                                "emailVerified" to true
+                            ),
+                            SetOptions.merge()
+                        ).await()
+                    }.onFailure { error ->
+                        Log.w(TAG, "Failed to sync verified email flag during auto-login for ${currentUser.uid}", error)
+                    }
                 }
 
-                val userDoc = db.collection("users").document(currentUser.uid).get().await()
                 val firestoreUserType = resolveUserType(currentUser.uid, userDoc)
                 val normalizedRole = normalizeRoleForLogin(firestoreUserType)
 
@@ -347,6 +359,112 @@ class LoginViewModel : ViewModel() {
         }
     }
 
+    fun requestPhoneVerificationOtp(email: String, password: String) {
+        val trimmedEmail = email.trim()
+        val trimmedPassword = password.trim()
+        if (trimmedEmail.isBlank() || trimmedPassword.isBlank()) {
+            _uiState.update {
+                it.copy(error = "Enter your email and password first, then request phone OTP.")
+            }
+            return
+        }
+        if (_uiState.value.phoneOtpCooldownSeconds > 0) {
+            _uiState.update {
+                it.copy(info = "Please wait ${it.phoneOtpCooldownSeconds}s before requesting another SMS code.")
+            }
+            return
+        }
+
+        _uiState.update { it.copy(isRequestingPhoneOtp = true, error = null, info = null) }
+        viewModelScope.launch {
+            try {
+                val authResult = auth.signInWithEmailAndPassword(trimmedEmail, trimmedPassword).await()
+                val user = authResult.user ?: throw Exception("Could not load your account.")
+                val phoneNumber = loadPhoneForVerification(user.uid)
+                val response = FunctionsClient.callMap(
+                    "requestMobileMoneyPhoneOtp",
+                    mapOf("phoneNumber" to phoneNumber)
+                )
+                val cooldownSeconds = (response?.get("cooldownSeconds") as? Number)?.toInt() ?: 60
+                val maskedPhone = response?.get("maskedPhone")?.toString()?.takeIf { it.isNotBlank() }
+                    ?: maskPhoneForDisplay(phoneNumber)
+                startPhoneOtpCooldown(cooldownSeconds)
+                _uiState.update {
+                    it.copy(
+                        isRequestingPhoneOtp = false,
+                        maskedPhoneForOtp = maskedPhone,
+                        info = "SMS code sent to $maskedPhone."
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "requestPhoneVerificationOtp failed", e)
+                if (e is FirebaseFunctionsException) {
+                    val details = e.details as? Map<*, *>
+                    val cooldownSeconds = (details?.get("cooldownSeconds") as? Number)?.toInt()
+                    if (cooldownSeconds != null && cooldownSeconds > 0) {
+                        startPhoneOtpCooldown(cooldownSeconds)
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        isRequestingPhoneOtp = false,
+                        error = e.localizedMessage ?: "Failed to send SMS verification code."
+                    )
+                }
+            } finally {
+                auth.signOut()
+            }
+        }
+    }
+
+    fun verifyPhoneVerificationOtp(email: String, password: String, code: String) {
+        val trimmedEmail = email.trim()
+        val trimmedPassword = password.trim()
+        val trimmedCode = code.trim()
+        if (trimmedEmail.isBlank() || trimmedPassword.isBlank()) {
+            _uiState.update {
+                it.copy(error = "Enter your email and password first, then verify the SMS code.")
+            }
+            return
+        }
+        if (!Regex("^\\d{6}$").matches(trimmedCode)) {
+            _uiState.update { it.copy(error = "Phone OTP code must be exactly 6 digits.") }
+            return
+        }
+
+        _uiState.update { it.copy(isVerifyingPhoneOtp = true, error = null, info = null) }
+        viewModelScope.launch {
+            try {
+                val authResult = auth.signInWithEmailAndPassword(trimmedEmail, trimmedPassword).await()
+                val user = authResult.user ?: throw Exception("Could not load your account.")
+                val phoneNumber = loadPhoneForVerification(user.uid)
+                FunctionsClient.callMap(
+                    "verifyMobileMoneyPhoneOtp",
+                    mapOf(
+                        "phoneNumber" to phoneNumber,
+                        "code" to trimmedCode
+                    )
+                )
+                _uiState.update {
+                    it.copy(
+                        isVerifyingPhoneOtp = false,
+                        info = "Phone verified successfully. You can log in now."
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "verifyPhoneVerificationOtp failed", e)
+                _uiState.update {
+                    it.copy(
+                        isVerifyingPhoneOtp = false,
+                        error = e.localizedMessage ?: "Failed to verify SMS code."
+                    )
+                }
+            } finally {
+                auth.signOut()
+            }
+        }
+    }
+
     private fun startResendCooldown(initialSeconds: Int) {
         val safeSeconds = initialSeconds.coerceAtLeast(0)
         resendCooldownJob?.cancel()
@@ -367,6 +485,68 @@ class LoginViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    private fun startPhoneOtpCooldown(initialSeconds: Int) {
+        val safeSeconds = initialSeconds.coerceAtLeast(0)
+        phoneOtpCooldownJob?.cancel()
+        if (safeSeconds == 0) {
+            _uiState.update { it.copy(phoneOtpCooldownSeconds = 0) }
+            return
+        }
+        _uiState.update { it.copy(phoneOtpCooldownSeconds = safeSeconds) }
+        phoneOtpCooldownJob = viewModelScope.launch {
+            var seconds = safeSeconds
+            while (seconds > 0) {
+                delay(1000)
+                seconds -= 1
+                _uiState.update {
+                    it.copy(
+                        phoneOtpCooldownSeconds = seconds
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun loadPhoneForVerification(userId: String): String {
+        val userDoc = db.collection("users").document(userId).get().await()
+        val storedPhone = sequenceOf(
+            userDoc.getString("phoneNumber"),
+            userDoc.getString("phone"),
+            userDoc.getString("mobile")
+        ).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty()
+
+        val normalized = normalizePhoneToE164(storedPhone)
+        if (normalized.isBlank()) {
+            throw Exception("No phone number found on your account profile.")
+        }
+        val digits = normalized.filter { it.isDigit() }
+        if (digits.length < 8 || digits.length > 15) {
+            throw Exception("Your account phone number is invalid. Update it in profile and try again.")
+        }
+        return normalized
+    }
+
+    private fun normalizePhoneToE164(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return ""
+        val digits = trimmed.filter { it.isDigit() }
+        if (digits.isBlank()) return ""
+        return if (trimmed.startsWith("+")) "+$digits" else "+$digits"
+    }
+
+    private fun maskPhoneForDisplay(phone: String): String {
+        val digits = phone.filter { it.isDigit() }
+        if (digits.isBlank()) return "***"
+        return if (digits.length <= 4) "***$digits" else "***${digits.takeLast(4)}"
+    }
+
+    private fun isPhoneVerified(userDoc: com.google.firebase.firestore.DocumentSnapshot): Boolean {
+        if (userDoc.getBoolean("phoneVerified") == true) return true
+        if (userDoc.getTimestamp("phoneVerifiedAt") != null) return true
+        if (userDoc.getTimestamp("mobileMoneyPhoneOtpVerifiedAt") != null) return true
+        return false
     }
 
     private suspend fun resolveUserType(userId: String, userDoc: com.google.firebase.firestore.DocumentSnapshot): String? {
