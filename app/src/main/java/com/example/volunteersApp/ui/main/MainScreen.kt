@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.RowScope
@@ -566,14 +567,36 @@ private fun DrawerContent(
         item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
 
         item {
-            DrawerSectionTitle("Personal")
-            DrawerItem("Account Settings", Icons.Default.ManageAccounts, currentRoute == "account_settings") {
-                scope.launch { drawerState.close() }
-                context.startActivity(Intent(context, AccountSettingsActivity::class.java))
+            DrawerSectionTitle("Community")
+            MirroredNavigationCatalog.communityItems.forEach { item ->
+                DrawerItem(
+                    item.label,
+                    MirroredNavigationCatalog.iconForRoute(item.route),
+                    currentRoute == item.route
+                ) {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(item.route)
+                }
             }
-            DrawerItem("Security & Privacy", Icons.Default.Lock, currentRoute == "privacy_settings") {
-                scope.launch { drawerState.close() }
-                navController.navigate("privacy_settings")
+        }
+
+        item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+
+        item {
+            DrawerSectionTitle("Personal")
+            MirroredNavigationCatalog.personalItems.forEach { item ->
+                DrawerItem(
+                    item.label,
+                    MirroredNavigationCatalog.iconForRoute(item.route),
+                    currentRoute == item.route
+                ) {
+                    scope.launch { drawerState.close() }
+                    if (item.route == "account_settings") {
+                        context.startActivity(Intent(context, AccountSettingsActivity::class.java))
+                    } else {
+                        navController.navigate(item.route)
+                    }
+                }
             }
         }
 
@@ -581,21 +604,15 @@ private fun DrawerContent(
 
         item {
             DrawerSectionTitle("Support")
-            DrawerItem("Support Center", Icons.Default.SupportAgent, currentRoute == "support") {
-                scope.launch { drawerState.close() }
-                navController.navigate("support")
-            }
-            DrawerItem("AML/CFT Guide", Icons.Default.GppGood, currentRoute == "aml_cft") {
-                scope.launch { drawerState.close() }
-                navController.navigate("aml_cft")
-            }
-            DrawerItem("How to Use", Icons.Default.Info, currentRoute == "how_to_use") {
-                scope.launch { drawerState.close() }
-                navController.navigate("how_to_use")
-            }
-            DrawerItem("AI Assistant", Icons.Default.AutoAwesome, currentRoute == "ai_assistant") {
-                scope.launch { drawerState.close() }
-                navController.navigate("ai_assistant")
+            MirroredNavigationCatalog.supportItems.forEach { item ->
+                DrawerItem(
+                    item.label,
+                    MirroredNavigationCatalog.iconForRoute(item.route),
+                    currentRoute == item.route
+                ) {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(item.route)
+                }
             }
             DrawerItem("Feedback", Icons.Default.Feedback, currentRoute == "feedback") {
                 scope.launch { drawerState.close() }
@@ -988,22 +1005,69 @@ private fun HomeHeroCard(
                 )
                 .padding(24.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = Color.White)
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.85f))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = onPrimary) { Text("Find Events") }
-                    Button(
-                        onClick = onSecondary,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFFFD54F),
-                            contentColor = Color(0xFF1A1A1A)
-                        ),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
-                    ) {
-                        Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Open Wallet")
+            BoxWithConstraints {
+                val compactWidth = maxWidth < 360.dp
+                val pillShape = RoundedCornerShape(50)
+                val sharedButtonModifier = Modifier.heightIn(min = 48.dp)
+
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = Color.White)
+                    Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.85f))
+
+                    if (compactWidth) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = onPrimary,
+                                shape = pillShape,
+                                modifier = sharedButtonModifier.fillMaxWidth()
+                            ) {
+                                Text("Find Events", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                            }
+                            Button(
+                                onClick = onSecondary,
+                                shape = pillShape,
+                                modifier = sharedButtonModifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFFD54F),
+                                    contentColor = Color(0xFF1A1A1A)
+                                ),
+                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
+                            ) {
+                                Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Open Wallet", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = onPrimary,
+                                shape = pillShape,
+                                modifier = sharedButtonModifier.weight(1f)
+                            ) {
+                                Text("Find Events", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                            }
+                            Button(
+                                onClick = onSecondary,
+                                shape = pillShape,
+                                modifier = sharedButtonModifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFFD54F),
+                                    contentColor = Color(0xFF1A1A1A)
+                                ),
+                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
+                            ) {
+                                Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Open Wallet", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
                     }
                 }
             }
