@@ -1,6 +1,7 @@
 package com.example.volunteersApp.employer.ui.main
 
 import androidx.lifecycle.ViewModel
+import com.example.volunteersApp.ui.main.MirroredNavigationCatalog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -17,6 +18,7 @@ class EmployerMainViewModel : ViewModel() {
     }
 
     private fun getTitleForRoute(route: String?): String {
+        MirroredNavigationCatalog.titleForRoute(route)?.let { return it }
         return when {
             route == "home" -> "Employer Dashboard"
             route == "jobs" -> "My Posted Jobs"
@@ -24,6 +26,10 @@ class EmployerMainViewModel : ViewModel() {
             route == "applications" -> "All Applications"
             route?.startsWith("applications/") == true -> "Job Applications"
             route == "profile" -> "Organization Profile"
+            route == "wallet" -> "Global Wallet"
+            route == "payments" -> "Payment Methods"
+            route == "live" -> "Live Streams"
+            route == "ai_assistant" -> "AI Assistant"
             route == "post_job" -> "Post a New Job"
             else -> "Employer Hub"
         }
