@@ -3,12 +3,12 @@ package com.example.volunteersApp.events
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.firebase.FunctionsClient
 import com.example.volunteersApp.jobs.JobDetailViewModel.ApplicationStatus
 import com.example.volunteersApp.models.EventModel
 import com.example.volunteersApp.models.Resource
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -101,7 +101,7 @@ class EventDetailViewModel : ViewModel() {
     }
 
     fun applyForEvent(eventId: String) {
-        val user = auth.currentUser ?: return
+        if (auth.currentUser == null) return
         val currentState = _uiState.value
         val event = currentState.event ?: return
 
@@ -113,29 +113,14 @@ class EventDetailViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isActionLoading = true) }
             try {
-                db.runTransaction { transaction ->
-                    val userRef = db.collection("users").document(user.uid)
-                    val eventRef = db.collection("events").document(eventId)
-                    val applicationRef = eventRef.collection("applications").document(user.uid)
-
-                    if (event.eventFee > 0) {
-                        val newBalance = currentState.walletBalance - event.eventFee
-                        transaction.update(userRef, "wallet.balance", newBalance)
-                    }
-
-                    val applicationData = hashMapOf(
-                        "applicationId" to applicationRef.id,
-                        "eventId" to eventId,
-                        "eventTitle" to event.title,
-                        "organizerId" to event.organizerId,
-                        "volunteerUid" to user.uid,
-                        "volunteerName" to (user.displayName ?: "Volunteer"),
-                        "volunteerEmail" to user.email,
-                        "status" to if (event.eventFee > 0) "approved" else "pending",
-                        "appliedDate" to FieldValue.serverTimestamp()
-                    )
-                    transaction.set(applicationRef, applicationData)
-                }.await()
+                val result = FunctionsClient.callMap(
+                    "applyForEvent",
+                    mapOf("eventId" to eventId)
+                )
+                val success = result?.get("success") as? Boolean ?: false
+                if (!success) {
+                    throw IllegalStateException("Event signup failed. Please try again.")
+                }
 
                 _actionResult.emit(Resource.Success(Unit))
                 loadEventDetails(eventId)

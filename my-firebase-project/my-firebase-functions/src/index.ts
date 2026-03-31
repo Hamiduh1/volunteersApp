@@ -211,6 +211,22 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       throw new functions.https.HttpsError("invalid-argument", "channelName must be 64 characters or fewer.");
     }
 
+    const requestedRole = String(data?.role || "publisher").trim().toLowerCase();
+    if (!["publisher", "subscriber"].includes(requestedRole)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "role must be either 'publisher' or 'subscriber'."
+      );
+    }
+
+    const requestedUid = Number(data?.uid ?? 0);
+    if (!Number.isInteger(requestedUid) || requestedUid < 0 || requestedUid > 4294967295) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "uid must be an integer between 0 and 4294967295."
+      );
+    }
+
     const {appId, appCertificate, ttlSeconds} = getAgoraConfig();
     if (!appId) {
       throw new functions.https.HttpsError(
@@ -220,24 +236,20 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
     }
 
     if (!appCertificate) {
-      // Supports projects where Agora app certificate is disabled (token optional).
-      functions.logger.warn("Agora certificate not configured; returning empty token.", {
-        channelName,
-        uid: context.auth.uid,
-      });
-      return {
-        token: "",
-        tokenRequired: false,
-        expiresInSeconds: ttlSeconds,
-      };
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Agora App Certificate is not configured in Cloud Functions environment."
+      );
     }
+
+    const rtcRole = requestedRole === "subscriber" ? RtcRole.SUBSCRIBER : RtcRole.PUBLISHER;
 
     const token = RtcTokenBuilder.buildTokenWithUid(
       appId,
       appCertificate,
       channelName,
-      0,
-      RtcRole.PUBLISHER,
+      requestedUid,
+      rtcRole,
       ttlSeconds,
       ttlSeconds
     );
@@ -246,6 +258,8 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       token,
       tokenRequired: true,
       expiresInSeconds: ttlSeconds,
+      role: requestedRole,
+      uid: requestedUid,
     };
   });
 
@@ -341,6 +355,7 @@ const AGENT_CASHOUT_FEE_TIERS = [
 
 const AGENT_CASHOUT_AGENT_SHARE = 0.6;
 const AGENT_CASHOUT_OWNER_SHARE = 0.4;
+const EVENT_TICKET_OWNER_FEE_RATE = 0.05;
 const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
 
 const roundMoney = (value: number): number => Number(value.toFixed(2));
@@ -403,6 +418,7 @@ type PlatformRevenueSource =
   | "blindDateFees"
   | "agentAuthorizationFees"
   | "agentCashoutOwnerShare"
+  | "eventTicketOwnerFee"
   | "marketplacePlatinumFee"
   | "garageSaleFee"
   | "otherIncome";
@@ -1154,6 +1170,158 @@ export const cashOutOwnerRevenue = functions.runWith({enforceAppCheck: true})
     });
 
     return {success: true, message: "Revenue transferred to your wallet."};
+  });
+
+// =============================================================================
+//  3D. EVENT SIGN-UP PAYMENT SPLIT (OWNER 5%)
+// =============================================================================
+
+interface ApplyForEventRequest {
+  eventId?: string;
+}
+
+export const applyForEvent = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in to apply.");
+    }
+
+    const userId = context.auth.uid;
+    const request = data as ApplyForEventRequest;
+    const eventId = String(request?.eventId || "").trim();
+    if (!eventId) {
+      throw new functions.https.HttpsError("invalid-argument", "Missing required field: eventId.");
+    }
+
+    const userRef = db.collection("users").doc(userId);
+    const eventRef = db.collection("events").doc(eventId);
+    const applicationRef = eventRef.collection("applications").doc(userId);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [userDoc, eventDoc, applicationDoc] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(eventRef),
+        transaction.get(applicationRef),
+      ]);
+
+      if (!userDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "User profile not found.");
+      }
+      if (!eventDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "Event not found.");
+      }
+      if (applicationDoc.exists) {
+        throw new functions.https.HttpsError("failed-precondition", "You have already applied for this event.");
+      }
+
+      const eventData = eventDoc.data() || {};
+      const organizerId = String(eventData.organizerId || "").trim();
+      if (!organizerId) {
+        throw new functions.https.HttpsError("failed-precondition", "Event organizer is missing.");
+      }
+      if (organizerId === userId) {
+        throw new functions.https.HttpsError("failed-precondition", "Organizers cannot apply to their own event.");
+      }
+      if (Boolean(eventData.closeEntries) === true) {
+        throw new functions.https.HttpsError("failed-precondition", "Event entries are closed.");
+      }
+
+      const eventTitle = String(eventData.title || "Event");
+      const eventFeeRaw = Number(eventData.eventFee ?? eventData.payment ?? 0);
+      const eventFee = Number.isFinite(eventFeeRaw) ? roundMoney(Math.max(0, eventFeeRaw)) : 0;
+      const ownerFeeAmount = eventFee > 0 ? roundMoney(eventFee * EVENT_TICKET_OWNER_FEE_RATE) : 0;
+      const organizerNetAmount = eventFee > 0 ? roundMoney(eventFee - ownerFeeAmount) : 0;
+
+      const timestamp = admin.firestore.Timestamp.now();
+      const userBalance = Number(userDoc.data()?.wallet?.balance || 0);
+      if (eventFee > 0 && userBalance < eventFee) {
+        throw new functions.https.HttpsError("failed-precondition", "Insufficient wallet balance.");
+      }
+
+      if (eventFee > 0) {
+        transaction.update(userRef, "wallet.balance", admin.firestore.FieldValue.increment(-eventFee));
+        transaction.set(userRef.collection("transactions").doc(), {
+          title: `Event Ticket: ${eventTitle}`,
+          amount: -eventFee,
+          type: "DEBIT",
+          status: "COMPLETED",
+          timestamp,
+          source: "EVENT_TICKET",
+          note: `Paid for event ${eventId}. Owner fee (5%): $${ownerFeeAmount.toFixed(2)}.`,
+        });
+
+        const organizerRef = db.collection("users").doc(organizerId);
+        transaction.set(organizerRef, {
+          wallet: {
+            balance: admin.firestore.FieldValue.increment(organizerNetAmount),
+          },
+        }, {merge: true});
+        transaction.set(organizerRef.collection("transactions").doc(), {
+          title: `Event Ticket Sale: ${eventTitle}`,
+          amount: organizerNetAmount,
+          type: "CREDIT",
+          status: "COMPLETED",
+          timestamp,
+          source: "EVENT_TICKET_SALE",
+          note: `Net from event ${eventId} after 5% owner fee.`,
+          relatedUserId: userId,
+        });
+
+        if (ownerFeeAmount > 0) {
+          recordPlatformRevenue(transaction, {
+            source: "eventTicketOwnerFee",
+            amount: ownerFeeAmount,
+            note: `5% owner fee from event ${eventId}`,
+            relatedUserId: userId,
+          });
+        }
+      } else {
+        transaction.set(userRef.collection("transactions").doc(), {
+          title: `Event Sign-up: ${eventTitle}`,
+          amount: 0,
+          type: "INFO",
+          status: "COMPLETED",
+          timestamp,
+          source: "EVENT_SIGNUP_FREE",
+          note: "Free event sign-up",
+        });
+      }
+
+      transaction.set(applicationRef, {
+        applicationId: applicationRef.id,
+        eventId,
+        eventTitle,
+        organizerId,
+        organizerUid: organizerId,
+        volunteerUid: userId,
+        volunteerId: userId,
+        userId,
+        volunteerName: String(userDoc.data()?.name || userDoc.data()?.displayName || "Volunteer"),
+        volunteerEmail: String(userDoc.data()?.email || context.auth?.token?.email || ""),
+        status: eventFee > 0 ? "APPROVED" : "PENDING",
+        transactionAmount: organizerNetAmount,
+        ticketPrice: eventFee,
+        ownerFeeRate: EVENT_TICKET_OWNER_FEE_RATE,
+        ownerFeeAmount,
+        organizerNetAmount,
+        currency: "USD",
+        paymentStatus: eventFee > 0 ? "PAID" : "NOT_REQUIRED",
+        appliedDate: timestamp,
+        paymentProcessedAt: eventFee > 0 ? timestamp : null,
+      });
+
+      return {
+        success: true,
+        eventId,
+        charged: eventFee > 0,
+        ticketPrice: eventFee,
+        ownerFeeRate: EVENT_TICKET_OWNER_FEE_RATE,
+        ownerFeeAmount,
+        organizerNetAmount,
+      };
+    });
+
+    return result;
   });
 
 
@@ -7631,6 +7799,117 @@ export const bootstrapOwnerSelf = functions.runWith({enforceAppCheck: true})
     };
   });
 
+export const ownerGrantAdminByEmail = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+
+    const callerUid = context.auth.uid;
+    const ownerUserId = getAppConfig().ownerUserId;
+    const callerTokenRole = String(context.auth.token?.role || "").trim().toLowerCase();
+    let isOwnerCaller =
+      context.auth.token?.owner === true ||
+      callerTokenRole === "owner" ||
+      (ownerUserId ? callerUid === ownerUserId : false);
+
+    if (!isOwnerCaller) {
+      const callerSnap = await db.collection("users").doc(callerUid).get();
+      const callerData = (callerSnap.data() || {}) as Record<string, unknown>;
+      const callerRole = asNonEmptyString(
+        callerData.role,
+        callerData.userRole,
+        callerData.userType
+      )?.toLowerCase();
+      isOwnerCaller = callerRole === "owner" || (ownerUserId ? callerUid === ownerUserId : false);
+    }
+
+    if (!isOwnerCaller) {
+      throw new functions.https.HttpsError("permission-denied", "Owner access required.");
+    }
+
+    const payload = (data || {}) as {email?: string; targetEmail?: string};
+    const targetEmail = normalizeEmailLower(payload.email || payload.targetEmail);
+    if (!targetEmail) {
+      throw new functions.https.HttpsError("invalid-argument", "Provide a valid email.");
+    }
+
+    let targetUid = "";
+    const byEmailSnap = await db.collection("users")
+      .where("email", "==", targetEmail)
+      .limit(1)
+      .get();
+    if (!byEmailSnap.empty) {
+      targetUid = byEmailSnap.docs[0].id;
+    } else {
+      try {
+        const authUser = await admin.auth().getUserByEmail(targetEmail);
+        targetUid = authUser.uid;
+      } catch {
+        // no-op: handled by not-found below
+      }
+    }
+
+    if (!targetUid) {
+      throw new functions.https.HttpsError(
+        "not-found",
+        "User account not found for the provided email."
+      );
+    }
+
+    const targetRef = db.collection("users").doc(targetUid);
+    const targetSnap = await targetRef.get();
+    const targetData = (targetSnap.data() || {}) as Record<string, unknown>;
+    const targetRole = String(targetData.role || "").trim().toLowerCase();
+    if (targetRole === "owner") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Owner account role cannot be downgraded to admin."
+      );
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    await targetRef.set({
+      email: targetEmail,
+      role: "admin",
+      userRole: "admin",
+      userType: "admin",
+      staffOnboardingStatus: "ACTIVE",
+      grantedByOwnerId: callerUid,
+      grantedAdminAt: now,
+      updatedAt: now,
+    }, {merge: true});
+
+    try {
+      const authUser = await admin.auth().getUser(targetUid);
+      const existingClaims = authUser.customClaims || {};
+      await admin.auth().setCustomUserClaims(targetUid, {
+        ...existingClaims,
+        admin: true,
+        role: "admin",
+      });
+    } catch (error) {
+      functions.logger.warn("Failed to set custom claims for owner-granted admin role.", {
+        targetUid,
+        error,
+      });
+    }
+
+    const updatedSnap = await targetRef.get();
+    const updatedData = (updatedSnap.data() || {}) as Record<string, unknown>;
+    return {
+      success: true,
+      message: "Admin access granted successfully.",
+      admin: {
+        userId: targetUid,
+        email: asNonEmptyString(updatedData.email) || targetEmail,
+        role: asNonEmptyString(updatedData.role) || "admin",
+        grantedByOwnerId: asNonEmptyString(updatedData.grantedByOwnerId) || callerUid,
+        grantedAdminAtMs: toMillisTimestamp(updatedData.grantedAdminAt),
+      },
+    };
+  });
+
 export const adminAddSupportAssociate = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     const adminUid = await assertAdminCallableAccess(context);
@@ -8100,6 +8379,13 @@ export const requestMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tr
       updatedAt: now,
     }, {merge: true});
 
+    await db.collection("users").doc(uid).set({
+      mobileMoneyPhoneOtpLastSentAtMs: nowMs,
+      mobileMoneyPhoneOtpLastSentPhone: phoneE164,
+      mobileMoneyPhoneOtpLastSentPhoneDigits: phoneDigits,
+      updatedAt: now,
+    }, {merge: true});
+
     return {
       success: true,
       alreadyVerified: false,
@@ -8216,6 +8502,11 @@ export const verifyMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tru
       mobileMoneyPhoneOtpVerifiedAt: now,
       mobileMoneyPhoneOtpVerifiedPhone: phoneE164,
       mobileMoneyPhoneOtpVerifiedPhoneDigits: phoneDigits,
+      phoneVerified: true,
+      phoneVerifiedAt: now,
+      phoneVerifiedNumber: phoneE164,
+      phoneVerifiedDigits: phoneDigits,
+      phoneVerificationMethod: "TWILIO_VERIFY_SMS",
       updatedAt: now,
     }, {merge: true});
 
