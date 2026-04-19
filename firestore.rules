@@ -1,0 +1,471 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- SECURITY FUNCTIONS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isOrganizer() {
+      return exists(/databases/$(database)/documents/organizers/$(request.auth.uid));
+    }
+
+    function isEmployer() {
+      return exists(/databases/$(database)/documents/employers/$(request.auth.uid));
+    }
+
+    function isWalletAgent() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'agent';
+    }
+
+    function isPlatformOwner() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    function isPlatformAdmin() {
+      return isSignedIn() && (
+        request.auth.token.owner == true ||
+        request.auth.token.admin == true ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['owner', 'admin']
+      );
+    }
+
+    function isApplicationOwnerFromData(data) {
+      return ('userId' in data && data.userId == request.auth.uid) ||
+        ('volunteerUid' in data && data.volunteerUid == request.auth.uid) ||
+        ('volunteerId' in data && data.volunteerId == request.auth.uid);
+    }
+
+    function isApplicationManagerFromData(data) {
+      return ('organizerId' in data && data.organizerId == request.auth.uid) ||
+        ('organizerUid' in data && data.organizerUid == request.auth.uid) ||
+        ('employerUid' in data && data.employerUid == request.auth.uid) ||
+        ('employerId' in data && data.employerId == request.auth.uid);
+    }
+
+    function isCallSessionParticipant(data) {
+      return request.auth.uid == data.callerId ||
+        request.auth.uid == data.receiverId ||
+        (('participantIds' in data) &&
+          (data.participantIds is list) &&
+          (request.auth.uid in data.participantIds));
+    }
+
+    // --- DEPOSIT REQUESTS ---
+    match /deposit_requests/{requestId} {
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isWalletAgent();
+      allow update: if isWalletAgent();
+      allow delete: if false;
+    }
+
+    // --- USER-SPECIFIC DATA ---
+    match /users/{userId} {
+      allow read: if isSignedIn();
+
+      allow create: if isOwner(userId)
+        && request.resource.data.role in ['user', 'organizer', 'employer', 'volunteer']
+        && request.resource.data.wallet.balance == 0;
+
+      allow update: if
+        (
+          isOwner(userId) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'wallet.balance'])
+        );
+
+      // --- SUB-COLLECTION RULES ---
+      match /transactions/{transactionId} {
+        allow create, update, delete: if false;
+        allow read: if isOwner(userId);
+      }
+
+      match /blindDateInvitations/{invitationId} {
+        allow create: if request.auth.uid == invitationId;
+        allow read, update: if request.auth.uid == userId;
+        allow delete: if false;
+      }
+
+      match /hostedEvents/{eventId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /beneficiaries/{phone} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /payment_methods/{methodId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create: if false;
+        allow update: if request.auth != null
+          && request.auth.uid == userId
+          && request.writeFields.hasOnly(['isDefault']);
+        allow delete: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /invitations/{senderId} {
+        allow read: if isSignedIn() && (isOwner(userId) || isOwner(senderId));
+        allow list: if isSignedIn() && isOwner(userId);
+        allow create: if isSignedIn() && isOwner(senderId);
+        allow update, delete: if isSignedIn() && isOwner(userId);
+      }
+
+      // Legacy chat invitation path used by older screens.
+      match /chat_invitations/{senderId} {
+        allow read: if isSignedIn() && (isOwner(userId) || isOwner(senderId));
+        allow list: if isSignedIn() && isOwner(userId);
+        allow create: if isSignedIn() && isOwner(senderId);
+        allow update, delete: if isSignedIn() && isOwner(userId);
+      }
+
+      match /jokes/{jokeId} {
+        allow read: if isSignedIn();
+        allow create: if isOwner(userId) && request.resource.data.authorId == request.auth.uid;
+        allow update: if isOwner(userId) ||
+          (
+            isSignedIn() &&
+            request.writeFields.hasOnly(['likes', 'commentsCount']) &&
+            request.resource.data.authorId == resource.data.authorId
+          );
+        allow delete: if isOwner(userId);
+
+        match /comments/{commentId} {
+          allow read: if isSignedIn();
+          allow create: if isSignedIn() && (
+            request.resource.data.authorId == request.auth.uid ||
+            request.resource.data.authorUid == request.auth.uid
+          );
+          allow update, delete: if false;
+        }
+      }
+
+      match /followers/{followerId} {
+        allow read: if isSignedIn();
+        allow create, delete: if isSignedIn() && request.auth.uid == followerId;
+        allow update: if false;
+      }
+
+      match /following/{followingId} {
+        allow read: if isSignedIn();
+        allow create, delete: if isSignedIn() && request.auth.uid == userId;
+        allow update: if false;
+      }
+
+      match /notifications/{notificationId} {
+        allow read, list: if isOwner(userId);
+        allow update: if isOwner(userId) && request.writeFields.hasOnly(['read']);
+        allow create, delete: if false;
+      }
+    }
+
+    // --- BLIND DATE RULES ---
+    match /blindDateProfiles/{userId} {
+      allow read: if isSignedIn();
+      allow create: if false;
+      allow update: if
+        (isOwner(userId) &&
+          !('status' in request.writeFields) &&
+          !('userId' in request.writeFields) &&
+          !('createdAt' in request.writeFields))
+        ||
+        (isOwner(userId) && request.resource.data.status == 'active'
+          && request.writeFields.hasOnly(['status']));
+    }
+
+    // --- CHAT RULES ---
+    match /chats/{chatId} {
+      allow create: if isSignedIn()
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() >= 2
+        && request.auth.uid in request.resource.data.participants;
+      allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
+      allow update: if isSignedIn()
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.participants == resource.data.participants;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow create: if isSignedIn()
+          && request.resource.data.senderId == request.auth.uid
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow update, delete: if false;
+      }
+
+      match /call_logs/{callId} {
+        allow read: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow create: if isSignedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+          && request.resource.data.callerId == request.auth.uid;
+        allow update: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow delete: if false;
+      }
+    }
+
+    match /call_sessions/{sessionId} {
+      allow read: if isSignedIn() && isCallSessionParticipant(resource.data);
+      allow create: if isSignedIn() && request.resource.data.callerId == request.auth.uid;
+      allow update: if isSignedIn() && isCallSessionParticipant(resource.data);
+      allow delete: if false;
+    }
+
+    // --- ORGANIZERS ---
+    match /organizers/{organizerId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(organizerId);
+      allow delete: if false;
+    }
+
+    // --- EMPLOYERS ---
+    match /employers/{employerId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(employerId);
+      allow delete: if false;
+    }
+
+    // --- EVENTS ---
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow create: if isOrganizer() && request.resource.data.organizerId == request.auth.uid;
+      allow update, delete: if isOrganizer() && resource.data.organizerId == request.auth.uid;
+    }
+
+    // --- JOBS ---
+    match /jobs/{jobId} {
+      allow read: if isSignedIn();
+      allow create: if isEmployer() && request.resource.data.employerUid == request.auth.uid;
+      allow update, delete: if isEmployer() && resource.data.employerUid == request.auth.uid;
+    }
+
+    // --- APPLICATIONS ---
+    match /applications/{applicationId} {
+      allow read: if isSignedIn() && (
+        (isEmployer() && (
+          resource.data.employerUid == request.auth.uid ||
+          resource.data.employerId == request.auth.uid
+        )) ||
+        (resource.data.userId == request.auth.uid)
+      );
+      allow update: if isEmployer() && (
+        resource.data.employerUid == request.auth.uid ||
+        resource.data.employerId == request.auth.uid
+      );
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /live_sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.hostId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.hostId == request.auth.uid;
+      allow delete: if false;
+
+      match /likes/{userId} {
+        allow read: if isSignedIn();
+        allow create, update: if isSignedIn()
+          && request.auth.uid == userId
+          && request.resource.data.userId == request.auth.uid;
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500;
+        allow update, delete: if false;
+      }
+    }
+
+    // --- NEW: JOIN LIVE STREAM REQUESTS ---
+    match /join_requests/{requestId} {
+      // Volunteers can create requests to join streams
+      allow create: if isSignedIn() && request.resource.data.volunteerId == request.auth.uid;
+
+      // Users can read their own requests
+      allow read: if isSignedIn() && (
+        resource.data.volunteerId == request.auth.uid ||
+        // Organizers can read requests for their streams
+        get(/databases/$(database)/documents/live_sessions/$(resource.data.streamId)).data.hostId == request.auth.uid
+      );
+
+      // Only the organizer of the stream can update request status
+      allow update: if isSignedIn() && 
+        get(/databases/$(database)/documents/live_sessions/$(resource.data.streamId)).data.hostId == request.auth.uid &&
+        (request.resource.data.status in ['accepted', 'rejected'] || request.resource.data.status == resource.data.status);
+
+      // No deletion allowed
+      allow delete: if false;
+    }
+
+    // --- PAYOUT REQUESTS ---
+    match /payout_requests/{requestId} {
+      allow create: if isSignedIn()
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.status == 'PENDING'
+        && !('secretCode' in request.resource.data)
+        && !('reservationStatus' in request.resource.data)
+        && !('walletDebitedAmount' in request.resource.data)
+        && (!('type' in request.resource.data) || request.resource.data.type != 'AGENT_CASH_OUT');
+      allow read: if isWalletAgent() || isPlatformAdmin() || (isSignedIn() && resource.data.senderId == request.auth.uid);
+      allow update: if isWalletAgent() || isPlatformAdmin();
+      allow delete: if false;
+    }
+
+    // --- USER REPORTS ---
+    // Supports both snake_case and camelCase collections used across screens.
+    match /user_reports/{reportId} {
+      allow create: if isSignedIn() &&
+        (!('reportingUserId' in request.resource.data) || request.resource.data.reportingUserId == request.auth.uid);
+      allow read: if isPlatformAdmin() ||
+        (isSignedIn() && resource.data.reportingUserId == request.auth.uid);
+      allow update, delete: if isPlatformAdmin();
+    }
+
+    match /userReports/{reportId} {
+      allow create: if isSignedIn() &&
+        (
+          !('reportingUserId' in request.resource.data) ||
+          request.resource.data.reportingUserId == request.auth.uid ||
+          ('userId' in request.resource.data && request.resource.data.userId == request.auth.uid)
+        );
+      allow read: if isPlatformAdmin() ||
+        (
+          isSignedIn() &&
+          (
+            resource.data.reportingUserId == request.auth.uid ||
+            resource.data.userId == request.auth.uid
+          )
+        );
+      allow update, delete: if isPlatformAdmin();
+    }
+
+    // --- SYSTEM / PLATFORM REVENUE ---
+    match /system/{docId} {
+      allow read: if isSignedIn() && (docId != 'platform_revenue' || isPlatformOwner());
+      allow write: if false;
+
+      match /transactions/{txId} {
+        allow read: if isPlatformOwner();
+        allow write: if false;
+      }
+    }
+
+    // --- APP CONTENT (READ FOR AUTHENTICATED USERS) ---
+    match /general_support_items/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isPlatformOwner();
+    }
+
+    match /howToUseTips/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isPlatformOwner();
+    }
+
+    match /aml_cft_content/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isPlatformOwner();
+    }
+
+    // --- APP CONFIG ---
+    // Used by Terms & Conditions / Privacy content shown in-app.
+    match /app_config/{docId} {
+      allow read: if true;
+      allow write: if isPlatformOwner();
+    }
+
+    // Legacy alias support in case content exists under camelCase collection.
+    match /appConfig/{docId} {
+      allow read: if true;
+      allow write: if isPlatformOwner();
+    }
+
+    // --- MARKETPLACE ---
+    match /marketplace_items/{itemId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.sellerId == request.auth.uid;
+      allow update, delete: if resource.data.sellerId == request.auth.uid;
+    }
+
+    // --- GALLERY UPLOADS ---
+    // iOS/Android shared Gallery feed metadata collection.
+    match /galleryUploads/{uploadId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.uploaderId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /purchase_requests/{requestId} {
+      allow create: if isSignedIn() && request.resource.data.buyerId == request.auth.uid;
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.buyerId || request.auth.uid == resource.data.sellerId);
+      allow update, delete: if false;
+    }
+
+    // --- JOKES ---
+    // Collection-group compatibility for MindLoom feed (e.g., collectionGroup("jokes")).
+    // Keep this read-only; writes stay scoped to /users/{userId}/jokes/{jokeId} above.
+    match /{path=**}/jokes/{jokeId} {   
+      allow read: if isSignedIn();
+    }   
+
+    match /jokes/{jokeId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // --- ADVERTISEMENTS ---
+    match /advertisements/{adId} {
+      allow read: if isSignedIn();
+      // Ad creation + fee debit must happen in Cloud Functions (Admin SDK).
+      allow create: if false;
+      allow update: if isSignedIn() &&
+        resource.data.ownerId == request.auth.uid &&
+        request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // --- GARAGE SALES ---
+    match /garage_sales/{saleId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /garage_sale_payments/{paymentId} {
+      allow create: if isSignedIn() && request.resource.data.buyerId == request.auth.uid;
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.buyerId || request.auth.uid == resource.data.sellerId);
+      allow update, delete: if false;
+    }
+
+    // --- DATING LOOP ---
+    match /dating_profiles/{userId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOwner(userId);
+    }
+
+    // --- APPLICATIONS IN SUBCOLLECTIONS (e.g. events/{eventId}/applications/{appId}) ---
+    match /{path=**}/applications/{appId} {
+      allow read: if isSignedIn() &&
+        (
+          isApplicationOwnerFromData(resource.data) ||
+          isApplicationManagerFromData(resource.data) ||
+          appId == request.auth.uid
+        );
+      allow create: if isSignedIn() && isApplicationOwnerFromData(request.resource.data);
+      allow update: if isSignedIn() && isApplicationManagerFromData(resource.data);
+      allow delete: if isSignedIn() &&
+        (isApplicationOwnerFromData(resource.data) || isApplicationManagerFromData(resource.data));
+    }
+  }
+}

@@ -13,19 +13,35 @@
           "package_name": "com.example.volunteersApp"
         }
       },
-      "oauth_client": [
-        {
-          "client_id": "6677623239-ngsjj0i1qildq49vec9hffjmsbse7nqm.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.example.volunteersApp",
-            "certificate_hash": "bd58cbfa8f84079721e5f8b593952620c5e78490"
-          }
-        }
-      ],
+      "oauth_client": [],
       "api_key": [
         {
           "current_key": "AIzaSyAHOi58DQhQ-AIIPW-3EFHIbfLA7Zc7_tA"
+        },
+        {
+          "current_key": "AIzaSyAanWV_-708qFyPbE780B8GNVOiV2VGG2k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:6677623239:android:b15712b70fcc6f5ad829e2",
+        "android_client_info": {
+          "package_name": "com.volunteersapp.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHOi58DQhQ-AIIPW-3EFHIbfLA7Zc7_tA"
+        },
+        {
+          "current_key": "AIzaSyAanWV_-708qFyPbE780B8GNVOiV2VGG2k"
         }
       ],
       "services": {
