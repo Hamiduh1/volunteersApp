@@ -41,6 +41,7 @@ fun OwnerDashboardScreen(
     viewModel: SystemRevenueViewModel = viewModel(),
     onBack: () -> Unit,
     onOpenPayouts: () -> Unit = {},
+    onOpenDepositQueue: () -> Unit = {},
     onOpenSupportConsole: () -> Unit = {},
     onOpenDisputes: () -> Unit = {},
     onOpenUserReports: () -> Unit = {},
@@ -56,8 +57,11 @@ fun OwnerDashboardScreen(
         uiState.stripeForexEarnings,
         uiState.mobileMoneyHiddenFee,
         uiState.blindDateFees,
+        uiState.eventTicketOwnerFee,
         uiState.agentAuthorizationFees,
         uiState.agentCashoutOwnerShare,
+        uiState.marketplacePlatinumFee,
+        uiState.garageSaleFee,
         uiState.otherIncome
     ).sum()
     val totalEarnings = if (uiState.totalCollected > 0) uiState.totalCollected else computedTotal
@@ -121,7 +125,7 @@ fun OwnerDashboardScreen(
                     ) {
                         RevenueMiniStat("Stripe FX 0.5%", "$${String.format("%.2f", uiState.stripeForexEarnings)}")
                         RevenueMiniStat("Mobile Money Fees", "$${String.format("%.2f", uiState.mobileMoneyHiddenFee)}")
-                        RevenueMiniStat("Blind Date Fees", "$${String.format("%.2f", uiState.blindDateFees)}")
+                        RevenueMiniStat("Event Ticket Fees", "$${String.format("%.2f", uiState.eventTicketOwnerFee)}")
                     }
                 }
             }
@@ -132,8 +136,11 @@ fun OwnerDashboardScreen(
                     RevenueSourceRow("Stripe FX 0.5%", uiState.stripeForexEarnings, Color(0xFF1B9AAA))
                     RevenueSourceRow("Hidden Mobile Money Fee", uiState.mobileMoneyHiddenFee, Color(0xFFF4B860))
                     RevenueSourceRow("Blind Date Fees", uiState.blindDateFees, Color(0xFFEF476F))
+                    RevenueSourceRow("Event Ticket Owner Fee", uiState.eventTicketOwnerFee, Color(0xFF7E57C2))
                     RevenueSourceRow("Agent Authorization", uiState.agentAuthorizationFees, Color(0xFF06D6A0))
                     RevenueSourceRow("Agent Cashout Owner Share", uiState.agentCashoutOwnerShare, Color(0xFF118AB2))
+                    RevenueSourceRow("Marketplace Commission", uiState.marketplacePlatinumFee, Color(0xFFE0A106))
+                    RevenueSourceRow("Garage Sale Fee", uiState.garageSaleFee, Color(0xFF8D6E63))
                     RevenueSourceRow("Other Income", uiState.otherIncome, Color(0xFF8E9AAF))
                 }
             }
@@ -242,6 +249,16 @@ fun OwnerDashboardScreen(
                         modifier = Modifier.weight(1f),
                         onClick = onOpenPayouts
                     )
+                    AdminActionCard(
+                        title = "Deposit Queue",
+                        subtitle = "Review deposit requests",
+                        icon = Icons.Default.Download,
+                        accent = Color(0xFF4D908E),
+                        modifier = Modifier.weight(1f),
+                        onClick = onOpenDepositQueue
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AdminActionCard(
                         title = "Associates",
                         subtitle = "Manage support team",

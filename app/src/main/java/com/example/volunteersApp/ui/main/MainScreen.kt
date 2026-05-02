@@ -136,9 +136,11 @@ fun MainScreen(
         currentRoute == "settings" -> "Account Details"
         currentRoute == "how_to_use" -> "How to Use"
         currentRoute == "support" -> "Support & Help"
-        currentRoute == "aml_cft" -> "AML/CFT Guide"
-        currentRoute == "owner_dashboard" -> "Admin Revenue"
+        currentRoute == "aml_cft" -> "AML/CFT Questionnaire"
+        currentRoute == "owner_dashboard" -> "Owner Dashboard"
+        currentRoute == "admin_dashboard" -> "Admin Dashboard"
         currentRoute == "admin_payouts" -> "Payout Queue"
+        currentRoute == "admin_deposits" -> "Deposit Queue"
         currentRoute == "support_console" -> "Support Console"
         currentRoute == "owner_disputes" -> "Disputes"
         currentRoute == "owner_user_reports" -> "User Reports"
@@ -166,7 +168,7 @@ fun MainScreen(
     ) {
         Scaffold(
             topBar = {
-                val isPrimary = listOf("home", "jobs", "events", "live", "community_hub", "wallet", "activity", "owner_dashboard", "profile", "my_chats").contains(currentRoute)
+                val isPrimary = listOf("home", "jobs", "events", "live", "community_hub", "wallet", "activity", "owner_dashboard", "admin_dashboard", "profile", "my_chats").contains(currentRoute)
                 CenterAlignedTopAppBar(
                     title = { Text(topBarTitle, fontWeight = FontWeight.Bold) },
                     navigationIcon = {
@@ -283,10 +285,11 @@ fun MainScreen(
                 }
                 composable("payments") { PaymentMethodsScreen(viewModel(), onBack = { navController.popBackStack() }) }
                 composable("owner_dashboard") {
-                    if (normalizedRole == "owner" || normalizedRole == "admin") {
+                    if (normalizedRole == "owner") {
                         OwnerDashboardScreen(
                             onBack = { navController.popBackStack() },
                             onOpenPayouts = { navController.navigate("admin_payouts") },
+                            onOpenDepositQueue = { navController.navigate("admin_deposits") },
                             onOpenSupportConsole = { navController.navigate("support_console") },
                             onOpenDisputes = { navController.navigate("owner_disputes") },
                             onOpenUserReports = { navController.navigate("owner_user_reports") },
@@ -298,9 +301,31 @@ fun MainScreen(
                         AccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
                 }
+                composable("admin_dashboard") {
+                    if (normalizedRole == "admin") {
+                        AdminDashboardScreen(
+                            currentUserRole = normalizedRole,
+                            onBack = { navController.popBackStack() },
+                            onOpenPayoutQueue = { navController.navigate("admin_payouts") },
+                            onOpenDepositQueue = { navController.navigate("admin_deposits") },
+                            onOpenSupportConsole = { navController.navigate("support_console") },
+                            onOpenReports = { navController.navigate("owner_user_reports") },
+                            onOpenKyc = { navController.navigate("owner_kyc_review") }
+                        )
+                    } else {
+                        AccessDeniedScreen(onBack = { navController.popBackStack() })
+                    }
+                }
                 composable("admin_payouts") {
                     if (normalizedRole == "owner" || normalizedRole == "admin") {
                         AdminPayoutQueueScreen(onBack = { navController.popBackStack() })
+                    } else {
+                        AccessDeniedScreen(onBack = { navController.popBackStack() })
+                    }
+                }
+                composable("admin_deposits") {
+                    if (normalizedRole == "owner" || normalizedRole == "admin") {
+                        AdminDepositQueueScreen(onBack = { navController.popBackStack() })
                     } else {
                         AccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
@@ -322,7 +347,7 @@ fun MainScreen(
                 }
                 composable("owner_disputes") {
                     if (normalizedRole == "owner" || normalizedRole == "admin") {
-                        AdminPayoutQueueScreen(onBack = { navController.popBackStack() })
+                        OwnerUserReportsScreen(onBack = { navController.popBackStack() })
                     } else {
                         AccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
@@ -342,14 +367,14 @@ fun MainScreen(
                     }
                 }
                 composable("owner_fee_settings") {
-                    if (normalizedRole == "owner" || normalizedRole == "admin") {
+                    if (normalizedRole == "owner") {
                         OwnerFeeSettingsScreen(onBack = { navController.popBackStack() })
                     } else {
                         AccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
                 }
                 composable("owner_system_config") {
-                    if (normalizedRole == "owner" || normalizedRole == "admin") {
+                    if (normalizedRole == "owner") {
                         OwnerSystemConfigScreen(onBack = { navController.popBackStack() })
                     } else {
                         AccessDeniedScreen(onBack = { navController.popBackStack() })
@@ -551,9 +576,10 @@ private fun DrawerContent(
                 navController.navigate("wallet")
             }
             if (normalizedRole == "owner" || normalizedRole == "admin") {
-                DrawerItem("Admin Dashboard", Icons.Default.AdminPanelSettings, currentRoute == "owner_dashboard", iconColor = Color(0xFFFFD700)) {
+                val adminDashboardRoute = if (normalizedRole == "owner") "owner_dashboard" else "admin_dashboard"
+                DrawerItem("Admin Dashboard", Icons.Default.AdminPanelSettings, currentRoute == adminDashboardRoute, iconColor = Color(0xFFFFD700)) {
                     scope.launch { drawerState.close() }
-                    navController.navigate("owner_dashboard")
+                    navController.navigate(adminDashboardRoute)
                 }
             }
             if (normalizedRole == "associate") {

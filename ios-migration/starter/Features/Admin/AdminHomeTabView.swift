@@ -3,21 +3,26 @@ import SwiftUI
 struct AdminHomeTabView: View {
     let user: AppSessionUser
 
-    private var isOwnerOrAdmin: Bool {
-        user.role == .owner || user.role == .admin
-    }
+    private var isOwner: Bool { user.role == .owner }
+    private var isOwnerOrAdmin: Bool { user.role == .owner || user.role == .admin }
 
     var body: some View {
         TabView {
             if isOwnerOrAdmin {
-                OwnerDashboardView(user: user)
-                    .tabItem {
-                        BrandTabLabel(
-                            title: "Dashboard",
-                            assetName: BrandAsset.tabDashboard,
-                            fallbackSystemName: "chart.line.uptrend.xyaxis"
-                        )
+                Group {
+                    if isOwner {
+                        OwnerDashboardView(user: user)
+                    } else {
+                        AdminDashboardView(user: user)
                     }
+                }
+                .tabItem {
+                    BrandTabLabel(
+                        title: "Dashboard",
+                        assetName: BrandAsset.tabDashboard,
+                        fallbackSystemName: "chart.line.uptrend.xyaxis"
+                    )
+                }
 
                 AdminControlsHubView(user: user)
                     .tabItem {
@@ -38,7 +43,9 @@ struct AdminHomeTabView: View {
                     )
                 }
 
-            GlobalWalletHomeView(user: user)
+            NavigationStack {
+                GlobalWalletHomeView(user: user)
+            }
                 .tabItem {
                     BrandTabLabel(
                         title: "Wallet",
@@ -47,7 +54,9 @@ struct AdminHomeTabView: View {
                     )
                 }
 
-            CommunityHubView(user: user)
+            NavigationStack {
+                CommunityHubView(user: user)
+            }
                 .tabItem {
                     BrandTabLabel(
                         title: "Community",
@@ -79,13 +88,34 @@ struct AdminHomeTabView: View {
 
 struct AdminControlsHubView: View {
     let user: AppSessionUser
+    let embedded: Bool
+
+    init(user: AppSessionUser, embedded: Bool = false) {
+        self.user = user
+        self.embedded = embedded
+    }
 
     var body: some View {
-        NavigationStack {
+        Group {
+            if embedded {
+                controlsContent
+            } else {
+                NavigationStack {
+                    controlsContent
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var controlsContent: some View {
             List {
                 Section("Moderation") {
                     NavigationLink("Payout Queue") {
                         AdminPayoutQueueView(user: user)
+                    }
+                    NavigationLink("Deposit Queue") {
+                        AdminDepositQueueView(user: user)
                     }
                     NavigationLink("User Reports") {
                         OwnerUserReportsView()
@@ -95,16 +125,22 @@ struct AdminControlsHubView: View {
                     }
                 }
 
-                Section("Configuration") {
-                    NavigationLink("Fee Settings") {
-                        OwnerFeeSettingsView()
+                if user.role == .owner {
+                    Section("Configuration") {
+                        NavigationLink("Fee Settings") {
+                            OwnerFeeSettingsView()
+                        }
+                        NavigationLink("System Config") {
+                            OwnerSystemConfigView()
+                        }
                     }
-                    NavigationLink("System Config") {
-                        OwnerSystemConfigView()
+                } else {
+                    Section("Configuration") {
+                        Text("Configuration is owner-only.")
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
             .navigationTitle("Admin Controls")
-        }
     }
 }

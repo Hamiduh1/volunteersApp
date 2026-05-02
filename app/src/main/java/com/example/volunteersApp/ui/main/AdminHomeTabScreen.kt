@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.ManageAccounts
@@ -62,6 +63,8 @@ import com.example.volunteersApp.jokes.JokesViewModel
 import com.example.volunteersApp.jokes.UserProfileScreen
 import com.example.volunteersApp.marketplace.MarketplaceScreen
 import com.example.volunteersApp.ui.profile.AiAssistantScreen
+import com.example.volunteersApp.wallet.AdminDashboardScreen
+import com.example.volunteersApp.wallet.AdminDepositQueueScreen
 import com.example.volunteersApp.wallet.AdminPayoutQueueScreen
 import com.example.volunteersApp.wallet.OwnerDashboardScreen
 import com.example.volunteersApp.wallet.OwnerFeeSettingsScreen
@@ -92,7 +95,9 @@ fun AdminHomeTabScreen(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val normalizedRole = uiState.role?.trim()?.lowercase(Locale.getDefault()).orEmpty()
+    val isOwner = normalizedRole == "owner"
     val isOwnerOrAdmin = normalizedRole == "owner" || normalizedRole == "admin"
+    val dashboardRoute = if (isOwner) "owner_dashboard" else "admin_dashboard"
     val tabs = listOf(
         AdminTabItem("support_tab", "Support", Icons.Default.SupportAgent),
         AdminTabItem("wallet_tab", "Wallet", Icons.Default.AccountBalanceWallet),
@@ -106,7 +111,14 @@ fun AdminHomeTabScreen(
         "support_tab", "support_console" -> "Support"
         "wallet_tab", "wallet_transact", "wallet_history", "wallet_payments" -> "Wallet"
         "community_tab", "marketplace", "date_eva", "jokes", "ads", "my_chats", "browse_users" -> "Community"
-        "tools_tab", "owner_dashboard", "admin_payouts", "owner_disputes", "owner_user_reports", "owner_kyc_review", "owner_fee_settings", "owner_system_config" -> "Tools"
+        "tools_tab" -> "Tools"
+        "owner_dashboard", "admin_dashboard" -> "Dashboard"
+        "admin_payouts" -> "Payout Queue"
+        "admin_deposits" -> "Deposit Queue"
+        "owner_disputes", "owner_user_reports" -> "User Reports"
+        "owner_kyc_review" -> "KYC Review"
+        "owner_fee_settings" -> "Fee Settings"
+        "owner_system_config" -> "System Config"
         "profile_tab" -> "Profile"
         else -> "Admin Home"
     }
@@ -186,14 +198,17 @@ fun AdminHomeTabScreen(
             }
             composable("tools_tab") {
                 AdminToolsTab(
+                    isOwner = isOwner,
                     isOwnerOrAdmin = isOwnerOrAdmin,
-                    onOpenDashboard = { navController.navigate("owner_dashboard") },
-                    onOpenControls = { navController.navigate("owner_fee_settings") },
+                    dashboardRoute = dashboardRoute,
+                    onOpenDashboard = { navController.navigate(dashboardRoute) },
                     onOpenSupportConsole = { navController.navigate("support_console") },
                     onOpenPayoutQueue = { navController.navigate("admin_payouts") },
+                    onOpenDepositQueue = { navController.navigate("admin_deposits") },
                     onOpenDisputes = { navController.navigate("owner_disputes") },
                     onOpenReports = { navController.navigate("owner_user_reports") },
                     onOpenKyc = { navController.navigate("owner_kyc_review") },
+                    onOpenFeeSettings = { navController.navigate("owner_fee_settings") },
                     onOpenSystemConfig = { navController.navigate("owner_system_config") }
                 )
             }
@@ -201,7 +216,7 @@ fun AdminHomeTabScreen(
                 AdminProfileTab(
                     uiState = uiState,
                     onSignOut = onSignOut,
-                    onOpenOwnerDashboard = { navController.navigate("owner_dashboard") },
+                    onOpenOwnerDashboard = { navController.navigate(dashboardRoute) },
                     onOpenSupportConsole = { navController.navigate("support_console") }
                 )
             }
@@ -210,16 +225,32 @@ fun AdminHomeTabScreen(
                 SupportConsoleScreen(currentUserRole = normalizedRole, onBack = { navController.popBackStack() })
             }
             composable("owner_dashboard") {
-                if (isOwnerOrAdmin) {
+                if (isOwner) {
                     OwnerDashboardScreen(
                         onBack = { navController.popBackStack() },
                         onOpenPayouts = { navController.navigate("admin_payouts") },
+                        onOpenDepositQueue = { navController.navigate("admin_deposits") },
                         onOpenSupportConsole = { navController.navigate("support_console") },
                         onOpenDisputes = { navController.navigate("owner_disputes") },
                         onOpenUserReports = { navController.navigate("owner_user_reports") },
                         onOpenKycReview = { navController.navigate("owner_kyc_review") },
                         onOpenFeeSettings = { navController.navigate("owner_fee_settings") },
                         onOpenSystemConfig = { navController.navigate("owner_system_config") }
+                    )
+                } else {
+                    AdminAccessDenied(onBack = { navController.popBackStack() })
+                }
+            }
+            composable("admin_dashboard") {
+                if (normalizedRole == "admin") {
+                    AdminDashboardScreen(
+                        currentUserRole = normalizedRole,
+                        onBack = { navController.popBackStack() },
+                        onOpenPayoutQueue = { navController.navigate("admin_payouts") },
+                        onOpenDepositQueue = { navController.navigate("admin_deposits") },
+                        onOpenSupportConsole = { navController.navigate("support_console") },
+                        onOpenReports = { navController.navigate("owner_user_reports") },
+                        onOpenKyc = { navController.navigate("owner_kyc_review") }
                     )
                 } else {
                     AdminAccessDenied(onBack = { navController.popBackStack() })
@@ -232,9 +263,16 @@ fun AdminHomeTabScreen(
                     AdminAccessDenied(onBack = { navController.popBackStack() })
                 }
             }
+            composable("admin_deposits") {
+                if (isOwnerOrAdmin) {
+                    AdminDepositQueueScreen(onBack = { navController.popBackStack() })
+                } else {
+                    AdminAccessDenied(onBack = { navController.popBackStack() })
+                }
+            }
             composable("owner_disputes") {
                 if (isOwnerOrAdmin) {
-                    AdminPayoutQueueScreen(onBack = { navController.popBackStack() })
+                    OwnerUserReportsScreen(onBack = { navController.popBackStack() })
                 } else {
                     AdminAccessDenied(onBack = { navController.popBackStack() })
                 }
@@ -254,14 +292,14 @@ fun AdminHomeTabScreen(
                 }
             }
             composable("owner_fee_settings") {
-                if (isOwnerOrAdmin) {
+                if (isOwner) {
                     OwnerFeeSettingsScreen(onBack = { navController.popBackStack() })
                 } else {
                     AdminAccessDenied(onBack = { navController.popBackStack() })
                 }
             }
             composable("owner_system_config") {
-                if (isOwnerOrAdmin) {
+                if (isOwner) {
                     OwnerSystemConfigScreen(onBack = { navController.popBackStack() })
                 } else {
                     AdminAccessDenied(onBack = { navController.popBackStack() })
@@ -325,14 +363,17 @@ fun AdminHomeTabScreen(
 
 @Composable
 private fun AdminToolsTab(
+    isOwner: Boolean,
     isOwnerOrAdmin: Boolean,
+    dashboardRoute: String,
     onOpenDashboard: () -> Unit,
-    onOpenControls: () -> Unit,
     onOpenSupportConsole: () -> Unit,
     onOpenPayoutQueue: () -> Unit,
+    onOpenDepositQueue: () -> Unit,
     onOpenDisputes: () -> Unit,
     onOpenReports: () -> Unit,
     onOpenKyc: () -> Unit,
+    onOpenFeeSettings: () -> Unit,
     onOpenSystemConfig: () -> Unit
 ) {
     LazyColumn(
@@ -350,7 +391,7 @@ private fun AdminToolsTab(
                 ) {
                     Text("Operations", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "Use Support, payout management, and controls from one place.",
+                        "Use Support, payout management, deposit review, and owner controls from one place.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -368,29 +409,40 @@ private fun AdminToolsTab(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("Owner/Admin", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("Dashboard", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(onClick = onOpenDashboard, modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Default.Home, contentDescription = null)
                                 Text(" Dashboard")
                             }
-                            Button(onClick = onOpenControls, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.ManageAccounts, contentDescription = null)
-                                Text(" Controls")
+                            if (isOwner) {
+                                Button(onClick = onOpenFeeSettings, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.ManageAccounts, contentDescription = null)
+                                    Text(" Fee Settings")
+                                }
                             }
+                        }
+                        if (!isOwner && dashboardRoute == "admin_dashboard") {
+                            Text(
+                                "Configuration is owner-only.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
             }
-            items(
-                listOf(
-                    Triple("Payout Queue", Icons.Default.AccountBalanceWallet, onOpenPayoutQueue),
-                    Triple("Disputes", Icons.Default.Report, onOpenDisputes),
-                    Triple("User Reports", Icons.Default.Report, onOpenReports),
-                    Triple("KYC Review", Icons.Default.VerifiedUser, onOpenKyc),
-                    Triple("System Config", Icons.Default.Settings, onOpenSystemConfig)
-                )
-            ) { item ->
+            val toolItems = buildList {
+                add(Triple("Payout Queue", Icons.Default.AccountBalanceWallet, onOpenPayoutQueue))
+                add(Triple("Deposit Queue", Icons.Default.Download, onOpenDepositQueue))
+                add(Triple("Disputes", Icons.Default.Report, onOpenDisputes))
+                add(Triple("User Reports", Icons.Default.Report, onOpenReports))
+                add(Triple("KYC Review", Icons.Default.VerifiedUser, onOpenKyc))
+                if (isOwner) {
+                    add(Triple("System Config", Icons.Default.Settings, onOpenSystemConfig))
+                }
+            }
+            items(toolItems) { item ->
                 ElevatedCard(onClick = item.third, modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -441,7 +493,7 @@ private fun AdminProfileTab(
         if (isOwnerOrAdmin) {
             Button(onClick = onOpenOwnerDashboard, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.AdminPanelSettings, contentDescription = null)
-                Text(" Owner Dashboard")
+                Text(" Dashboard")
             }
         }
         if (isSupportFamily) {

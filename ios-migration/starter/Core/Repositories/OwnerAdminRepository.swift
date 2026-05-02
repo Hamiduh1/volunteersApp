@@ -1,6 +1,5 @@
 import Foundation
 import FirebaseFirestore
-import FirebaseFirestoreSwift
 
 final class OwnerAdminRepository {
     private let db = Firestore.firestore()
@@ -17,6 +16,7 @@ final class OwnerAdminRepository {
             stripeForexEarnings: data.double("stripeForexEarnings"),
             mobileMoneyHiddenFee: data.double("mobileMoneyHiddenFee"),
             blindDateFees: data.double("blindDateFees"),
+            eventTicketOwnerFee: data.double("eventTicketOwnerFee"),
             agentAuthorizationFees: data.double("agentAuthorizationFees"),
             agentCashoutOwnerShare: data.double("agentCashoutOwnerShare"),
             otherIncome: data.double("otherIncome"),
@@ -62,7 +62,7 @@ final class OwnerAdminRepository {
     func listPayoutRequests(
         statuses: [String]?,
         limit: Int = 180,
-        mobileMoneyOnly: Bool = true
+        mobileMoneyOnly: Bool = false
     ) async throws -> [AdminPayoutRequestRecord] {
         var payload: [String: Any] = [
             "limit": limit,
@@ -91,7 +91,10 @@ final class OwnerAdminRepository {
                 amount: row.double("amount"),
                 currency: (row.string("currency") ?? "USD").uppercased(),
                 status: row.string("status") ?? "UNKNOWN",
-                destinationLabel: row.string("recipientPhone") ?? row.string("recipientNetwork"),
+                destinationLabel: row.string("recipientPhone")
+                    ?? row.string("recipientNetwork")
+                    ?? row.string("destinationType")
+                    ?? row.string("fundingSourceType"),
                 createdAt: createdAt
             )
         }
@@ -102,13 +105,65 @@ final class OwnerAdminRepository {
         }
     }
 
+    func listDepositRequests(
+        statuses: [String]?,
+        limit: Int = 180
+    ) async throws -> [AdminDepositRequestRecord] {
+        var payload: [String: Any] = ["limit": limit]
+        if let statuses, !statuses.isEmpty {
+            payload["statuses"] = statuses
+        }
+
+        let map = try await FunctionsService.shared.callMap(function: .adminListDepositRequests, data: payload)
+        let data = (map["data"] as? [String: Any]) ?? map
+        let rawItems = (data["items"] as? [Any]) ?? []
+
+        return rawItems.compactMap { raw in
+            guard let row = coerceStringMap(raw) else { return nil }
+            guard let depositId = row.string("depositRequestId") else { return nil }
+            let createdAt = row.dateFromEpochGuess("createdAtMs")
+                ?? row.dateFromEpochGuess("timestampMs")
+                ?? row.dateFromEpochGuess("createdAt")
+                ?? row.dateFromEpochGuess("timestamp")
+            let processedAt = row.dateFromEpochGuess("processedAtMs")
+                ?? row.dateFromEpochGuess("lastStatusCheckAtMs")
+                ?? row.dateFromEpochGuess("processedAt")
+                ?? row.dateFromEpochGuess("lastStatusCheckAt")
+
+            return AdminDepositRequestRecord(
+                id: depositId,
+                requesterId: row.string("userId") ?? "",
+                requesterName: row.string("requesterName") ?? row.string("userName") ?? "User",
+                paymentMethodId: row.string("paymentMethodId") ?? "",
+                methodType: row.string("methodType") ?? row.string("fundingSourceType") ?? "UNKNOWN",
+                sourceLabel: row.string("sourceLabel"),
+                amount: row.double("amount"),
+                currency: (row.string("currency") ?? "USD").uppercased(),
+                status: row.string("status") ?? "UNKNOWN",
+                walletCredited: row.bool(keys: ["walletCredited"], fallback: false),
+                detailMessage: row.string(keys: ["errorMessage", "settlementMessage", "providerMessage"]),
+                createdAt: createdAt,
+                processedAt: processedAt
+            )
+        }
+        .sorted {
+            let l = $0.createdAt ?? .distantPast
+            let r = $1.createdAt ?? .distantPast
+            return l > r
+        }
+    }
+
     @discardableResult
-    func reversePayoutRequests(ids: [String], reason: String) async throws -> [String: Any] {
+    func reversePayoutRequests(
+        ids: [String],
+        reason: String,
+        allowCompleted: Bool = false
+    ) async throws -> [String: Any] {
         try await FunctionsService.shared.callMap(
             function: .adminReversePayoutRequestsCallable,
             data: [
                 "payoutRequestIds": ids,
-                "allowCompleted": false,
+                "allowCompleted": allowCompleted,
                 "reason": reason
             ]
         )
@@ -124,7 +179,7 @@ final class OwnerAdminRepository {
         let data = (map["data"] as? [String: Any]) ?? map
         let rawItems = (data["items"] as? [Any]) ?? []
 
-        let parsed = rawItems.compactMap { raw in
+        let parsed: [SupportUserSummaryRecord] = rawItems.compactMap { raw in
             guard let row = coerceStringMap(raw) else { return nil }
             guard let userId = row.string("userId") else { return nil }
             return SupportUserSummaryRecord(
@@ -238,6 +293,45 @@ final class OwnerAdminRepository {
         )
     }
 
+    func grantAdminAccess(ownerId: String, email: String) async throws -> String {
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !cleanEmail.isEmpty else {
+            throw NSError(
+                domain: "OwnerAdminRepository",
+                code: 1001,
+                userInfo: [NSLocalizedDescriptionKey: "Admin email is required."]
+            )
+        }
+        guard cleanEmail.contains("@") else {
+            throw NSError(
+                domain: "OwnerAdminRepository",
+                code: 1003,
+                userInfo: [NSLocalizedDescriptionKey: "Enter a valid email address."]
+            )
+        }
+
+        let map = try await FunctionsService.shared.callMap(
+            function: .ownerGrantAdminByEmail,
+            data: [
+                "targetEmail": cleanEmail,
+                "email": cleanEmail,
+                "ownerId": ownerId.trimmingCharacters(in: .whitespacesAndNewlines)
+            ],
+            requiresAppCheck: true
+        )
+        let data = (map["data"] as? [String: Any]) ?? map
+        let success = data.bool(keys: ["success"], fallback: true)
+        let message = data.string(keys: ["message", "error"]) ?? "Admin access granted."
+        if !success {
+            throw NSError(
+                domain: "OwnerAdminRepository",
+                code: 1004,
+                userInfo: [NSLocalizedDescriptionKey: message]
+            )
+        }
+        return message
+    }
+
     func fetchUserReports(limit: Int = 250) async throws -> [OwnerUserReportRecord] {
         var loadedSnapshots: [(String, QuerySnapshot)] = []
         var lastError: Error?
@@ -342,19 +436,27 @@ final class OwnerAdminRepository {
     }
 
     func saveFeeSettings(_ settings: OwnerFeeSettingsRecord) async throws {
-        try await db.collection(FirestoreCollection.appConfig.rawValue)
-            .document("fee_settings")
-            .setData(
-                [
-                    "blindDateFeeUsd": settings.blindDateFeeUsd,
-                    "agentAuthorizationFeeUsd": settings.agentAuthorizationFeeUsd,
-                    "forexProfitMargin": settings.forexProfitMargin,
-                    "stripeForexDepositProfitMargin": settings.stripeForexDepositProfitMargin,
-                    "mobileMoneyHiddenFeeRate": settings.mobileMoneyHiddenFeeRate,
-                    "updatedAt": FieldValue.serverTimestamp()
-                ],
-                merge: true
+        let map = try await FunctionsService.shared.callMap(
+            function: .ownerSaveFeeSettings,
+            data: [
+                "blindDateFeeUsd": settings.blindDateFeeUsd,
+                "agentAuthorizationFeeUsd": settings.agentAuthorizationFeeUsd,
+                "forexProfitMargin": settings.forexProfitMargin,
+                "stripeForexDepositProfitMargin": settings.stripeForexDepositProfitMargin,
+                "mobileMoneyHiddenFeeRate": settings.mobileMoneyHiddenFeeRate
+            ],
+            requiresAppCheck: true
+        )
+        let data = (map["data"] as? [String: Any]) ?? map
+        let success = data.bool(keys: ["success"], fallback: true)
+        let message = data.string(keys: ["message", "error"]) ?? "Fee settings saved."
+        if !success {
+            throw NSError(
+                domain: "OwnerAdminRepository",
+                code: 1201,
+                userInfo: [NSLocalizedDescriptionKey: message]
             )
+        }
     }
 
     func fetchSystemConfig() async throws -> OwnerSystemConfigRecord {
@@ -373,19 +475,27 @@ final class OwnerAdminRepository {
     }
 
     func saveSystemConfig(_ config: OwnerSystemConfigRecord) async throws {
-        try await db.collection(FirestoreCollection.appConfig.rawValue)
-            .document("system_config")
-            .setData(
-                [
-                    "maintenanceMode": config.maintenanceMode,
-                    "allowNewSignups": config.allowNewSignups,
-                    "enableBlindDate": config.enableBlindDate,
-                    "enableLiveStreams": config.enableLiveStreams,
-                    "maxUploadMb": config.maxUploadMb,
-                    "updatedAt": FieldValue.serverTimestamp()
-                ],
-                merge: true
+        let map = try await FunctionsService.shared.callMap(
+            function: .ownerSaveSystemConfig,
+            data: [
+                "maintenanceMode": config.maintenanceMode,
+                "allowNewSignups": config.allowNewSignups,
+                "enableBlindDate": config.enableBlindDate,
+                "enableLiveStreams": config.enableLiveStreams,
+                "maxUploadMb": config.maxUploadMb
+            ],
+            requiresAppCheck: true
+        )
+        let data = (map["data"] as? [String: Any]) ?? map
+        let success = data.bool(keys: ["success"], fallback: true)
+        let message = data.string(keys: ["message", "error"]) ?? "System config saved."
+        if !success {
+            throw NSError(
+                domain: "OwnerAdminRepository",
+                code: 1202,
+                userInfo: [NSLocalizedDescriptionKey: message]
             )
+        }
     }
 }
 
@@ -403,9 +513,18 @@ private func coerceStringMap(_ value: Any) -> [String: Any]? {
 
 private extension Dictionary where Key == String, Value == Any {
     func string(_ key: String) -> String? {
-        (self[key] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nonEmpty
+        guard let raw = self[key] as? String else { return nil }
+        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean.isEmpty ? nil : clean
+    }
+
+    func string(keys: [String]) -> String? {
+        for key in keys {
+            if let value = string(key) {
+                return value
+            }
+        }
+        return nil
     }
 
     func number(_ key: String, fallback: Double = 0) -> Double {
@@ -441,6 +560,16 @@ private extension Dictionary where Key == String, Value == Any {
         }
         return false
     }
+
+    func bool(keys: [String], fallback: Bool = false) -> Bool {
+        for key in keys {
+            if self.keys.contains(key) {
+                return bool(key)
+            }
+        }
+        return fallback
+    }
+
 
     func dateFromMillis(_ key: String) -> Date? {
         let ms = number(key)

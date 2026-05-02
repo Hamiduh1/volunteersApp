@@ -25,8 +25,11 @@ final class OwnerDashboardViewModel: ObservableObject {
         stripeForexEarnings: 0,
         mobileMoneyHiddenFee: 0,
         blindDateFees: 0,
+        eventTicketOwnerFee: 0,
         agentAuthorizationFees: 0,
         agentCashoutOwnerShare: 0,
+        marketplacePlatinumFee: 0,
+        garageSaleFee: 0,
         otherIncome: 0,
         transactionCount: 0,
         lastUpdate: nil
@@ -35,6 +38,8 @@ final class OwnerDashboardViewModel: ObservableObject {
     @Published var activeWindow: OwnerRevenueWindow = .last30Days
     @Published var isLoading = false
     @Published var isCashingOut = false
+    @Published var adminGrantEmail = ""
+    @Published var isGrantingAdmin = false
     @Published var statusMessage: String?
     @Published var errorMessage: String?
 
@@ -83,6 +88,29 @@ final class OwnerDashboardViewModel: ObservableObject {
         }
     }
 
+    func grantAdminAccess(ownerId: String) async {
+        let cleanEmail = adminGrantEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !cleanEmail.isEmpty else {
+            errorMessage = "Admin email is required."
+            return
+        }
+        guard cleanEmail.contains("@") else {
+            errorMessage = "Enter a valid email address."
+            return
+        }
+
+        isGrantingAdmin = true
+        errorMessage = nil
+        defer { isGrantingAdmin = false }
+
+        do {
+            statusMessage = try await repository.grantAdminAccess(ownerId: ownerId, email: cleanEmail)
+            adminGrantEmail = ""
+        } catch {
+            errorMessage = AppErrorMapper.message(from: error)
+        }
+    }
+
     private func filterTransactions(days: Int) -> [OwnerRevenueTransactionRecord] {
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else {
             return transactions
@@ -93,4 +121,3 @@ final class OwnerDashboardViewModel: ObservableObject {
         }
     }
 }
-

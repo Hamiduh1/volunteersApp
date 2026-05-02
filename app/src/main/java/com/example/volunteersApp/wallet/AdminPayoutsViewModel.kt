@@ -82,7 +82,7 @@ class AdminPayoutsViewModel : ViewModel() {
             try {
                 val payload = mutableMapOf<String, Any>(
                     "limit" to 180,
-                    "mobileMoneyOnly" to true
+                    "mobileMoneyOnly" to false
                 )
                 _uiState.value.activeFilter.statuses?.let { statuses ->
                     payload["statuses"] = statuses

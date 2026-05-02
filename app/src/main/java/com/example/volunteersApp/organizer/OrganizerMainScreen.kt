@@ -77,6 +77,7 @@ import com.example.volunteersApp.ui.profile.TermsConditionsScreen
 import com.example.volunteersApp.ui.profile.TermsViewModel
 import com.example.volunteersApp.ui.shared.AiTopBarSearchAction
 import com.example.volunteersApp.ui.volunteers.*
+import com.example.volunteersApp.wallet.AdminDepositQueueScreen
 import com.example.volunteersApp.wallet.AdminPayoutQueueScreen
 import com.example.volunteersApp.wallet.OwnerFeeSettingsScreen
 import com.example.volunteersApp.wallet.OwnerKycReviewScreen
@@ -469,6 +470,7 @@ fun OrganizerMainScreen(
                         OwnerDashboardScreen(
                             onBack = { navController.popBackStack() },
                             onOpenPayouts = { navController.navigate("admin_payouts") },
+                            onOpenDepositQueue = { navController.navigate("admin_deposits") },
                             onOpenSupportConsole = { navController.navigate("support_console") },
                             onOpenDisputes = { navController.navigate("owner_disputes") },
                             onOpenUserReports = { navController.navigate("owner_user_reports") },
@@ -484,6 +486,13 @@ fun OrganizerMainScreen(
                 composable("admin_payouts") {
                     if (uiState.role == "owner" || uiState.role == "admin") {
                         AdminPayoutQueueScreen(onBack = { navController.popBackStack() })
+                    } else {
+                        OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
+                    }
+                }
+                composable("admin_deposits") {
+                    if (uiState.role == "owner" || uiState.role == "admin") {
+                        AdminDepositQueueScreen(onBack = { navController.popBackStack() })
                     } else {
                         OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
@@ -507,7 +516,7 @@ fun OrganizerMainScreen(
                 }
                 composable("owner_disputes") {
                     if (uiState.role == "owner" || uiState.role == "admin") {
-                        AdminPayoutQueueScreen(onBack = { navController.popBackStack() })
+                        OwnerUserReportsScreen(onBack = { navController.popBackStack() })
                     } else {
                         OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
@@ -909,6 +918,7 @@ private fun getOrganizerTitle(currentRoute: String?): String {
         "summary" -> "Activity Summary"
         "owner_dashboard" -> "Admin Dashboard"
         "admin_payouts" -> "Payout Queue"
+        "admin_deposits" -> "Deposit Queue"
         "support_console" -> "Support Console"
         "owner_disputes" -> "Disputes"
         "owner_user_reports" -> "User Reports"

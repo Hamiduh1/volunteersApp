@@ -67,7 +67,7 @@ object MirroredNavigationCatalog {
         "support" to "Support Center",
         "privacy_policy" to "Privacy Policy",
         "terms_conditions" to "Terms & Conditions",
-        "aml_cft" to "AML/CFT Guide",
+        "aml_cft" to "AML/CFT Questionnaire",
         "how_to_use" to "How to Use",
         "ai_assistant" to "AI Assistant"
     )

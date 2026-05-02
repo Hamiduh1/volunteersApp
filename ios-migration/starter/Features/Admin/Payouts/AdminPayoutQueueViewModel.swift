@@ -111,9 +111,13 @@ final class AdminPayoutQueueViewModel: ObservableObject {
         defer { isReversing = false }
 
         do {
+            let allowCompleted = items.contains { item in
+                selectedIds.contains(item.id) && item.status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "COMPLETED"
+            }
             let response = try await repository.reversePayoutRequests(
                 ids: Array(selectedIds),
-                reason: cleanedReason
+                reason: cleanedReason,
+                allowCompleted: allowCompleted
             )
             let totals = (response["totals"] as? [String: Any]) ?? [:]
             let refunded = Int((totals["refunded"] as? NSNumber)?.intValue ?? 0)
@@ -127,4 +131,3 @@ final class AdminPayoutQueueViewModel: ObservableObject {
         }
     }
 }
-
