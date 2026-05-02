@@ -15,6 +15,21 @@ struct AdminPayoutQueueView: View {
                 }
             }
 
+            AdminRoleResponsibilitiesSection(
+                screenKey: AdminRoleResponsibilitiesScreenKey.PAYOUT_QUEUE,
+                fallbackGuide: AdminRoleResponsibilitiesGuide(
+                    roleTitle: "Payout Operations Associate",
+                    mission: "Process payout requests safely and keep settlement records audit-ready.",
+                    responsibilities: [
+                        "Review payout status, destination details, and provider errors before action.",
+                        "Use reversals only for failed/invalid settlement cases.",
+                        "Capture a clear reason for every reversal decision.",
+                        "Escalate repeated failures and suspicious payout patterns."
+                    ],
+                    escalationRule: "Escalate large-value or repeated failed payouts immediately."
+                )
+            )
+
             Section {
                 Picker("Filter", selection: $viewModel.activeFilter) {
                     ForEach(AdminPayoutFilter.allCases) { filter in

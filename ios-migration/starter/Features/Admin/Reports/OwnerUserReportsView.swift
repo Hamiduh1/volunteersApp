@@ -13,6 +13,21 @@ struct OwnerUserReportsView: View {
                 }
             }
 
+            AdminRoleResponsibilitiesSection(
+                screenKey: AdminRoleResponsibilitiesScreenKey.USER_REPORTS,
+                fallbackGuide: AdminRoleResponsibilitiesGuide(
+                    roleTitle: "Reports Review Associate",
+                    mission: "Review user complaints and convert reports into safe moderation actions.",
+                    responsibilities: [
+                        "Validate report reason and context before action.",
+                        "Identify repeat offenders and escalate severe abuse quickly.",
+                        "Keep reviewer notes objective and policy-aligned.",
+                        "Coordinate with support for user-facing follow-up."
+                    ],
+                    escalationRule: "Escalate violence, exploitation, or legal-risk reports immediately."
+                )
+            )
+
             Section("Filters") {
                 TextField("Search reports", text: $viewModel.query)
                     .textInputAutocapitalization(.never)
