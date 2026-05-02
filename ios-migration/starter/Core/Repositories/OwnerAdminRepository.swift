@@ -43,7 +43,10 @@ final class OwnerAdminRepository {
                 source: (data["source"] as? String) ?? "unknown",
                 amount: data.double("amount"),
                 note: data["note"] as? String,
-                createdAt: createdAt
+                createdAt: createdAt,
+                relatedUserId: data.string("relatedUserId")
+                    ?? data.string("userId")
+                    ?? data.string("senderId")
             )
         }
         .sorted {
@@ -51,6 +54,37 @@ final class OwnerAdminRepository {
             let r = $1.createdAt ?? .distantPast
             return l > r
         }
+    }
+
+    func fetchUserCountries(userIds: [String]) async throws -> [String: String] {
+        let normalized = Array(
+            Set(
+                userIds
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
+        )
+        guard !normalized.isEmpty else { return [:] }
+
+        var countriesByUserId: [String: String] = [:]
+        for chunk in normalized.chunked(into: 30) {
+            let snapshot = try await db.collection(FirestoreCollection.users.rawValue)
+                .whereField(FieldPath.documentID(), in: chunk)
+                .getDocuments()
+            for doc in snapshot.documents {
+                let data = doc.data()
+                countriesByUserId[doc.documentID] = normalizeCountry(
+                    data.string("country")
+                        ?? data.string("countryName")
+                        ?? data.string("countryCode")
+                )
+            }
+        }
+
+        for userId in normalized where countriesByUserId[userId] == nil {
+            countriesByUserId[userId] = "Unknown"
+        }
+        return countriesByUserId
     }
 
     func cashOutOwnerRevenue() async throws -> String {
@@ -335,9 +369,13 @@ final class OwnerAdminRepository {
         return OwnerFeeSettingsRecord(
             blindDateFeeUsd: data.double("blindDateFeeUsd", fallback: 10.0),
             agentAuthorizationFeeUsd: data.double("agentAuthorizationFeeUsd", fallback: 1.0),
+            adPostFeeUsd: data.double("adPostFeeUsd", fallback: 1.0),
             forexProfitMargin: data.double("forexProfitMargin", fallback: 0.010),
             stripeForexDepositProfitMargin: data.double("stripeForexDepositProfitMargin", fallback: 0.005),
-            mobileMoneyHiddenFeeRate: data.double("mobileMoneyHiddenFeeRate", fallback: 0.0)
+            mobileMoneyHiddenFeeRate: data.double("mobileMoneyHiddenFeeRate", fallback: 0.0),
+            eventTicketOwnerFeeRate: data.double("eventTicketOwnerFeeRate", fallback: 0.05),
+            marketplacePlatinumFeeRate: data.double("marketplacePlatinumFeeRate", fallback: 0.02),
+            garageSaleFeeRate: data.double("garageSaleFeeRate", fallback: 0.02)
         )
     }
 
@@ -348,13 +386,30 @@ final class OwnerAdminRepository {
                 [
                     "blindDateFeeUsd": settings.blindDateFeeUsd,
                     "agentAuthorizationFeeUsd": settings.agentAuthorizationFeeUsd,
+                    "adPostFeeUsd": settings.adPostFeeUsd,
                     "forexProfitMargin": settings.forexProfitMargin,
                     "stripeForexDepositProfitMargin": settings.stripeForexDepositProfitMargin,
                     "mobileMoneyHiddenFeeRate": settings.mobileMoneyHiddenFeeRate,
+                    "eventTicketOwnerFeeRate": settings.eventTicketOwnerFeeRate,
+                    "marketplacePlatinumFeeRate": settings.marketplacePlatinumFeeRate,
+                    "garageSaleFeeRate": settings.garageSaleFeeRate,
                     "updatedAt": FieldValue.serverTimestamp()
                 ],
                 merge: true
             )
+    }
+
+    private func normalizeCountry(_ raw: String?) -> String {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "Unknown" }
+        if trimmed.count == 2 {
+            let locale = Locale(identifier: "en_US")
+            let code = trimmed.uppercased()
+            if let regionName = locale.localizedString(forRegionCode: code), !regionName.isEmpty {
+                return regionName
+            }
+        }
+        return trimmed
     }
 
     func fetchSystemConfig() async throws -> OwnerSystemConfigRecord {
@@ -462,5 +517,19 @@ private extension Optional where Wrapped == String {
     var nonEmpty: String? {
         guard let self, !self.isEmpty else { return nil }
         return self
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        var chunks: [[Element]] = []
+        var index = 0
+        while index < count {
+            let end = Swift.min(index + size, count)
+            chunks.append(Array(self[index..<end]))
+            index += size
+        }
+        return chunks
     }
 }

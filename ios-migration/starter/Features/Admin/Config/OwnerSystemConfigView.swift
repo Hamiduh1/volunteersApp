@@ -21,6 +21,21 @@ struct OwnerSystemConfigView: View {
                 }
             }
 
+            AdminRoleResponsibilitiesSection(
+                screenKey: AdminRoleResponsibilitiesScreenKey.SYSTEM_CONFIG,
+                fallbackGuide: AdminRoleResponsibilitiesGuide(
+                    roleTitle: "System Configuration Admin",
+                    mission: "Maintain safe platform defaults and operational toggles.",
+                    responsibilities: [
+                        "Change maintenance and signup flags with stakeholder notice.",
+                        "Keep feature toggles aligned with policy and release readiness.",
+                        "Set upload limits based on security and performance constraints.",
+                        "Validate config behavior after every save."
+                    ],
+                    escalationRule: "Escalate production-impacting misconfiguration immediately."
+                )
+            )
+
             Section("Flags") {
                 Toggle("Maintenance Mode", isOn: $viewModel.maintenanceMode)
                 Toggle("Allow New Signups", isOn: $viewModel.allowNewSignups)

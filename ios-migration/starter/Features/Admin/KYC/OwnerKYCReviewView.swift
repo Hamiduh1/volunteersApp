@@ -13,6 +13,21 @@ struct OwnerKYCReviewView: View {
                 }
             }
 
+            AdminRoleResponsibilitiesSection(
+                screenKey: AdminRoleResponsibilitiesScreenKey.KYC_REVIEW,
+                fallbackGuide: AdminRoleResponsibilitiesGuide(
+                    roleTitle: "KYC Review Associate",
+                    mission: "Protect the platform by verifying identity and risk indicators.",
+                    responsibilities: [
+                        "Review account verification state and profile risk signals.",
+                        "Prioritize high-risk or high-volume accounts for deeper checks.",
+                        "Document pass/fail rationale clearly for audits.",
+                        "Escalate suspicious identity patterns to admin owner."
+                    ],
+                    escalationRule: "Escalate potential fraud or sanctions concerns immediately."
+                )
+            )
+
             Section("Filters") {
                 TextField("Search name/email/role", text: $viewModel.query)
                     .textInputAutocapitalization(.never)

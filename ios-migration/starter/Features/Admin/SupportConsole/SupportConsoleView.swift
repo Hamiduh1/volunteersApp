@@ -19,6 +19,35 @@ struct SupportConsoleView: View {
                     }
                 }
 
+                AdminRoleResponsibilitiesSection(
+                    screenKey: isAdmin
+                    ? AdminRoleResponsibilitiesScreenKey.SUPPORT_CONSOLE_ADMIN
+                    : AdminRoleResponsibilitiesScreenKey.SUPPORT_CONSOLE_ASSOCIATE,
+                    fallbackGuide: isAdmin
+                    ? AdminRoleResponsibilitiesGuide(
+                        roleTitle: "Admin Support Lead",
+                        mission: "Oversee support quality and protect customer accounts.",
+                        responsibilities: [
+                            "Grant and audit associate access.",
+                            "Resolve complex account issues using strict verification standards.",
+                            "Review complaint patterns and coordinate escalations with owner.",
+                            "Document decisions on sensitive support cases."
+                        ],
+                        escalationRule: "Escalate suspected fraud or account takeover risk immediately."
+                    )
+                    : AdminRoleResponsibilitiesGuide(
+                        roleTitle: "Support Associate",
+                        mission: "Help users safely while following verification and policy rules.",
+                        responsibilities: [
+                            "Verify customer email and phone before opening account details.",
+                            "Record accurate notes for each support action.",
+                            "Escalate payout, security, or legal concerns to admin quickly.",
+                            "Do not change fee/config/reversal controls."
+                        ],
+                        escalationRule: "Escalate any identity mismatch or payment dispute before action."
+                    )
+                )
+
                 Section("Search Users") {
                     HStack {
                         TextField("Name, email, phone", text: $viewModel.query)

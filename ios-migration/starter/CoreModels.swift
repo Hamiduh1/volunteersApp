@@ -326,6 +326,7 @@ struct PaymentMethodRecord: Codable, Identifiable {
     var chargeSourceStatus: String? = nil
     var achDebitEnabled: Bool? = nil
     var achCreditEnabled: Bool? = nil
+    var payoutReady: Bool? = nil
     var requiresRelinkForCharges: Bool? = nil
     var phoneOwnershipVerified: Bool? = nil
 }
@@ -594,6 +595,7 @@ struct OwnerRevenueTransactionRecord: Identifiable {
     let amount: Double
     let note: String?
     let createdAt: Date?
+    let relatedUserId: String?
 }
 
 struct AdminPayoutRequestRecord: Identifiable {
@@ -677,9 +679,13 @@ struct OwnerKYCRecord: Identifiable {
 struct OwnerFeeSettingsRecord {
     let blindDateFeeUsd: Double
     let agentAuthorizationFeeUsd: Double
+    let adPostFeeUsd: Double
     let forexProfitMargin: Double
     let stripeForexDepositProfitMargin: Double
     let mobileMoneyHiddenFeeRate: Double
+    let eventTicketOwnerFeeRate: Double
+    let marketplacePlatinumFeeRate: Double
+    let garageSaleFeeRate: Double
 }
 
 struct OwnerSystemConfigRecord {

@@ -5,6 +5,7 @@ struct OwnerDashboardView: View {
         static let dashboard = "owner_dashboard_home"
         static let totals = "owner_totals"
         static let sources = "owner_sources"
+        static let countries = "owner_countries"
         static let operations = "owner_operations"
         static let window = "owner_window"
         static let transactions = "owner_transactions"
@@ -40,6 +41,21 @@ struct OwnerDashboardView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
+                        AdminRoleResponsibilitiesCard(
+                            screenKey: AdminRoleResponsibilitiesScreenKey.OWNER_DASHBOARD,
+                            fallbackGuide: AdminRoleResponsibilitiesGuide(
+                                roleTitle: "Platform Owner / Admin",
+                                mission: "Keep operations safe, compliant, and financially accurate.",
+                                responsibilities: [
+                                    "Monitor revenue and country/source trends daily.",
+                                    "Approve sensitive reversals and investigate anomalies quickly.",
+                                    "Manage admin and associate access with least-privilege controls.",
+                                    "Review fee/config changes before releasing to production."
+                                ],
+                                escalationRule: "Escalate fraud, legal disputes, or payout incidents immediately."
+                            )
+                        )
+
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Total Earnings")
                                 .font(.caption)
@@ -71,6 +87,76 @@ struct OwnerDashboardView: View {
                             .padding(.top, 4)
                         }
                         .id(SectionAnchor.sources)
+
+                        GroupBox("Country Revenue Explorer") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                TextField("Search country", text: $viewModel.countrySearchText)
+                                    .textFieldStyle(.roundedBorder)
+
+                                if viewModel.isCountryAnalyticsLoading {
+                                    ProgressView("Loading country revenue...")
+                                        .font(.caption)
+                                }
+
+                                if viewModel.availableCountries.isEmpty {
+                                    Text("No country-linked revenue transactions found yet.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    if viewModel.filteredCountryOptions.isEmpty {
+                                        Text("No country matches that search.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 8) {
+                                                ForEach(Array(viewModel.filteredCountryOptions.prefix(8)), id: \.self) { country in
+                                                    Button(country) {
+                                                        viewModel.selectCountry(country)
+                                                    }
+                                                    .buttonStyle(country == viewModel.selectedCountry ? .borderedProminent : .bordered)
+                                                    .font(.caption.weight(.semibold))
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if !viewModel.selectedCountry.isEmpty {
+                                        Divider()
+                                        Text("\(viewModel.selectedCountry) Total: \(currency(viewModel.selectedCountryTotal))")
+                                            .font(.subheadline.weight(.semibold))
+
+                                        if viewModel.selectedCountrySourceBreakdown.isEmpty {
+                                            Text("No revenue sources available for this country.")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            ForEach(viewModel.selectedCountrySourceBreakdown, id: \.source) { item in
+                                                HStack {
+                                                    Text(countryRevenueSourceLabel(item.source))
+                                                    Spacer()
+                                                    Text(currency(item.amount))
+                                                        .fontWeight(.semibold)
+                                                }
+                                                .font(.caption)
+                                            }
+                                        }
+                                    }
+
+                                    if !viewModel.topCountries.isEmpty {
+                                        Divider()
+                                        Text("Top Countries")
+                                            .font(.caption.weight(.semibold))
+                                        ForEach(Array(viewModel.topCountries.enumerated()), id: \.element.id) { index, row in
+                                            Text("\(index + 1). \(row.country): \(currency(row.total))")
+                                                .font(.caption2)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
+                        .id(SectionAnchor.countries)
 
                         GroupBox("Operations") {
                             VStack(alignment: .leading, spacing: 10) {
@@ -196,6 +282,12 @@ struct OwnerDashboardView: View {
                     dashboardQuickButton("Sources") {
                         withAnimation { proxy.scrollTo(SectionAnchor.sources, anchor: .top) }
                     }
+                    dashboardQuickButton("Country") {
+                        withAnimation { proxy.scrollTo(SectionAnchor.countries, anchor: .top) }
+                    }
+                }
+
+                HStack(spacing: 8) {
                     dashboardQuickButton("Ops") {
                         withAnimation { proxy.scrollTo(SectionAnchor.operations, anchor: .top) }
                     }
@@ -302,5 +394,32 @@ struct OwnerDashboardView: View {
     private func dateText(_ date: Date?) -> String {
         guard let date else { return "--" }
         return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func countryRevenueSourceLabel(_ source: String) -> String {
+        switch source {
+        case "stripeForexEarnings":
+            return "Stripe FX 0.5%"
+        case "mobileMoneyHiddenFee":
+            return "Hidden Mobile Money Fee"
+        case "blindDateFees":
+            return "Blind Date Fees"
+        case "agentAuthorizationFees":
+            return "Agent Authorization"
+        case "agentCashoutOwnerShare":
+            return "Agent Cashout Owner Share"
+        case "eventTicketOwnerFee":
+            return "Event Ticket Owner Fee"
+        case "advertisementFees":
+            return "Sponsored Ad Fee"
+        case "marketplacePlatinumFee":
+            return "Marketplace Platinum Fee"
+        case "garageSaleFee":
+            return "Garage Sale Fee"
+        case "otherIncome":
+            return "Other Income"
+        default:
+            return source.replacingOccurrences(of: "_", with: " ").capitalized
+        }
     }
 }
