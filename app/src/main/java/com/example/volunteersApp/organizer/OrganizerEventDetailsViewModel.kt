@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 /**
  * Modernized UI State for the Organizer's Event Detail view.
@@ -48,7 +49,7 @@ class OrganizerEventDetailsViewModel : ViewModel() {
 
         eventListener?.remove() // Cleanup old listener if exists
 
-        eventListener = db.collection("events").document(eventId)
+        eventListener = db.collection(FirestoreCollection.EVENTS).document(eventId)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
                     _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
@@ -72,7 +73,7 @@ class OrganizerEventDetailsViewModel : ViewModel() {
             _uiState.update { it.copy(isActionLoading = true) }
             try {
                 // Correctly targets the 'isActive' field that the UI depends on.
-                db.collection("events").document(eventId)
+                db.collection(FirestoreCollection.EVENTS).document(eventId)
                     .update("isActive", newActiveState).await()
 
                 val statusMsg = if (newActiveState) "Event is now OPEN" else "Event is now CLOSED"

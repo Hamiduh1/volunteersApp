@@ -1,5 +1,6 @@
 package com.example.volunteersApp.organizer
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -7,8 +8,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
@@ -27,6 +30,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.volunteersApp.VertexViewModel
 import com.example.volunteersApp.models.EventModel
+import com.example.volunteersApp.models.OpportunityStatus
+import com.example.volunteersApp.streams.StartStreamActivity
+import kotlinx.coroutines.launch
 
 /**
  * The main screen for organizers to view and manage the events they are hosting.
@@ -45,6 +51,9 @@ fun HostedEventsScreen(
     // Observe the response from VertexViewModel
     val aiResponse by vertexViewModel.generatedResponse.collectAsState()
     var showAiResponseDialog by remember { mutableStateOf(false) }
+    var eventPendingDeletion by remember { mutableStateOf<EventModel?>(null) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     // When the AI generates a response, show the dialog
     LaunchedEffect(aiResponse) {
@@ -101,12 +110,40 @@ fun HostedEventsScreen(
                                 onViewApplicantsClick = { onViewApplicants(event.eventId, event.title) },
                                 onPublishClick = { viewModel.publishEvent(event.eventId) },
                                 onUnpublishClick = { viewModel.unpublishEvent(event.eventId) },
+                                onGoLiveClick = {
+                                    context.startActivity(
+                                        Intent(context, StartStreamActivity::class.java).apply {
+                                            putExtra(StartStreamActivity.EXTRA_SOURCE_TYPE, "event")
+                                            putExtra(StartStreamActivity.EXTRA_EVENT_ID, event.eventId)
+                                        }
+                                    )
+                                },
+                                onDeleteClick = { eventPendingDeletion = event },
                                 // Pass a lambda to trigger the AI generation
                                 onGenerateClick = { prompt -> vertexViewModel.generate(prompt) }
                             )
                         }
                     }
                 }
+            }
+
+            uiState.error?.let { message ->
+                Text(
+                    text = message,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(16.dp)
+                )
+            }
+            uiState.message?.let { message ->
+                Text(
+                    text = message,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(16.dp)
+                )
             }
 
             // Show the AI-generated content in a dialog
@@ -120,13 +157,42 @@ fun HostedEventsScreen(
                 )
             }
         }
+
+        eventPendingDeletion?.let { event ->
+            AlertDialog(
+                onDismissRequest = { eventPendingDeletion = null },
+                title = { Text("Remove event?") },
+                text = {
+                    Text(
+                        "Unused events are deleted. Events with registrations or a linked live " +
+                            "broadcast are closed instead, preserving volunteer and event history."
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                viewModel.deleteEvent(event)
+                                eventPendingDeletion = null
+                            }
+                        }
+                    ) {
+                        Text("Remove")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { eventPendingDeletion = null }) {
+                        Text("Keep event")
+                    }
+                }
+            )
+        }
     }
 }
 
 /**
  * A visually rich card for displaying a hosted event, including an image banner.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HostedEventCard(
     event: EventModel,
@@ -135,9 +201,13 @@ private fun HostedEventCard(
     onViewApplicantsClick: () -> Unit,
     onPublishClick: () -> Unit,
     onUnpublishClick: () -> Unit,
+    onGoLiveClick: () -> Unit,
+    onDeleteClick: () -> Unit,
     // New lambda to handle the AI generate action
     onGenerateClick: (String) -> Unit
 ) {
+    val eventIsClosed = event.status == OpportunityStatus.CLOSED || event.closeEntries
+    val statusColor = if (event.isActive && !eventIsClosed) Color(0xFF4CAF50) else Color.Gray
     ElevatedCard(
         onClick = onCardClick,
         modifier = Modifier.fillMaxWidth(),
@@ -166,10 +236,13 @@ private fun HostedEventCard(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
-                    val statusColor = if (event.isActive) Color(0xFF4CAF50) else Color.Gray
                     Box(modifier = Modifier.padding(start = 8.dp)) {
                         Text(
-                            text = if (event.isActive) "Published" else "Draft",
+                            text = when {
+                                eventIsClosed -> "Closed"
+                                event.isActive -> "Published"
+                                else -> "Draft"
+                            },
                             color = statusColor,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold
@@ -217,7 +290,24 @@ private fun HostedEventCard(
                     Text("Generate Thank You Note")
                 }
                 Spacer(Modifier.height(8.dp))
-                if (event.isActive) {
+                if (eventIsClosed) {
+                    OutlinedButton(
+                        onClick = onDeleteClick,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null)
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text("Remove closed event")
+                    }
+                } else if (event.isActive) {
+                    OutlinedButton(
+                        onClick = onGoLiveClick,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Videocam, contentDescription = null)
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text("Go live for this event")
+                    }
                     Button(
                         onClick = onUnpublishClick,
                         modifier = Modifier.fillMaxWidth(),
@@ -231,6 +321,16 @@ private fun HostedEventCard(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Publish")
+                    }
+                }
+                if (!eventIsClosed) {
+                    TextButton(
+                        onClick = onDeleteClick,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null)
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text("Remove event")
                     }
                 }
             }

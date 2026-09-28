@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 // --- Data Models ---
 
@@ -36,28 +37,38 @@ sealed interface SupportUiState {
 
 // --- ViewModel ---
 
-class SupportViewModel : ViewModel() {
+class SupportViewModel(private val collectionName: String = FirestoreCollection.GENERAL_SUPPORT_ITEMS) : ViewModel() {
 
     private val db = FirebaseFirestore.getInstance()
+    private val fallbackItems = listOf(
+        SupportItem(text = "How to use the app", iconName = "help", order = 1),
+        SupportItem(text = "Wallet and payments help", iconName = "account_balance_wallet", order = 2),
+        SupportItem(text = "Report a problem", iconName = "report", order = 3),
+        SupportItem(text = "Contact support", iconName = "support_agent", order = 4)
+    )
 
     // Private mutable state that holds the current UI state.
     private val _uiState = MutableStateFlow<SupportUiState>(SupportUiState.Loading)
     // Public, immutable state flow for the UI to observe.
     val uiState = _uiState.asStateFlow()
 
+    companion object {
+        private const val TAG = "SupportViewModel"
+    }
+
     init {
         // Automatically start loading items when the ViewModel is created.
         loadSupportItems()
     }
 
-    private fun loadSupportItems() {
+    fun loadSupportItems() {
         // Launch a coroutine in the ViewModel's scope, which is automatically
         // cancelled when the ViewModel is cleared.
         viewModelScope.launch {
             _uiState.value = SupportUiState.Loading
             try {
                 // Use .await() from the kotlinx-coroutines-play-services library for clean, sequential code.
-                val querySnapshot = db.collection("general_support_items")
+                val querySnapshot = db.collection(collectionName)
                     .orderBy("order", Query.Direction.ASCENDING)
                     .get()
                     .await()
@@ -65,12 +76,19 @@ class SupportViewModel : ViewModel() {
                 // Use mapNotNull for safe deserialization; it skips any documents
                 // that fail to convert to a SupportItem.
                 val items = querySnapshot.documents.mapNotNull { it.toObject<SupportItem>() }
-                _uiState.value = SupportUiState.Success(items)
-                Log.d("SupportViewModel", "Successfully loaded ${items.size} support items.")
+                val finalItems = if (items.isNotEmpty()) items else fallbackItems
+                _uiState.value = SupportUiState.Success(finalItems)
+                Log.d(TAG, "Successfully loaded ${finalItems.size} support items from $collectionName.")
 
             } catch (e: Exception) {
-                Log.e("SupportViewModel", "Error fetching support items", e)
-                _uiState.value = SupportUiState.Error(e.localizedMessage ?: "An unknown error occurred")
+                Log.e(TAG, "Error fetching support items from $collectionName", e)
+                val isPermissionDenied = (e.message ?: "").contains("PERMISSION_DENIED", ignoreCase = true)
+                if (isPermissionDenied) {
+                    _uiState.value = SupportUiState.Success(fallbackItems)
+                    Log.w(TAG, "Falling back to built-in support items due to Firestore permissions.")
+                } else {
+                    _uiState.value = SupportUiState.Error(e.localizedMessage ?: "An unknown error occurred")
+                }
             }
         }
     }

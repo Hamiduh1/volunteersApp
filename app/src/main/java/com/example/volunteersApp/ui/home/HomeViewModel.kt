@@ -12,6 +12,7 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import com.google.firebase.Firebase
 import java.util.Date
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -55,7 +56,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadUpcomingEvents() {
         _isLoading.value = true
-        db.collection("events")
+        db.collection(FirestoreCollection.EVENTS)
             // Use a new Date() object for the current time
             .whereGreaterThanOrEqualTo("eventDateTime", Date())
             .orderBy("eventDateTime", Query.Direction.ASCENDING)

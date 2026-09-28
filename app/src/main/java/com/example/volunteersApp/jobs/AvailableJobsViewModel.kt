@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 data class AvailableJobsUiState(
     val jobs: List<JobPost> = emptyList(),
@@ -41,7 +42,7 @@ class AvailableJobsViewModel : ViewModel() {
             _uiState.update { it.copy(isLoading = true) }
 
             try {
-                var query = db.collection("jobPosts")
+                var query = db.collection(FirestoreCollection.JOB_POSTS)
                     .whereEqualTo("status", "open")
                     .orderBy("createdAt", Query.Direction.DESCENDING)
                     .limit(pageSize)

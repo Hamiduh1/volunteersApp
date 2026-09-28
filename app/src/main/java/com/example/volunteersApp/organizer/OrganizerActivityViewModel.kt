@@ -75,13 +75,20 @@ class OrganizerActivityViewModel(
     }
 
     private suspend fun processEventsWithVolunteers(hostedEvents: List<EventModel>): List<EventWithVolunteerCount> {
+        val activeStatuses = setOf(
+            ApplicationStatus.APPROVED,
+            ApplicationStatus.ACCEPTED,
+            ApplicationStatus.ATTENDED,
+            ApplicationStatus.COMPLETED
+        )
+
         val deferredCounts = hostedEvents.map { event ->
             viewModelScope.async {
                 try {
                     val appsRes = applicationRepository.getApplicationsForEvent(event.eventId).first()
                     if (appsRes is Resource.Success) {
                         val approvedCount = appsRes.data?.count {
-                            it.status == ApplicationStatus.APPROVED
+                            it.status in activeStatuses
                         } ?: 0
                         EventWithVolunteerCount(event, approvedCount)
                     } else {

@@ -1,5 +1,7 @@
 package com.example.volunteersApp.host
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -81,6 +83,20 @@ fun EventDetailScreen(
         viewModel.loadEventDetails(eventId)
     }
 
+    LaunchedEffect(uiState.checkoutUrl) {
+        val checkoutUrl = uiState.checkoutUrl ?: return@LaunchedEffect
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(checkoutUrl)))
+        }.onFailure {
+            Toast.makeText(
+                context,
+                "Checkout was created, but no browser is available to open it.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        viewModel.consumeCheckoutUrl()
+    }
+
     LaunchedEffect(Unit) {
         viewModel.actionResult.collect { result ->
             when (result) {
@@ -101,7 +117,6 @@ fun EventDetailScreen(
     if (showConfirmDialog && uiState.event?.eventFee ?: 0.0 > 0.0) {
         PaymentConfirmDialog(
             fee = uiState.event!!.eventFee,
-            balance = uiState.walletBalance,
             isActionLoading = uiState.isActionLoading,
             onConfirm = {
                 viewModel.applyForEvent(eventId)
@@ -253,18 +268,17 @@ private fun VolunteerActionBar(
 ) {
     val event = uiState.event!!
     val hasFee = event.eventFee > 0
-    val insufficientBalance = hasFee && uiState.walletBalance < event.eventFee
+    val paymentPending = uiState.isPaymentCollectionPending
 
-    // FIX: The `when` statement is now exhaustive, covering all cases from ApplicationStatus
     val (text, enabled, color) = when (uiState.applicationStatus) {
         ApplicationStatus.CAN_APPLY -> when {
             event.closeEntries -> Triple("ENTRIES CLOSED", false, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
-            insufficientBalance -> Triple("INSUFFICIENT BALANCE", false, Color.Red)
-            hasFee -> Triple("PAY WITH WALLET", true, MaterialTheme.colorScheme.tertiary)
+            paymentPending -> Triple("PAYMENT PENDING", false, MaterialTheme.colorScheme.secondary)
+            hasFee -> Triple("PAID REGISTRATION UNAVAILABLE", false, MaterialTheme.colorScheme.error)
             else -> Triple("APPLY NOW", true, MaterialTheme.colorScheme.primary)
         }
         ApplicationStatus.APPLIED_PENDING -> Triple("APPLICATION PENDING", false, MaterialTheme.colorScheme.secondary)
-        ApplicationStatus.APPROVED -> Triple("APPLICATION APPROVED", false, Color(0xFF4CAF50))
+        ApplicationStatus.APPROVED -> Triple("APPLICATION APPROVED", false, MaterialTheme.colorScheme.tertiary)
         ApplicationStatus.REJECTED -> Triple("APPLICATION REJECTED", false, MaterialTheme.colorScheme.error)
         ApplicationStatus.JOB_CLOSED -> Triple("EVENT CLOSED", false, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
         ApplicationStatus.UNKNOWN -> Triple("LOADING STATUS...", false, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
@@ -278,15 +292,16 @@ private fun VolunteerActionBar(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (hasFee) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.size(8.dp))
-                    Text(
-                        text = "Wallet Balance: $${String.format("%.2f", uiState.walletBalance)}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (insufficientBalance) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = if (paymentPending) {
+                        uiState.paymentCollectionDetail
+                            ?: "Provider payment is processing. Your application unlocks after confirmation."
+                    } else {
+                        "Provider checkout is not configured for paid events yet. No app wallet balance will be used."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(Modifier.height(8.dp))
             }
             Button(
@@ -314,19 +329,20 @@ private fun VolunteerActionBar(
 @Composable
 private fun PaymentConfirmDialog(
     fee: Double,
-    balance: Double,
     isActionLoading: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Confirm Payment") },
+        title = { Text("Confirm Provider Payment") },
         text = {
-            Column {
-                Text("You are about to pay $${String.format("%.2f", fee)} for this event.")
-                Text("Your current balance is $${String.format("%.2f", balance)}.")
-                Text("This amount will be deducted from your wallet.", fontWeight = FontWeight.Bold)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("You are about to start a $${String.format("%.2f", fee)} provider collection for this event.")
+                Text(
+                    "No app wallet balance is debited. Your application unlocks after the provider confirms payment.",
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         },
         confirmButton = {

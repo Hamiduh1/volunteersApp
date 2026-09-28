@@ -1,0 +1,5 @@
+<!-- Add these keys to your app target Info.plist -->
+<key>STRIPE_PUBLISHABLE_KEY</key>
+<string>$(STRIPE_PUBLISHABLE_KEY)</string>
+<key>stripe_publishable_key</key>
+<string>$(STRIPE_PUBLISHABLE_KEY)</string>

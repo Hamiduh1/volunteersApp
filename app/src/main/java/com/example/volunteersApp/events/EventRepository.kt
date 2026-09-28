@@ -5,11 +5,11 @@ import com.example.volunteersApp.models.EventModel
 import com.example.volunteersApp.models.Resource
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 /**
  * ARCHITECTURAL ROLE:
@@ -23,7 +23,7 @@ import kotlinx.coroutines.tasks.await
 class EventRepository {
 
     private val db = FirebaseFirestore.getInstance()
-    private val eventsCollection = db.collection("events")
+    private val eventsCollection = db.collection(FirestoreCollection.EVENTS)
     private val TAG = "EventRepository"
 
     /**
@@ -66,7 +66,6 @@ class EventRepository {
         trySend(Resource.Loading())
         val query = eventsCollection
             .whereEqualTo("organizerId", organizerId)
-            .orderBy("eventTimestamp", Query.Direction.DESCENDING)
 
         val listener = query.addSnapshotListener { snapshots, error ->
             if (error != null) {
@@ -76,7 +75,7 @@ class EventRepository {
 
             val list = snapshots?.documents?.mapNotNull { doc ->
                 doc.toObject(EventModel::class.java)?.copy(eventId = doc.id)
-            } ?: emptyList()
+            }?.sortedByDescending { it.eventDateTime?.toDate() } ?: emptyList()
 
             trySend(Resource.Success(list))
         }

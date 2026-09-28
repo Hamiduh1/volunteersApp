@@ -6,13 +6,19 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import com.example.volunteersApp.streams.LiveStreamActivity
+import com.example.volunteersApp.streams.LiveLaunchIntent
+import com.example.volunteersApp.streams.LiveLaunchTarget
+import com.example.volunteersApp.streams.LiveShareRouter
 import com.example.volunteersApp.ui.main.MainActivity
 import com.example.volunteersApp.ui.theme.VolunteersAppTheme
+import kotlinx.coroutines.launch
 
 /**
  * Modernized LoginActivity.
@@ -22,15 +28,25 @@ class LoginActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_EMAIL_VERIFIED_SUCCESS = "extra_email_verified_success"
+        private const val EXTRA_PENDING_STREAM_SESSION_ID = "extra_pending_stream_session_id"
+        private const val EXTRA_PENDING_LIVE_HOST_ID = "extra_pending_live_host_id"
+        private const val EXTRA_PENDING_LIVE_SHARE_TOKEN = "extra_pending_live_share_token"
     }
 
     private val viewModel: LoginViewModel by viewModels()
+    private var pendingStreamSessionId: String? = null
+    private var pendingLiveHostId: String? = null
+    private var pendingLiveShareToken: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        pendingStreamSessionId = savedInstanceState?.getString(EXTRA_PENDING_STREAM_SESSION_ID)
+        pendingLiveHostId = savedInstanceState?.getString(EXTRA_PENDING_LIVE_HOST_ID)
+        pendingLiveShareToken = savedInstanceState?.getString(EXTRA_PENDING_LIVE_SHARE_TOKEN)
+
         // Handle App Links (e.g. from stream invitations)
-        if (handleAppLink(intent)) return
+        handleAppLink(intent)
 
         if (intent.getBooleanExtra(SignUpActivity.EXTRA_SHOW_VERIFY_HINT, false)) {
             Toast.makeText(
@@ -55,28 +71,45 @@ class LoginActivity : ComponentActivity() {
 
         setContent {
             VolunteersAppTheme {
+                val uiState by viewModel.uiState.collectAsState()
                 var showLoginForm by rememberSaveable { mutableStateOf(openLoginFormImmediately) }
+                var hasNavigated by rememberSaveable { mutableStateOf(false) }
+                var hasOpenedVerification by rememberSaveable { mutableStateOf(false) }
+
+                LaunchedEffect(uiState.loginSuccess) {
+                    if (uiState.loginSuccess && !hasNavigated) {
+                        hasNavigated = true
+                        navigateAfterLogin()
+                    }
+                }
+                LaunchedEffect(uiState.emailVerificationRequired) {
+                    if (uiState.emailVerificationRequired && !hasOpenedVerification) {
+                        hasOpenedVerification = true
+                        startActivity(Intent(this@LoginActivity, EmailVerificationActivity::class.java))
+                    }
+                }
+
                 if (showLoginForm) {
                     LoginScreen(
                         viewModel = viewModel,
-                        onLoginSuccess = { userType ->
-                            navigateToDashboard(userType)
+                        onLoginSuccess = {
+                            if (!hasNavigated) {
+                                hasNavigated = true
+                                navigateAfterLogin()
+                            }
                         },
                         onForgotPassword = {
                             startActivity(Intent(this, ForgotPasswordActivity::class.java))
                         },
                         onSignUp = {
                             startActivity(Intent(this, SignUpActivity::class.java))
-                        },
-                        onVerifyEmail = {
-                            startActivity(Intent(this, EmailVerificationActivity::class.java))
                         }
                     )
                 } else {
                     AuthLaunchScreen(
                         onSignIn = { showLoginForm = true },
                         onCreateAccount = { startActivity(Intent(this, SignUpActivity::class.java)) },
-                        onVerifyEmail = { startActivity(Intent(this, EmailVerificationActivity::class.java)) },
+                        onVerifyEmail = { showLoginForm = true },
                         onForgotPassword = { startActivity(Intent(this, ForgotPasswordActivity::class.java)) }
                     )
                 }
@@ -89,40 +122,80 @@ class LoginActivity : ComponentActivity() {
         handleAppLink(intent)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingStreamSessionId?.let { outState.putString(EXTRA_PENDING_STREAM_SESSION_ID, it) }
+        pendingLiveHostId?.let { outState.putString(EXTRA_PENDING_LIVE_HOST_ID, it) }
+        pendingLiveShareToken?.let { outState.putString(EXTRA_PENDING_LIVE_SHARE_TOKEN, it) }
+    }
+
     /**
      * Checks if the app was launched via an Agora stream link.
      */
     private fun handleAppLink(intent: Intent): Boolean {
-        val action = intent.action
-        val data = intent.data
-        if (Intent.ACTION_VIEW == action && data != null) {
-            val path = data.path
-            if (path != null && path.startsWith("/stream/")) {
-                val sessionId = data.lastPathSegment
-                if (!sessionId.isNullOrEmpty()) {
-                    if (viewModel.isUserLoggedIn()) {
-                        redirectToStream(sessionId)
-                    } else {
-                        Toast.makeText(this, "Please log in to join the stream.", Toast.LENGTH_LONG).show()
-                    }
-                    return true
-                }
+        // Restore pending session id (e.g. process recreation)
+        pendingStreamSessionId = pendingStreamSessionId
+            ?: intent.getStringExtra(EXTRA_PENDING_STREAM_SESSION_ID)
+            ?: intent.getStringExtra(LiveLaunchIntent.EXTRA_LIVE_SESSION_ID)
+        pendingLiveHostId = pendingLiveHostId
+            ?: intent.getStringExtra(EXTRA_PENDING_LIVE_HOST_ID)
+            ?: intent.getStringExtra(LiveLaunchIntent.EXTRA_LIVE_HOST_ID)
+        pendingLiveShareToken = pendingLiveShareToken
+            ?: intent.getStringExtra(EXTRA_PENDING_LIVE_SHARE_TOKEN)
+            ?: intent.getStringExtra(LiveLaunchIntent.EXTRA_LIVE_SHARE_TOKEN)
+
+        val target = when {
+            Intent.ACTION_VIEW == intent.action && intent.data != null -> LiveLaunchIntent.parse(intent.data!!)
+            else -> LiveLaunchIntent.parse(intent)
+        }
+        if (target != null) {
+            if (viewModel.isUserLoggedIn()) {
+                redirectToStream(target)
+                finish()
+            } else {
+                pendingStreamSessionId = target.sessionId
+                pendingLiveHostId = target.hostId
+                pendingLiveShareToken = target.shareAccessToken
+                Toast.makeText(this, "Please log in to join the stream.", Toast.LENGTH_LONG).show()
             }
+            return true
         }
         return false
     }
 
-    private fun redirectToStream(sessionId: String) {
-        val intent = Intent(this, LiveStreamActivity::class.java).apply {
-            putExtra("CHANNEL_NAME", sessionId)
-            putExtra("IS_HOST", false)
+    private fun redirectToStream(target: LiveLaunchTarget) {
+        lifecycleScope.launch {
+            runCatching {
+                LiveShareRouter.launch(this@LoginActivity, target)
+            }.onFailure { error ->
+                Toast.makeText(
+                    this@LoginActivity,
+                    error.localizedMessage ?: "Could not open live stream.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         }
-        startActivity(intent)
     }
 
-    private fun navigateToDashboard(userType: String) {
+    private fun navigateAfterLogin() {
+        val pendingSessionId = pendingStreamSessionId ?: intent.getStringExtra(EXTRA_PENDING_STREAM_SESSION_ID)
+            ?: intent.getStringExtra(LiveLaunchIntent.EXTRA_LIVE_SESSION_ID)
+
+        if (!pendingSessionId.isNullOrBlank()) {
+            val target = LiveLaunchTarget(
+                sessionId = pendingSessionId,
+                hostId = pendingLiveHostId ?: intent.getStringExtra(LiveLaunchIntent.EXTRA_LIVE_HOST_ID),
+                shareAccessToken = pendingLiveShareToken ?: intent.getStringExtra(LiveLaunchIntent.EXTRA_LIVE_SHARE_TOKEN),
+            )
+            pendingStreamSessionId = null
+            pendingLiveHostId = null
+            pendingLiveShareToken = null
+            redirectToStream(target)
+            finish()
+            return
+        }
+
         val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("USER_TYPE", userType)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         startActivity(intent)

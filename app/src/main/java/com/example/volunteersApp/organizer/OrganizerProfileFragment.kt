@@ -1,6 +1,5 @@
 package com.example.volunteersApp.organizer
 
-import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -11,8 +10,6 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.viewModels
 import com.example.volunteersApp.VertexViewModel
-import com.example.volunteersApp.general.LoginActivity
-import com.example.volunteersApp.ui.main.MainActivity
 import com.example.volunteersApp.ui.theme.VolunteersAppTheme
 
 /**
@@ -44,27 +41,8 @@ class OrganizerProfileFragment : Fragment() {
                         viewModel = viewModel,
                         // Pass the shared VertexViewModel to the composable
                         vertexViewModel = vertexViewModel,
-                        // Triggers the Logout confirmation dialog defined in the Host Activity
                         onLogout = {
                             (activity as? OrganizerMainActivity)?.promptLogout()
-                        },
-                        // Handles the complex logic of restarting the app task stack when changing roles
-                        onNavigateToRole = { roleTechnicalName ->
-                            val intent = when (val role = roleTechnicalName.lowercase()) {
-                                "volunteer", "employer" -> Intent(activity, MainActivity::class.java).apply {
-                                    // Add extra to specify which NavGraph to start
-                                    putExtra("START_ROLE", role)
-                                }
-                                "organizer" -> Intent(activity, OrganizerMainActivity::class.java)
-                                else -> Intent(activity, LoginActivity::class.java)
-                            }
-
-                            // Clear the current task stack to ensure the new Activity starts as the root
-                            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                            startActivity(intent)
-
-                            // Close all activities associated with the old role
-                            activity?.finishAffinity()
                         }
                     )
                 }

@@ -2,12 +2,15 @@ package com.example.volunteersApp.ui.volunteers
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +26,7 @@ import com.example.volunteersApp.VertexViewModel
 import com.example.volunteersApp.models.ApplicationStatus
 import com.example.volunteersApp.models.EventApplication
 import com.example.volunteersApp.ui.shared.AiResponseDialog // Assuming you have a shared dialog
+import com.google.firebase.auth.FirebaseAuth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,6 +42,7 @@ fun ViewApplicantsScreen(
     val context = LocalContext.current
     var selectedTabIndex by remember { mutableStateOf(0) }
     val tabs = listOf("All", "Pending", "Approved", "Rejected")
+    val organizerEmail = remember { FirebaseAuth.getInstance().currentUser?.email.orEmpty() }
 
     // --- Vertex AI State ---
     val aiResponse by vertexViewModel.generatedResponse.collectAsState()
@@ -103,6 +108,59 @@ fun ViewApplicantsScreen(
                 }
             }
 
+            val currentBucketLabel = tabs.getOrElse(selectedTabIndex) { "All" }
+            val filteredEmails = remember(uiState.applicants) {
+                collectVolunteerEmails(uiState.applicants)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = {
+                        if (filteredEmails.isEmpty()) {
+                            Toast.makeText(context, "No volunteer emails available in this tab.", Toast.LENGTH_SHORT).show()
+                            return@FilledTonalButton
+                        }
+                        val launched = launchOrganizerEmailComposer(
+                            context = context,
+                            organizerEmail = organizerEmail,
+                            recipientEmails = filteredEmails,
+                            subject = defaultVolunteerEmailSubject(eventName, currentBucketLabel),
+                            body = defaultVolunteerEmailBody(eventName, currentBucketLabel)
+                        )
+                        if (!launched) {
+                            Toast.makeText(context, "No email app found.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Email, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Email ${currentBucketLabel} (${filteredEmails.size})")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val count = copyVolunteerEmailsToClipboard(context, filteredEmails)
+                        val message = if (count > 0) {
+                            "Copied $count volunteer email(s)."
+                        } else {
+                            "No volunteer emails to copy."
+                        }
+                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.wrapContentWidth()
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copy")
+                }
+            }
+
             Box(modifier = Modifier.fillMaxSize()) {
                 when {
                     uiState.isLoading -> {
@@ -145,17 +203,22 @@ fun ViewApplicantsScreen(
                                         )
                                     },
                                     onContact = {
-                                        // Ensure 'volunteerEmail' is a non-null field in your EventApplication
-                                        val email = applicant.volunteerEmail
-                                        if (email.isNotEmpty()) {
-                                            val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                                data = Uri.parse("mailto:$email")
-                                                putExtra(
-                                                    Intent.EXTRA_SUBJECT,
-                                                    "Regarding your application for ${applicant.eventName}"
-                                                )
-                                            }
-                                            context.startActivity(intent)
+                                        val email = applicant.volunteerEmail.trim()
+                                        if (email.isBlank()) {
+                                            Toast.makeText(context, "Volunteer email is missing.", Toast.LENGTH_SHORT).show()
+                                            return@ApplicantCard
+                                        }
+                                        val launched = launchOrganizerEmailComposer(
+                                            context = context,
+                                            organizerEmail = organizerEmail,
+                                            recipientEmails = listOf(email),
+                                            subject = "Regarding your application for ${applicant.eventName}",
+                                            body = "Hello ${applicant.volunteerName},\n\n"
+                                                + "I am contacting you about your application for ${applicant.eventName}.\n\n"
+                                                + "Best regards,\nOrganizer"
+                                        )
+                                        if (!launched) {
+                                            Toast.makeText(context, "No email app found.", Toast.LENGTH_SHORT).show()
                                         }
                                     },
                                     // Pass the generate lambda to the card

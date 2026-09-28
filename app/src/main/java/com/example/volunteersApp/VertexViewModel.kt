@@ -42,7 +42,7 @@ class VertexViewModel : ViewModel() {
         )
 
     private val generativeModel = Firebase.vertexAI.generativeModel(
-        modelName = "gemini-1.5-pro-latest",
+        modelName = "gemini-2.0-flash",
         generationConfig = generationConfig {
             temperature = 0.7f
         }

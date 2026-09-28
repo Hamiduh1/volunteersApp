@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.firestore
@@ -14,6 +15,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FirestoreSubcollection
 
 /**
  * ViewModel for the Volunteers list screen.
@@ -45,7 +48,7 @@ class VolunteersViewModel : ViewModel() {
             }
 
             try {
-                val result = db.collection("users")
+                val result = db.collection(FirestoreCollection.USERS)
                     .whereEqualTo("userType", "volunteer") // Ensure this matches your Firestore field
                     .orderBy("name", Query.Direction.ASCENDING)
                     .get()
@@ -80,14 +83,18 @@ class VolunteersViewModel : ViewModel() {
             val recipientId = recipient.uid
 
             val invitation = hashMapOf(
-                "status" to "pending",
+                "senderId" to inviterId,
+                "senderName" to (currentUser.displayName ?: "A Volunteer"),
                 "inviterName" to (currentUser.displayName ?: "A Volunteer"),
-                "timestamp" to System.currentTimeMillis()
+                "senderProfilePicUrl" to (currentUser.photoUrl?.toString() ?: ""),
+                "status" to "pending",
+                "timestamp" to FieldValue.serverTimestamp(),
+                "context" to "Volunteer Directory"
             )
 
             try {
-                db.collection("users").document(recipientId)
-                    .collection("chat_invitations").document(inviterId)
+                db.collection(FirestoreCollection.USERS).document(recipientId)
+                    .collection(FirestoreSubcollection.CHAT_INVITATIONS).document(inviterId)
                     .set(invitation, SetOptions.merge())
                     .await()
 

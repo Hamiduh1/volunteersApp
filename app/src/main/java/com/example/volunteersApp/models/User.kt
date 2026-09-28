@@ -16,6 +16,7 @@ data class User(
     val userRole: String? = null, 
     val fcmToken: String? = null,
     val wallet: Map<String, Any>? = null,
+    val profilePictureUrl: String? = null,
     val dateOfBirth: Date? = null
 ) {
     @get:Exclude

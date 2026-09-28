@@ -1,0 +1,13 @@
+<!-- Merge these keys into the iOS target's Info.plist for cross-platform calls. -->
+<key>AGORA_APP_ID</key>
+<string>$(AGORA_APP_ID)</string>
+<key>NSMicrophoneUsageDescription</key>
+<string>Volunteers App uses your microphone for voice and video calls.</string>
+<key>NSCameraUsageDescription</key>
+<string>Volunteers App uses your camera when you place or answer a video call.</string>
+<key>UIBackgroundModes</key>
+<array>
+    <string>audio</string>
+    <string>remote-notification</string>
+    <string>voip</string>
+</array>

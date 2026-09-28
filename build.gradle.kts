@@ -1,5 +1,6 @@
-// Top-level build file where you can add configuration options common to all sub-projects/modules.
+//import jdk.tools.jlink.resources.plugins
 
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 
 plugins {
@@ -13,9 +14,8 @@ plugins {
     alias(libs.plugins.androidx.navigation.safeargs.kotlin) apply false
 
 
-
     // This declares the Compose compiler plugin is available for sub-modules.
     // Your existing line for this is also fine, but using the alias is cleaner.
-   // alias(libs.plugins.kotlin.compose) apply false
+    // alias(libs.plugins.kotlin.compose) apply false
 
 }

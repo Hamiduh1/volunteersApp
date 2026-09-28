@@ -5,16 +5,24 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.Icon
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.volunteersApp.VertexViewModel
+import com.example.volunteersApp.ui.shared.AiResponseDialog
 
 /**
  * Modernized Employer Home Screen using Jetpack Compose.
@@ -28,14 +36,52 @@ fun EmployerHomeScreen(
     onViewJobs: () -> Unit,
     onViewApplications: () -> Unit,
     onManageProfile: () -> Unit,
-    onGoLive: () -> Unit
+    onGoLive: () -> Unit,
+    vertexViewModel: VertexViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val aiResponse by vertexViewModel.generatedResponse.collectAsState()
+    var showAiResponse by remember { mutableStateOf(false) }
+    var pendingAiQuery by remember { mutableStateOf(false) }
+
+    LaunchedEffect(aiResponse) {
+        if (pendingAiQuery && aiResponse != null) {
+            showAiResponse = true
+            pendingAiQuery = false
+        }
+    }
+
+    if (showAiResponse) {
+        AiResponseDialog(
+            generatedText = aiResponse.orEmpty(),
+            onDismiss = {
+                showAiResponse = false
+                vertexViewModel.clearResponse()
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Employer Hub", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            pendingAiQuery = true
+                            vertexViewModel.generate(
+                                buildString {
+                                    append("Create a short manager dashboard insight using the following:\n")
+                                    append("Jobs posted: ${uiState.jobCount}\n")
+                                    append("Applications: ${uiState.applicationCount}\n")
+                                    append("Create two practical recommendations for improving volunteer conversion.")
+                                }
+                            )
+                        }
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "AI Insights")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer

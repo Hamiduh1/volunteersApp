@@ -40,6 +40,7 @@ import com.example.volunteersApp.advertisement.AdvertisementViewModel
 import com.example.volunteersApp.alerts.CommunityAlertsScreen
 import com.example.volunteersApp.alerts.CommunityAlertsViewModel
 import com.example.volunteersApp.chat.ChatInboxScreen
+import com.example.volunteersApp.chat.CallSessionViewModel
 import com.example.volunteersApp.chat.ChatScreen
 import com.example.volunteersApp.chat.UserDirectoryScreen
 import com.example.volunteersApp.date.DateEvaScreen
@@ -58,10 +59,16 @@ import com.example.volunteersApp.streams.LiveStreamViewModel
 import com.example.volunteersApp.streams.LiveStreamsScreen
 import com.example.volunteersApp.streams.LiveStreamsViewModel
 import com.example.volunteersApp.streams.StartStreamActivity
+import com.example.volunteersApp.ui.main.RequireWalletUnlocked
 import com.example.volunteersApp.ui.main.CommunityHubScreen
 import com.example.volunteersApp.ui.main.DateEvaViewModelFactory
+import com.example.volunteersApp.ui.main.ForegroundIncomingCallFallbackEffect
+import com.example.volunteersApp.ui.main.MainViewModel
 import com.example.volunteersApp.ui.main.MirroredNavigationCatalog
+import com.example.volunteersApp.ui.main.SocialInboxNav
+import com.example.volunteersApp.ui.main.SocialInboxPendingNavigationEffect
 import com.example.volunteersApp.ui.main.UserUiState
+import com.example.volunteersApp.ui.main.addMirroredLoopDestinations
 import com.example.volunteersApp.ui.profile.AccountSettingsActivity
 import com.example.volunteersApp.ui.profile.AiAssistantScreen
 import com.example.volunteersApp.ui.profile.AmlCftGuideScreen
@@ -77,7 +84,10 @@ import com.example.volunteersApp.ui.profile.TermsConditionsScreen
 import com.example.volunteersApp.ui.profile.TermsViewModel
 import com.example.volunteersApp.ui.shared.AiTopBarSearchAction
 import com.example.volunteersApp.ui.volunteers.*
+import com.example.volunteersApp.wallet.WalletProductReleasePolicy
+import com.example.volunteersApp.wallet.AdminOperationsDashboardScreen
 import com.example.volunteersApp.wallet.AdminPayoutQueueScreen
+import com.example.volunteersApp.wallet.AdminQueueMode
 import com.example.volunteersApp.wallet.OwnerFeeSettingsScreen
 import com.example.volunteersApp.wallet.OwnerKycReviewScreen
 import com.example.volunteersApp.wallet.OwnerDashboardScreen
@@ -86,25 +96,38 @@ import com.example.volunteersApp.wallet.OwnerUserReportsScreen
 import com.example.volunteersApp.wallet.PaymentMethodsScreen
 import com.example.volunteersApp.wallet.PaymentsViewModel
 import com.example.volunteersApp.wallet.SupportConsoleScreen
-import com.example.volunteersApp.wallet.TransactionHistoryScreen
-import com.example.volunteersApp.wallet.WalletViewModel
+import com.example.volunteersApp.wallet.TransactScreen
+import com.example.volunteersApp.wallet.WalletScreen
+import com.example.volunteersApp.wallet.TransactionHistoryScreen as GlobalTransactionHistoryScreen
 import com.example.volunteersApp.VertexViewModel
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrganizerMainScreen(
     vertexViewModel: VertexViewModel = viewModel(),
-    uiState: UserUiState, onSignOut: () -> Unit
+    uiState: UserUiState,
+    onSignOut: () -> Unit,
+    activityMainViewModel: MainViewModel? = null,
 ) {
     val navController = rememberNavController()
+    activityMainViewModel?.let { vm ->
+        SocialInboxPendingNavigationEffect(navController, vm)
+    }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val callSessionViewModel: CallSessionViewModel = viewModel()
     val context = LocalContext.current
+    val normalizedRole = uiState.role.orEmpty().trim().lowercase(Locale.ROOT)
     val organizerViewModel: OrganizerDashboardViewModel = viewModel()
     val organizerUiState by organizerViewModel.uiState.collectAsState()
+    ForegroundIncomingCallFallbackEffect(
+        currentRoute = currentRoute,
+        callSessionViewModel = callSessionViewModel
+    )
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -145,10 +168,12 @@ fun OrganizerMainScreen(
                     "summary",
                     "owner_dashboard",
                     "organizer_wallet",
+                    "global_wallet",
                     "payments",
                     "live",
                     "community_hub",
-                    "my_chats",
+                    SocialInboxNav.GRAPH_ROUTE,
+                    SocialInboxNav.INBOX_ROUTE,
                     "browse_users",
                     "marketplace",
                     "jokes",
@@ -192,6 +217,7 @@ fun OrganizerMainScreen(
                     "organizer_wallet",
                     "payments",
                     "withdraw_screen",
+                    "withdraw_screen_app_user",
                     "transaction_history"
                 ).contains(currentRoute)
                 if (showBottomBar) {
@@ -258,14 +284,6 @@ fun OrganizerMainScreen(
                     OrganizerProfileScreen(
                         viewModel = viewModel(),
                         onLogout = onSignOut,
-                        onNavigateToRole = {},
-                        vertexViewModel = vertexViewModel
-                    )
-                }
-
-                composable("ai_assistant") {
-                    AiAssistantScreen(
-                        onBack = { navController.popBackStack() },
                         vertexViewModel = vertexViewModel
                     )
                 }
@@ -278,11 +296,54 @@ fun OrganizerMainScreen(
                     )
                 }
 
+                composable("global_wallet") {
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        WalletScreen(
+                            onBack = { navController.popBackStack() },
+                            onNavigateToTransact = { navController.navigate("global_wallet_transact") },
+                            onNavigateToHistory = { navController.navigate("global_wallet_history") },
+                            onNavigateToPayments = { navController.navigate("global_wallet_payments") }
+                        )
+                    }
+                }
+
+                composable("global_wallet_transact") {
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        TransactScreen(
+                            onBack = { navController.popBackStack() },
+                            onNavigateToPayments = { navController.navigate("global_wallet_payments") },
+                            onNavigateToUserDirectory = { navController.navigate("browse_users") },
+                            onNavigateToMarketplace = { navController.navigate("marketplace") },
+                            onNavigateToTransactionHistory = { navController.navigate("global_wallet_history") }
+                        )
+                    }
+                }
+
+                composable("global_wallet_history") {
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        GlobalTransactionHistoryScreen(
+                            viewModel = viewModel(),
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                }
+
+                composable("global_wallet_payments") {
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        PaymentMethodsScreen(
+                            viewModel = viewModel<PaymentsViewModel>(),
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                }
+
                 composable("payments") {
-                    PaymentMethodsScreen(
-                        viewModel = viewModel<PaymentsViewModel>(),
-                        onBack = { navController.popBackStack() }
-                    )
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        PaymentMethodsScreen(
+                            viewModel = viewModel<PaymentsViewModel>(),
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
                 }
 
                 composable("live") {
@@ -290,7 +351,7 @@ fun OrganizerMainScreen(
                         viewModel = viewModel<LiveStreamsViewModel>(),
                         onBack = { navController.popBackStack() },
                         onStreamClick = { session ->
-                            navController.navigate("live_stream/${session.agoraChannelName}")
+                            navController.navigate("live_stream/${session.sessionId}")
                         }
                     )
                 }
@@ -310,116 +371,13 @@ fun OrganizerMainScreen(
                     }
                 }
 
-                composable("community_hub") {
-                    CommunityHubScreen { route -> navController.navigate(route) }
-                }
-
-                composable("my_chats") {
-                    ChatInboxScreen(navController = navController)
-                }
-
-                composable("browse_users") {
-                    UserDirectoryScreen(viewModel())
-                }
-
-                composable(
-                    "chat/{chatId}/{otherUserId}",
-                    arguments = listOf(
-                        navArgument("chatId") { type = NavType.StringType },
-                        navArgument("otherUserId") { type = NavType.StringType }
-                    )
-                ) { backStackEntry ->
-                    val chatId = backStackEntry.arguments?.getString("chatId") ?: return@composable
-                    val otherUserId = backStackEntry.arguments?.getString("otherUserId") ?: return@composable
-                    ChatScreen(
-                        chatId = chatId,
-                        otherUserId = otherUserId,
-                        onNavigateUp = { navController.popBackStack() }
-                    )
-                }
-
-                composable("marketplace") {
-                    MarketplaceScreen(
-                        viewModel = viewModel(),
-                        navController = navController,
-                        vertexViewModel = vertexViewModel
-                    )
-                }
-
-                composable("jokes") {
-                    JokesFeatureScreen()
-                }
-
-                composable("ads") {
-                    AdvertisementFeatureScreen(viewModel<AdvertisementViewModel>())
-                }
-
-                composable("date_eva") {
-                    val walletViewModel: WalletViewModel = viewModel()
-                    DateEvaScreen(
-                        viewModel = viewModel<DateEvaViewModel>(
-                            factory = DateEvaViewModelFactory(walletViewModel)
-                        ),
-                        vertexViewModel = vertexViewModel
-                    )
-                }
-
-                composable("notification_settings") {
-                    NotificationSettingsScreen(navController, viewModel<NotificationSettingsViewModel>())
-                }
-
-                composable("community_alerts") {
-                    CommunityAlertsScreen(
-                        viewModel = viewModel<CommunityAlertsViewModel>(),
-                        onAddAlertClick = {
-                            navController.navigate("support")
-                        }
-                    )
-                }
-
-                composable("support") {
-                    SupportScreen(
-                        onNavigateUp = { navController.popBackStack() },
-                        viewModel = viewModel<SupportViewModel>(),
-                        onOpenAmlCft = { navController.navigate("aml_cft") },
-                        onOpenLiveChat = { navController.navigate("my_chats") }
-                    )
-                }
-
-                composable("aml_cft") {
-                    AmlCftGuideScreen()
-                }
-
-                composable("privacy_settings") {
-                    PrivacySecurityScreen(
-                        onBack = { navController.popBackStack() },
-                        onOpenPrivacyPolicy = { navController.navigate("privacy_policy") },
-                        onOpenSecurityCenter = {
-                            context.startActivity(Intent(context, AccountSettingsActivity::class.java))
-                        }
-                    )
-                }
-
-                composable("privacy_policy") {
-                    PrivacyPolicyScreen(
-                        onNavigateUp = { navController.popBackStack() },
-                        viewModel = viewModel<PrivacyPolicyViewModel>()
-                    )
-                }
-
-                composable("terms_conditions") {
-                    TermsConditionsScreen(
-                        onNavigateUp = { navController.popBackStack() },
-                        viewModel = viewModel<TermsViewModel>()
-                    )
-                }
-
-                composable("how_to_use") {
-                    HowToUseScreen(
-                        onNavigateUp = { navController.popBackStack() },
-                        viewModel = viewModel<HowToUseViewModel>()
-                    )
-                }
+                addMirroredLoopDestinations(
+                    navController = navController,
+                    context = context,
+                    vertexViewModel = vertexViewModel,
+                    sharedCallSessionViewModel = callSessionViewModel,
+                    mainViewModel = activityMainViewModel,
+                )
 
                 composable("create_event") {
                     CreateEventScreen(
@@ -450,40 +408,81 @@ fun OrganizerMainScreen(
 
                 composable("withdraw_screen") {
                     WithdrawScreen(
-                        viewModel = viewModel(),
                         onBack = { navController.popBackStack() },
-                        vertexViewModel = vertexViewModel
+                        onOpenBusinessPayouts = {
+                            navController.navigate("payments") {
+                                popUpTo("organizer_wallet") { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        }
+                    )
+                }
+
+                composable("withdraw_screen_app_user") {
+                    WithdrawScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenBusinessPayouts = {
+                            navController.navigate("payments") {
+                                popUpTo("organizer_wallet") { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        }
                     )
                 }
 
                 composable("transaction_history") {
-                    TransactionHistoryScreen(
-                        viewModel = viewModel(),
-                        onBack = { navController.popBackStack() },
-                        vertexViewModel = vertexViewModel
-                    )
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        GlobalTransactionHistoryScreen(
+                            viewModel = viewModel(),
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
                 }
 
                 composable("owner_dashboard") {
-                    if (uiState.role == "owner") {
-                        OwnerDashboardScreen(
-                            onBack = { navController.popBackStack() },
-                            onOpenPayouts = { navController.navigate("admin_payouts") },
-                            onOpenSupportConsole = { navController.navigate("support_console") },
-                            onOpenDisputes = { navController.navigate("owner_disputes") },
-                            onOpenUserReports = { navController.navigate("owner_user_reports") },
-                            onOpenKycReview = { navController.navigate("owner_kyc_review") },
-                            onOpenFeeSettings = { navController.navigate("owner_fee_settings") },
-                            onOpenSystemConfig = { navController.navigate("owner_system_config") }
-                        )
-                    } else {
-                        OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
+                    when (normalizedRole) {
+                        "owner" -> {
+                            OwnerDashboardScreen(
+                                onBack = { navController.popBackStack() },
+                                onOpenPayouts = { navController.navigate("admin_payouts") },
+                                onOpenDeposits = { navController.navigate("admin_deposits") },
+                                onOpenSupportConsole = { navController.navigate("support_console") },
+                                onOpenDisputes = { navController.navigate("owner_disputes") },
+                                onOpenUserReports = { navController.navigate("owner_user_reports") },
+                                onOpenKycReview = { navController.navigate("owner_kyc_review") },
+                                onOpenFeeSettings = { navController.navigate("owner_fee_settings") },
+                                onOpenSystemConfig = { navController.navigate("owner_system_config") }
+                            )
+                        }
+                        "admin" -> {
+                            AdminOperationsDashboardScreen(
+                                onBack = { navController.popBackStack() },
+                                onOpenPayouts = { navController.navigate("admin_payouts") },
+                                onOpenDeposits = { navController.navigate("admin_deposits") },
+                                onOpenSupportConsole = { navController.navigate("support_console") },
+                                onOpenDisputes = { navController.navigate("owner_disputes") },
+                                onOpenUserReports = { navController.navigate("owner_user_reports") },
+                                onOpenKycReview = { navController.navigate("owner_kyc_review") },
+                                onOpenStaff = { navController.navigate("support_console") }
+                            )
+                        }
+                        else -> OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
                 }
 
                 composable("admin_payouts") {
-                    if (uiState.role == "owner" || uiState.role == "admin") {
+                    if (normalizedRole == "owner" || normalizedRole == "admin") {
                         AdminPayoutQueueScreen(onBack = { navController.popBackStack() })
+                    } else {
+                        OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
+                    }
+                }
+                composable("admin_deposits") {
+                    if (normalizedRole == "owner" || normalizedRole == "admin") {
+                        AdminPayoutQueueScreen(
+                            mode = AdminQueueMode.DEPOSITS,
+                            onBack = { navController.popBackStack() }
+                        )
                     } else {
                         OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
@@ -506,35 +505,38 @@ fun OrganizerMainScreen(
                     }
                 }
                 composable("owner_disputes") {
-                    if (uiState.role == "owner" || uiState.role == "admin") {
-                        AdminPayoutQueueScreen(onBack = { navController.popBackStack() })
+                    if (normalizedRole == "owner" || normalizedRole == "admin") {
+                        AdminPayoutQueueScreen(
+                            mode = com.example.volunteersApp.wallet.AdminQueueMode.DISPUTES,
+                            onBack = { navController.popBackStack() }
+                        )
                     } else {
                         OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
                 }
                 composable("owner_user_reports") {
-                    if (uiState.role == "owner" || uiState.role == "admin") {
+                    if (normalizedRole == "owner" || normalizedRole == "admin") {
                         OwnerUserReportsScreen(onBack = { navController.popBackStack() })
                     } else {
                         OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
                 }
                 composable("owner_kyc_review") {
-                    if (uiState.role == "owner" || uiState.role == "admin") {
+                    if (normalizedRole == "owner" || normalizedRole == "admin") {
                         OwnerKycReviewScreen(onBack = { navController.popBackStack() })
                     } else {
                         OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
                 }
                 composable("owner_fee_settings") {
-                    if (uiState.role == "owner") {
+                    if (normalizedRole == "owner") {
                         OwnerFeeSettingsScreen(onBack = { navController.popBackStack() })
                     } else {
                         OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
                     }
                 }
                 composable("owner_system_config") {
-                    if (uiState.role == "owner") {
+                    if (normalizedRole == "owner") {
                         OwnerSystemConfigScreen(onBack = { navController.popBackStack() })
                     } else {
                         OrganizerAccessDeniedScreen(onBack = { navController.popBackStack() })
@@ -617,6 +619,7 @@ private fun ModernNavigationDrawer(
     onNavigate: (String) -> Unit,
     onLogoutClick: () -> Unit
 ) {
+    val normalizedRole = uiState.role.orEmpty().trim().lowercase(Locale.ROOT)
     val profileScaleAnim by animateFloatAsState(
         targetValue = 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
@@ -629,11 +632,14 @@ private fun ModernNavigationDrawer(
         add(Triple("requests", "Applications", Icons.Default.Groups))
         add(Triple("summary", "Event Summary", Icons.Default.Dashboard))
         add(Triple("org_profile", "Organizer Profile", Icons.Default.AccountCircle))
-        add(Triple("organizer_wallet", "Wallet", Icons.Default.AccountBalanceWallet))
+        add(Triple("organizer_wallet", "Organizer Wallet", Icons.Default.AccountBalanceWallet))
+        add(Triple("global_wallet", WalletProductReleasePolicy.hubTitle, Icons.Default.AccountBalanceWallet))
         add(Triple("payments", "Payment Methods", Icons.Default.Dashboard))
         add(Triple("live", "Live", Icons.Default.Videocam))
-        if (uiState.role == "owner" || uiState.role == "admin") {
-            add(Triple("owner_dashboard", "Admin Dashboard", Icons.Default.AdminPanelSettings))
+        if (normalizedRole == "owner") {
+            add(Triple("owner_dashboard", "Owner Command Center", Icons.Default.AdminPanelSettings))
+        } else if (normalizedRole == "admin") {
+            add(Triple("owner_dashboard", "Admin Operations", Icons.Default.AdminPanelSettings))
         }
     }
     val communityItems = MirroredNavigationCatalog.communityItems.map { item ->
@@ -742,7 +748,7 @@ private fun ModernNavigationDrawer(
             drawerSection("Support", supportItems, currentRoute, onNavigate)
 
             item {
-                val role = uiState.role.orEmpty().trim().lowercase()
+                val role = normalizedRole
                 if (role == "owner" || role == "admin" || role == "associate" || role == "support" || role == "support_associate") {
                     NavigationDrawerItem(
                         label = { Text("Support Console", fontWeight = FontWeight.SemiBold) },
@@ -825,7 +831,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.drawerSection(
             NavigationDrawerItem(
                 label = { Text(label, fontWeight = FontWeight.SemiBold) },
                 icon = { Icon(icon, null) },
-                selected = currentRoute == route,
+                selected = SocialInboxNav.matchesNavSelection(route, currentRoute),
                 onClick = { onNavigate(route) },
                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
                 shape = RoundedCornerShape(12.dp)
@@ -869,7 +875,7 @@ private fun ModernNavigationBar(currentRoute: String?, onNavigate: (String) -> U
                 )
                 "organizer_wallet" -> isOrganizerRouteInFamily(
                     currentRoute,
-                    exact = setOf("organizer_wallet", "payments", "withdraw_screen", "transaction_history")
+                    exact = setOf("organizer_wallet", "payments", "withdraw_screen", "withdraw_screen_app_user", "transaction_history")
                 )
                 "summary" -> isOrganizerRouteInFamily(currentRoute, exact = setOf("summary"))
                 else -> false
@@ -907,8 +913,9 @@ private fun getOrganizerTitle(currentRoute: String?): String {
         "hosted_events" -> "My Events"
         "requests" -> "Volunteer Applications"
         "summary" -> "Activity Summary"
-        "owner_dashboard" -> "Admin Dashboard"
+        "owner_dashboard" -> "Owner Command Center"
         "admin_payouts" -> "Payout Queue"
+        "admin_deposits" -> "Mobile Money Collection Audit"
         "support_console" -> "Support Console"
         "owner_disputes" -> "Disputes"
         "owner_user_reports" -> "User Reports"
@@ -916,11 +923,15 @@ private fun getOrganizerTitle(currentRoute: String?): String {
         "owner_fee_settings" -> "Fee Settings"
         "owner_system_config" -> "System Config"
         "org_profile" -> "My Profile"
-        "organizer_wallet" -> "My Wallet"
+        "organizer_wallet" -> "Organizer Wallet"
+        "global_wallet" -> WalletProductReleasePolicy.hubTitle
+        "global_wallet_transact" -> "Send Money"
+        "global_wallet_history" -> "${WalletProductReleasePolicy.hubTitle} History"
+        "global_wallet_payments" -> "Payment Methods"
         "payments" -> "Payment Methods"
         "live" -> "Live Streams"
         "privacy_settings" -> "Security & Privacy"
-        "withdraw_screen" -> "Withdraw / Refund"
+        "withdraw_screen", "withdraw_screen_app_user" -> "Payout setup"
         "transaction_history" -> "Transaction History"
         "ai_assistant" -> "AI Assistant"
         "create_event" -> "Create New Event"

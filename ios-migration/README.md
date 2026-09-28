@@ -25,6 +25,15 @@ This folder starts iOS migration without changing your current Android structure
   Canonical backend contract to follow in iOS.
 - `ios-migration/PHASED_ROLLOUT.md`:
   Execution order, effort, and acceptance criteria.
+- `ios-migration/ANDROID_SOCIAL_INBOX_PARITY.md` / `ANDROID_LIVE_STREAM_PARITY.md`:
+  Feature parity notes for Android ↔ iOS.
+- `ios-migration/ANDROID_AFRIEX_LIVE_MODE_PARITY.md`:
+  Afriex live/sandbox parity rules (callable-only apps).
+- `ios-migration/AFRIEX_TEMPORARY_TRANSACTION_ONLY_ROLLOUT.md`:
+  Transaction-only Transfers hub rollout while Afriex UAT completes.
+- `ios-migration/afriex/`:
+  Afriex Business API Partner Integration **UAT workbook** (prerequisites, SET/PAY/WH cases, sign-off) + Android wallet workflow map + **supported currencies / deposit & payout rails** ([`05_SUPPORTED_CURRENCIES_AND_RAILS.md`](./afriex/05_SUPPORTED_CURRENCIES_AND_RAILS.md) — local bank + SWIFT 100 countries per [Afriex docs](https://docs.afriex.com/guides/supported-currencies)).
+  The shared [runtime configuration and key-hygiene reference](./afriex/10_RUNTIME_CONFIGURATION_AND_KEY_HYGIENE.md) keeps all provider credentials in Cloud Functions, never in Android or iOS source.
 - `ios-migration/starter/FirebaseContract.swift`:
   Compile-ready enums/path helpers for collections/functions.
 - `ios-migration/starter/CoreModels.swift`:

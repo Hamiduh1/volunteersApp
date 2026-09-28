@@ -1,20 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.example.volunteersApp">
-
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- ===================================================================================== -->
     <!-- PERMISSIONS: Grouped for clarity                                                      -->
     <!-- ===================================================================================== -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- Camera and Storage Permissions -->
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.ar"
+        android:required="false" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -31,6 +42,7 @@
     <application
         android:name=".VolunteersApplication"
         android:allowBackup="true"
+        android:largeHeap="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -40,14 +52,37 @@
         android:theme="@style/Theme.VolunteersApp"
         android:networkSecurityConfig="@xml/network_security_config"
         android:enableOnBackInvokedCallback="true"
-        tools:targetApi="31">
+        tools:targetApi="tiramisu">
 
-        <!-- ===================================================================================== -->
-        <!-- META-DATA                                                                             -->
+        <service
+            android:name=".notifications.VolunteersFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".notifications.IncomingCallRingtoneService"
+            android:exported="false"
+            android:foregroundServiceType="phoneCall" />
+
+        <service
+            android:name=".notifications.ActiveCallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera" />
+
+        <receiver
+            android:name=".notifications.IncomingCallActionReceiver"
+            android:exported="false" />
+
         <!-- ===================================================================================== -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="${MAPS_API_KEY}" />
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
 
         <!-- ===================================================================================== -->
         <!-- CORE & MAIN ACTIVITIES                                                                -->
@@ -69,11 +104,16 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <!-- Your domain -->
                 <data android:scheme="https" />
-                <data android:host="lvcaapp.com" />
+                <data android:host="softsolutionstech.com" />
                 <!-- The path pattern for your live streams -->
                 <data android:pathPattern="/stream/.*" />
-
-
+                <data android:pathPrefix="/live" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="volunteersapp" android:host="live" />
             </intent-filter>
             <!-- =============================================================== -->
 
@@ -81,13 +121,15 @@
 
         <activity
             android:name=".ui.main.MainActivity"
-            android:windowSoftInputMode="adjustResize"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustPan"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.VolunteersApp" />
 
         <activity
             android:name=".organizer.OrganizerMainActivity"
+            android:launchMode="singleTop"
             android:label="Organizer Dashboard"
             android:exported="false" />
 
@@ -99,15 +141,43 @@
             android:name=".general.SignUpActivity"
             android:exported="false" />
         <activity
+            android:name=".general.EmailVerificationActivity"
+            android:exported="false" />
+        <activity
             android:name=".general.ForgotPasswordActivity"
             android:exported="false" />
+        <activity
+            android:name=".general.ResetPasswordActivity"
+            android:exported="true">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="volunteersapp-968b2.firebaseapp.com"
+                    android:pathPrefix="/__/auth/action" />
+                <data
+                    android:scheme="https"
+                    android:host="volunteersapp-968b2.web.app"
+                    android:pathPrefix="/__/auth/action" />
+                <!-- Email uses /__/auth/links when handleCodeInApp is true; match it so the app can unwrap oobCode. -->
+                <data
+                    android:scheme="https"
+                    android:host="volunteersapp-968b2.firebaseapp.com"
+                    android:pathPrefix="/__/auth/links" />
+                <data
+                    android:scheme="https"
+                    android:host="volunteersapp-968b2.web.app"
+                    android:pathPrefix="/__/auth/links" />
+            </intent-filter>
+        </activity>
 
 
         <!-- ===================================================================================== -->
         <!-- SETTINGS-RELATED ACTIVITIES (These are launched from the SettingsFragment)            -->
         <!-- ===================================================================================== -->
         <activity android:name=".ui.profile.AccountSettingsActivity" android:label="Account" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
-        <activity android:name=".ui.profile.ProfileSupportActivity" android:label="Support" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
         <activity android:name=".general.PrivacySecurityActivity" android:label="Privacy &amp; Security" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
         <activity android:name=".ui.profile.HowToUseActivity" android:label="How to Use" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
         <activity android:name=".ui.profile.TermsConditionsActivity" android:label="Terms and Conditions" android:parentActivityName=".ui.main.MainActivity" android:exported="false"/>
@@ -149,13 +219,28 @@
 
         <activity
             android:name=".wallet.PaymentsActivity"
-            android:exported="false"
-            android:screenOrientation="fullSensor" />
+            android:exported="true"
+            android:screenOrientation="fullSensor">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="volunteersapp"
+                    android:host="payments"
+                    android:pathPrefix="/stripe-connect" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".wallet.TransactActivity"
             android:exported="false"
             android:label="Transfer" />
+
+        <activity
+            android:name=".chat.UserDirectoryActivity"
+            android:exported="false"
+            android:label="@string/feature_browse_users_title" />
 
 
         <!-- ===================================================================================== -->
@@ -182,12 +267,30 @@
             android:screenOrientation="portrait"
             android:configChanges="orientation|keyboardHidden|screenSize"/>
 
+        <activity
+            android:name=".streams.LiveArchivePlayerActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|keyboardHidden|screenSize"/>
+
         <!-- Chat Activity Registration -->
         <activity
             android:name=".chat.ChatActivity"
             android:label="Chat"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".chat.CallActivity"
+            android:label="Call"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTask"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
+            android:screenOrientation="fullSensor" />
 
     </application>
 

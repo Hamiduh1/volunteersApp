@@ -1,0 +1,291 @@
+{
+  "source": "Afriex production account confirmation",
+  "syncedAt": "2026-09-03",
+  "notes": [
+    "The fixed provider fees below apply to Schedule 1 local BANK_ACCOUNT payouts and the 18 priced MOBILE_MONEY payout corridors.",
+    "Afriex documents 19 mobile-money payout countries. Ethiopia supports Telebirr and M-Pesa, but its provider commercial was not supplied and must be configured before production quoting.",
+    "Mobile Money payout and collection availability is account- and corridor-specific. Collection fees are not supplied by this Schedule 1 catalog.",
+    "USD SWIFT payout provider fee is 0.25% of the transfer. FX is quoted in real time, settlement is typically 3-5 working days, and intermediary banks can affect the final received amount."
+  ],
+  "productionTerms": {
+    "localBankPayout": {
+      "enabledCountryIso2": [
+        "NG",
+        "GH",
+        "KE",
+        "ZA",
+        "EG"
+      ],
+      "limitUsdEquivalent": {
+        "perTransaction": 2000,
+        "perUtcDay": 5000
+      }
+    },
+    "mobileMoney": {
+      "payoutAndCollectionAvailability": "Requires an explicit production account allowlist.",
+      "payoutLimitUsdEquivalent": {
+        "perTransaction": 2000,
+        "perUtcDay": 5000
+      },
+      "providerFeeSource": "Schedule 1 for 18 priced payout corridors; Ethiopia requires a separately agreed provider-fee configuration.",
+      "providerDocumentedPayoutCountryIso2": [
+        "GH",
+        "KE",
+        "RW",
+        "CM",
+        "CI",
+        "SN",
+        "GM",
+        "GN",
+        "MG",
+        "MW",
+        "MZ",
+        "SL",
+        "TZ",
+        "UG",
+        "ZM",
+        "BW",
+        "BJ",
+        "CG",
+        "ET"
+      ],
+      "schedule1PricedPayoutCountryIso2": [
+        "GH",
+        "KE",
+        "RW",
+        "CM",
+        "CI",
+        "SN",
+        "GM",
+        "GN",
+        "MG",
+        "MW",
+        "MZ",
+        "SL",
+        "TZ",
+        "UG",
+        "ZM",
+        "BW",
+        "BJ",
+        "CG"
+      ],
+      "unpricedPayoutCountryIso2": [
+        "ET"
+      ]
+    },
+    "swiftUsd": {
+      "providerFeeRate": 0.0025,
+      "fx": "real-time quote",
+      "settlement": "3-5 working days",
+      "intermediaryBanksMayAffectReceivedAmount": true
+    },
+    "businessBalanceFunding": {
+      "supportedFundingCurrencies": [
+        "USD",
+        "GBP",
+        "EUR"
+      ],
+      "cardProcessorRequirement": "Third-party payment support is required for card-processor settlement."
+    },
+    "endCustomerOnboarding": "Standard customer-onboarding information is required; KYC is not generally mandatory."
+  },
+  "quoteRule": "transferFee = providerFeeUsd + ownerFeeUsd; totalDebit = amount + transferFee; SWIFT providerFeeUsd = transfer amount * 0.0025",
+  "defaultTransferOwnerFeeUsd": 0,
+  "bankPayout": [
+    {
+      "iso2": "NG",
+      "country": "Nigeria",
+      "providerFeeUsd": 0.2,
+      "ownerFeeUsd": 0,
+      "networks": "Bank Account",
+      "active": true
+    },
+    {
+      "iso2": "GH",
+      "country": "Ghana",
+      "providerFeeUsd": 1.4,
+      "ownerFeeUsd": 0,
+      "networks": "Bank Account",
+      "active": true
+    },
+    {
+      "iso2": "KE",
+      "country": "Kenya",
+      "providerFeeUsd": 0.25,
+      "ownerFeeUsd": 0,
+      "networks": "Bank Account",
+      "active": true
+    },
+    {
+      "iso2": "ZA",
+      "country": "South Africa",
+      "providerFeeUsd": 1.2,
+      "ownerFeeUsd": 0,
+      "networks": "Bank Account",
+      "active": true
+    },
+    {
+      "iso2": "EG",
+      "country": "Egypt",
+      "providerFeeUsd": 1.6,
+      "ownerFeeUsd": 0,
+      "networks": "Bank Account",
+      "active": true
+    }
+  ],
+  "mobileMoneyPayout": [
+    {
+      "iso2": "GH",
+      "country": "Ghana",
+      "providerFeeUsd": 0.7,
+      "ownerFeeUsd": 0,
+      "networks": "Airtel, MTN",
+      "active": true
+    },
+    {
+      "iso2": "KE",
+      "country": "Kenya",
+      "providerFeeUsd": 0.75,
+      "ownerFeeUsd": 0,
+      "networks": "M-Pesa, Airtel",
+      "active": true
+    },
+    {
+      "iso2": "RW",
+      "country": "Rwanda",
+      "providerFeeUsd": 0.15,
+      "ownerFeeUsd": 0,
+      "networks": "Airtel, MTN",
+      "active": true
+    },
+    {
+      "iso2": "CM",
+      "country": "Cameroon",
+      "providerFeeUsd": 1.63,
+      "ownerFeeUsd": 0,
+      "networks": "MTN, Orange",
+      "active": true
+    },
+    {
+      "iso2": "CI",
+      "country": "Cote d'Ivoire",
+      "providerFeeUsd": 1.2,
+      "ownerFeeUsd": 0,
+      "networks": "MTN, Orange, MOOV, Wave",
+      "active": true
+    },
+    {
+      "iso2": "SN",
+      "country": "Senegal",
+      "providerFeeUsd": 1.2,
+      "ownerFeeUsd": 0,
+      "networks": "Orange, Wave, FreeMoney",
+      "active": true
+    },
+    {
+      "iso2": "GM",
+      "country": "Gambia",
+      "providerFeeUsd": 1.2,
+      "ownerFeeUsd": 0,
+      "networks": "Africell",
+      "active": true
+    },
+    {
+      "iso2": "GN",
+      "country": "Guinea (Conakry)",
+      "providerFeeUsd": 1.8,
+      "ownerFeeUsd": 0,
+      "networks": "Orange, MTN",
+      "active": true
+    },
+    {
+      "iso2": "MG",
+      "country": "Madagascar",
+      "providerFeeUsd": 1.95,
+      "ownerFeeUsd": 0,
+      "networks": "MVOLA, Airtel, Orange",
+      "active": true
+    },
+    {
+      "iso2": "MW",
+      "country": "Malawi",
+      "providerFeeUsd": 1.35,
+      "ownerFeeUsd": 0,
+      "networks": "Airtel, TNM",
+      "active": true
+    },
+    {
+      "iso2": "MZ",
+      "country": "Mozambique",
+      "providerFeeUsd": 1.65,
+      "ownerFeeUsd": 0,
+      "networks": "Vodacom",
+      "active": true
+    },
+    {
+      "iso2": "SL",
+      "country": "Sierra Leone",
+      "providerFeeUsd": 1.2,
+      "ownerFeeUsd": 0,
+      "networks": "Orange, Africell",
+      "active": true
+    },
+    {
+      "iso2": "TZ",
+      "country": "Tanzania",
+      "providerFeeUsd": 1.8,
+      "ownerFeeUsd": 0,
+      "networks": "Airtel, Tigo, Vodacom",
+      "active": true
+    },
+    {
+      "iso2": "UG",
+      "country": "Uganda",
+      "providerFeeUsd": 0.75,
+      "ownerFeeUsd": 0,
+      "networks": "Airtel, MTN",
+      "active": true
+    },
+    {
+      "iso2": "ZM",
+      "country": "Zambia",
+      "providerFeeUsd": 1.65,
+      "ownerFeeUsd": 0,
+      "networks": "Airtel, MTN",
+      "active": true
+    },
+    {
+      "iso2": "BW",
+      "country": "Botswana",
+      "providerFeeUsd": 1.5,
+      "ownerFeeUsd": 0,
+      "networks": "Mascom",
+      "active": true
+    },
+    {
+      "iso2": "BJ",
+      "country": "Benin",
+      "providerFeeUsd": 1.8,
+      "ownerFeeUsd": 0,
+      "networks": "MOOV, MTN",
+      "active": true
+    },
+    {
+      "iso2": "CG",
+      "country": "Congo (Brazzaville)",
+      "providerFeeUsd": 1.8,
+      "ownerFeeUsd": 0,
+      "networks": "MTN, Airtel",
+      "active": true
+    },
+    {
+      "iso2": "ET",
+      "country": "Ethiopia",
+      "providerFeeUsd": null,
+      "ownerFeeUsd": 0,
+      "networks": "Telebirr, M-Pesa",
+      "active": true,
+      "providerFeeRequired": true
+    }
+  ]
+}

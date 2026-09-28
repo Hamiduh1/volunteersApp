@@ -10,11 +10,16 @@ import com.google.firebase.firestore.toObject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FirestoreSubcollection
+import com.example.volunteersApp.firebase.FirestoreUserSettingsDocument
 
 // This data class MUST have default values for all properties
 // for Firestore's .toObject() deserialization to work reliably.
 data class NotificationSettings(
     val newFollowers: Boolean = true,
+    val jokesPosts: Boolean = true,
+    val liveStreams: Boolean = true,
     val eventReminders: Boolean = true,
     val appUpdates: Boolean = false
 )
@@ -39,8 +44,8 @@ class NotificationSettingsViewModel : ViewModel() {
 
         // Define the document where this user's settings are stored.
         // Using a subcollection is a robust way to organize user-specific data.
-        val settingsDocRef = db.collection("users").document(currentUser.uid)
-            .collection("settings").document("notifications")
+        val settingsDocRef = db.collection(FirestoreCollection.USERS).document(currentUser.uid)
+            .collection(FirestoreSubcollection.SETTINGS).document(FirestoreUserSettingsDocument.NOTIFICATIONS)
 
         // Listen for real-time updates to the document.
         settingsDocRef.addSnapshotListener { snapshot, error ->
@@ -66,8 +71,8 @@ class NotificationSettingsViewModel : ViewModel() {
     fun onSettingToggled(settingField: String, isEnabled: Boolean) {
         val currentUser = auth.currentUser ?: return
 
-        val settingsDocRef = db.collection("users").document(currentUser.uid)
-            .collection("settings").document("notifications")
+        val settingsDocRef = db.collection(FirestoreCollection.USERS).document(currentUser.uid)
+            .collection(FirestoreSubcollection.SETTINGS).document(FirestoreUserSettingsDocument.NOTIFICATIONS)
 
         // The UI will update instantly via the snapshot listener,
         // so we just need to fire off the update to Firestore.
@@ -89,6 +94,8 @@ class NotificationSettingsViewModel : ViewModel() {
     // Constants for the field names to avoid typos.
     companion object {
         const val FIELD_NEW_FOLLOWERS = "newFollowers"
+        const val FIELD_JOKES_POSTS = "jokesPosts"
+        const val FIELD_LIVE_STREAMS = "liveStreams"
         const val FIELD_EVENT_REMINDERS = "eventReminders"
         const val FIELD_APP_UPDATES = "appUpdates"
     }

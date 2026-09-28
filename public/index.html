@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Volunteer opportunities and role portal for Volunteers App.">
+    <title>Volunteers App | Opportunities Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --ink: #11253a;
+        --muted: #527084;
+        --paper: #f4f6ed;
+        --panel: rgba(255, 255, 255, .82);
+        --line: rgba(17, 37, 58, .14);
+        --orange: #ff6d38;
+        --teal: #007b73;
+        --gold: #f6c94c;
+        --danger: #b42318;
+        --shadow: 0 20px 50px rgba(17, 37, 58, .12);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        min-width: 320px;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 8% 0%, rgba(246, 201, 76, .34), transparent 26rem),
+          radial-gradient(circle at 91% 11%, rgba(0, 123, 115, .18), transparent 31rem),
+          var(--paper);
+        font-family: "Space Grotesk", sans-serif;
+      }
+      button, input { font: inherit; }
+      button { cursor: pointer; }
+      .shell { width: min(1160px, calc(100% - 32px)); margin: 0 auto; }
+      .masthead { padding: 18px 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+      .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; color: var(--ink); }
+      .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: var(--teal); clip-path: polygon(50% 0, 100% 26%, 100% 74%, 50% 100%, 0 74%, 0 26%); }
+      .mono { font-family: "DM Mono", monospace; letter-spacing: .02em; }
+      .session { display: flex; align-items: center; gap: 12px; font-size: .9rem; }
+      .hero { display: grid; grid-template-columns: 1.2fr .8fr; gap: 24px; padding: 52px 0 35px; align-items: stretch; }
+      .hero-copy { padding: 30px 0; }
+      .eyebrow { color: var(--teal); font: 500 .78rem/1.3 "DM Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
+      h1 { margin: 12px 0 16px; max-width: 760px; font-size: clamp(2.5rem, 6vw, 5.5rem); line-height: .94; letter-spacing: -.07em; }
+      h1 em { color: var(--orange); font-style: normal; }
+      .lead { max-width: 650px; font-size: 1.12rem; line-height: 1.6; color: var(--muted); }
+      .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
+      .button { border: 1px solid transparent; border-radius: 999px; padding: 11px 17px; font-weight: 700; text-decoration: none; transition: transform .18s ease, box-shadow .18s ease; }
+      .button:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(17, 37, 58, .16); }
+      .button-primary { color: white; background: var(--teal); }
+      .button-secondary { color: var(--ink); background: rgba(255,255,255,.58); border-color: var(--line); }
+      .portal-card, .listing-card, .role-card, .notice { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); backdrop-filter: blur(10px); }
+      .portal-card { padding: 24px; border-radius: 20px; display: flex; flex-direction: column; justify-content: space-between; }
+      .portal-card h2, .section-heading h2 { margin: 7px 0; letter-spacing: -.04em; }
+      .portal-card p { color: var(--muted); line-height: 1.5; }
+      .form { display: grid; gap: 10px; margin-top: 18px; }
+      label { font-size: .82rem; font-weight: 700; }
+      input { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; color: var(--ink); background: rgba(255,255,255,.72); }
+      .hidden { display: none !important; }
+      .status { min-height: 1.5em; margin: 13px 0 0; color: var(--muted); font-size: .88rem; }
+      .status.error { color: var(--danger); }
+      .status.success { color: var(--teal); }
+      .roles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 25px 0 50px; }
+      .role-card { min-height: 182px; padding: 20px; border-radius: 16px; }
+      .role-card:nth-child(1) { border-top: 5px solid var(--gold); }
+      .role-card:nth-child(2) { border-top: 5px solid var(--teal); }
+      .role-card:nth-child(3) { border-top: 5px solid var(--orange); }
+      .role-card h3 { margin: 9px 0; }
+      .role-card p { margin: 0; color: var(--muted); line-height: 1.5; }
+      .opportunities { padding: 31px 0 64px; }
+      .section-heading { display: flex; gap: 18px; justify-content: space-between; align-items: end; margin-bottom: 18px; }
+      .section-heading p { margin: 0; max-width: 580px; color: var(--muted); }
+      .tabs { display: inline-flex; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.55); }
+      .tab { border: 0; border-radius: 999px; padding: 9px 14px; background: transparent; color: var(--muted); font-weight: 700; }
+      .tab.active { color: white; background: var(--ink); }
+      .listings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .listing-card { padding: 19px; border-radius: 16px; }
+      .listing-meta { color: var(--teal); font: 500 .74rem/1.35 "DM Mono", monospace; text-transform: uppercase; }
+      .listing-card h3 { margin: 9px 0 4px; font-size: 1.25rem; letter-spacing: -.03em; }
+      .listing-owner, .listing-copy { color: var(--muted); line-height: 1.45; }
+      .listing-copy { margin: 12px 0; }
+      .listing-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; }
+      .badge { padding: 6px 9px; border-radius: 999px; color: #075a55; background: #d8f4ed; font: 500 .7rem "DM Mono", monospace; text-transform: uppercase; }
+      .managed { margin-top: 20px; padding: 17px; border-radius: 14px; background: rgba(17, 37, 58, .05); }
+      .managed ul { margin: 9px 0 0; padding-left: 18px; color: var(--muted); }
+      footer { padding: 26px 0 38px; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); }
+      footer a { color: inherit; }
+      @media (max-width: 760px) {
+        .hero { grid-template-columns: 1fr; padding-top: 22px; }
+        .roles, .listings { grid-template-columns: 1fr; }
+        .section-heading { align-items: start; flex-direction: column; }
+        .session { font-size: .78rem; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <a class="brand" href="/" aria-label="Volunteers App home"><span class="brand-mark">V</span> Volunteers App</a>
+        <div class="session"><span id="session-label">Explore as a visitor</span><button id="sign-out" class="button button-secondary hidden" type="button">Sign out</button></div>
+      </header>
+
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <div class="eyebrow">One shared opportunity network</div>
+          <h1 id="hero-title">Find people,<br>do <em>useful</em> work.</h1>
+          <p class="lead">Browse current volunteer events and jobs on the same Firebase-backed network used by the iOS and Android apps. Sign in to apply, manage your opportunities, and keep every application in sync.</p>
+          <div class="hero-actions"><a class="button button-primary" href="#opportunities">Browse opportunities</a><a class="button button-secondary" href="#portal">Open your portal</a></div>
+        </div>
+        <aside id="portal" class="portal-card" aria-labelledby="portal-title">
+          <div>
+            <div class="eyebrow">Member portal</div>
+            <h2 id="portal-title">Your work, in one place.</h2>
+            <p id="portal-copy">Sign in with the same account you use in Volunteers App.</p>
+          </div>
+          <form id="login-form" class="form">
+            <label for="email">Email</label><input id="email" type="email" autocomplete="email" required>
+            <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
+            <button class="button button-primary" type="submit">Sign in</button>
+          </form>
+          <button id="portal-refresh" class="button button-secondary hidden" type="button">Refresh portal</button>
+          <p id="portal-status" class="status" role="status"></p>
+          <div id="managed-listings" class="managed hidden"></div>
+        </aside>
+      </section>
+
+      <section class="roles" aria-label="Portal roles">
+        <article class="role-card"><div class="eyebrow">Volunteer</div><h3>Discover and apply</h3><p>See active events and jobs only. Once an application is sent, every app shows the same status.</p></article>
+        <article class="role-card"><div class="eyebrow">Organizer</div><h3>Lead an event</h3><p>Sign in to see events tied to your account, then manage participants and history in the app.</p></article>
+        <article class="role-card"><div class="eyebrow">Employer</div><h3>Hire with purpose</h3><p>Sign in to see your job posts and keep applicants connected to the same shared records.</p></article>
+      </section>
+
+      <section id="opportunities" class="opportunities" aria-labelledby="opportunities-title">
+        <div class="section-heading"><div><div class="eyebrow">Live opportunity board</div><h2 id="opportunities-title">Open for good</h2><p>Past, closed, deleted, and undated listings are excluded by the server. The web page never decides what is eligible.</p></div><div class="tabs" role="tablist"><button class="tab active" id="events-tab" type="button" role="tab" aria-selected="true">Events</button><button class="tab" id="jobs-tab" type="button" role="tab" aria-selected="false">Jobs</button></div></div>
+        <p id="listings-status" class="status" role="status">Loading active opportunities…</p>
+        <div id="listings" class="listings" aria-live="polite"></div>
+      </section>
+    </main>
+    <footer class="shell">Volunteers App portal · <a href="/privacy.html">Privacy policy</a> · Configure browser App Check before production deployment.</footer>
+    <script src="/portal-config.js"></script>
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+      import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
+      import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-functions.js";
+      import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app-check.js";
+
+      const configured = window.VOLUNTEERS_PORTAL_CONFIG || {};
+      const firebaseOptions = {
+        apiKey: "AIzaSyAHOi58DQhQ-AIIPW-3EFHIbfLA7Zc7_tA",
+        authDomain: "volunteersapp-968b2.firebaseapp.com",
+        databaseURL: "https://volunteersapp-968b2-default-rtdb.firebaseio.com",
+        projectId: "volunteersapp-968b2",
+        storageBucket: "volunteersapp-968b2.firebasestorage.app",
+        messagingSenderId: "6677623239",
+      };
+      if (configured.firebaseAppId) firebaseOptions.appId = configured.firebaseAppId;
+      const app = initializeApp(firebaseOptions);
+      if (configured.appCheckSiteKey && configured.firebaseAppId) {
+        initializeAppCheck(app, { provider: new ReCaptchaV3Provider(configured.appCheckSiteKey), isTokenAutoRefreshEnabled: true });
+      }
+
+      const auth = getAuth(app);
+      const functions = getFunctions(app, "us-central1");
+      const getListings = httpsCallable(functions, "getVolunteerListings");
+      const getPortalProfile = httpsCallable(functions, "getPortalProfile");
+      const applyForEvent = httpsCallable(functions, "applyForEvent");
+      const applyForJob = httpsCallable(functions, "applyForJob");
+      const elements = {
+        form: document.querySelector("#login-form"), email: document.querySelector("#email"), password: document.querySelector("#password"),
+        portalStatus: document.querySelector("#portal-status"), portalCopy: document.querySelector("#portal-copy"), portalRefresh: document.querySelector("#portal-refresh"),
+        managed: document.querySelector("#managed-listings"), session: document.querySelector("#session-label"), signOut: document.querySelector("#sign-out"),
+        eventsTab: document.querySelector("#events-tab"), jobsTab: document.querySelector("#jobs-tab"), listingsStatus: document.querySelector("#listings-status"), listings: document.querySelector("#listings"),
+      };
+      let activeTab = "events";
+      let listingData = { events: [], jobs: [] };
+
+      const setStatus = (target, message = "", tone = "") => { target.textContent = message; target.className = `status ${tone}`.trim(); };
+      const escaped = (value) => String(value || "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+      const formatDate = (millis) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(millis)));
+      const isSignedIn = () => Boolean(auth.currentUser);
+
+      function renderListings() {
+        const listings = listingData[activeTab] || [];
+        if (!listings.length) { elements.listings.innerHTML = "<div class='notice listing-card'>No active opportunities are available right now. Please check again soon.</div>"; return; }
+        elements.listings.innerHTML = listings.map((listing) => {
+          const application = listing.applicationStatus ? "<span class='badge'>Application sent</span>" : `<button class='button button-primary' data-apply='${escaped(listing.id)}' data-kind='${escaped(listing.kind)}'>Apply</button>`;
+          return `<article class='listing-card'><div class='listing-meta'>${escaped(listing.category || listing.kind)} · ${escaped(listing.location || "Location shared in details")}</div><h3>${escaped(listing.title)}</h3><div class='listing-owner'>Hosted by ${escaped(listing.ownerName)}</div><p class='listing-copy'>${escaped(listing.description || "Open the app for full opportunity details.")}</p><div class='listing-owner'>${escaped(listing.dateTimeLabel)}: ${formatDate(listing.dateTimeMillis)}</div><div class='listing-footer'>${application}</div></article>`;
+        }).join("");
+      }
+
+      async function loadListings() {
+        setStatus(elements.listingsStatus, "Loading active opportunities…");
+        try {
+          const result = await getListings();
+          listingData = result.data || { events: [], jobs: [] };
+          setStatus(elements.listingsStatus, "");
+          renderListings();
+        } catch (error) {
+          const needsSetup = !configured.appCheckSiteKey || !configured.firebaseAppId ? " Browser App Check is not configured yet." : "";
+          setStatus(elements.listingsStatus, `We could not load opportunities. ${error.message || "Please retry."}${needsSetup}`, "error");
+        }
+      }
+
+      async function loadPortal() {
+        if (!auth.currentUser) return;
+        setStatus(elements.portalStatus, "Loading your portal…");
+        try {
+          const profile = (await getPortalProfile()).data;
+          const roles = (profile.roles || ["VOLUNTEER"]).join(" · ");
+          elements.portalCopy.textContent = `${profile.name || "Member"} · ${roles}`;
+          elements.session.textContent = `Signed in as ${profile.email || auth.currentUser.email || "member"}`;
+          const managed = profile.managedListings || [];
+          elements.managed.innerHTML = managed.length ? `<strong>Your managed opportunities</strong><ul>${managed.map((item) => `<li>${escaped(item.title)} · ${escaped(item.status)}</li>`).join("")}</ul>` : "<strong>Your portal is ready.</strong><div>Use the app to create and manage your events or job posts.</div>";
+          elements.managed.classList.remove("hidden");
+          setStatus(elements.portalStatus, "Portal synced.", "success");
+        } catch (error) {
+          setStatus(elements.portalStatus, `Signed in, but your portal could not load. ${error.message || "Please retry."}`, "error");
+        }
+      }
+
+      async function apply(listingId, kind) {
+        if (!isSignedIn()) { elements.email.focus(); setStatus(elements.portalStatus, "Sign in before applying.", "error"); return; }
+        try {
+          const callable = kind === "EVENT" ? applyForEvent : applyForJob;
+          const payload = kind === "EVENT" ? { eventId: listingId } : { jobId: listingId };
+          await callable(payload);
+          setStatus(elements.listingsStatus, "Application sent.", "success");
+          await loadListings();
+        } catch (error) { setStatus(elements.listingsStatus, error.message || "Your application could not be sent.", "error"); }
+      }
+
+      elements.form.addEventListener("submit", async (event) => {
+        event.preventDefault(); setStatus(elements.portalStatus, "Signing in…");
+        try { await signInWithEmailAndPassword(auth, elements.email.value.trim(), elements.password.value); }
+        catch (error) { setStatus(elements.portalStatus, error.message || "Sign-in failed.", "error"); }
+      });
+      elements.signOut.addEventListener("click", () => signOut(auth));
+      elements.portalRefresh.addEventListener("click", loadPortal);
+      elements.eventsTab.addEventListener("click", () => { activeTab = "events"; elements.eventsTab.classList.add("active"); elements.jobsTab.classList.remove("active"); elements.eventsTab.setAttribute("aria-selected", "true"); elements.jobsTab.setAttribute("aria-selected", "false"); renderListings(); });
+      elements.jobsTab.addEventListener("click", () => { activeTab = "jobs"; elements.jobsTab.classList.add("active"); elements.eventsTab.classList.remove("active"); elements.jobsTab.setAttribute("aria-selected", "true"); elements.eventsTab.setAttribute("aria-selected", "false"); renderListings(); });
+      elements.listings.addEventListener("click", (event) => { const button = event.target.closest("[data-apply]"); if (button) apply(button.dataset.apply, button.dataset.kind); });
+      onAuthStateChanged(auth, async (user) => {
+        elements.form.classList.toggle("hidden", Boolean(user)); elements.signOut.classList.toggle("hidden", !user); elements.portalRefresh.classList.toggle("hidden", !user);
+        elements.managed.classList.add("hidden");
+        if (user) { await loadPortal(); } else { elements.session.textContent = "Explore as a visitor"; elements.portalCopy.textContent = "Sign in with the same account you use in Volunteers App."; setStatus(elements.portalStatus, ""); }
+        loadListings();
+      });
+    </script>
+  </body>
+</html>

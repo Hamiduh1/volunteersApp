@@ -1,32 +1,40 @@
 package com.example.volunteersApp.chat
 
-import com.example.volunteersApp.models.User
+data class DirectoryUser(
+    val id: String = "",
+    val uid: String = "",
+    val name: String = "Anonymous",
+    val username: String = "",
+    val profileImageUrl: String? = null
+)
 
-/**
- * Represents the complete state for the User Directory screen.
- * single state object that the UI can observe.
- *
- * @param searchQuery The current text entered in the search bar.
- * @param allUsers The master list of all users fetched from the backend.
- * @param isLoading True if the initial user list is being fetched.
- * @param error A message to display if an error occurs.
- */
 data class UserDirectoryUiState(
     val searchQuery: String = "",
-    val allUsers: List<User> = emptyList(),
-    val isLoading: Boolean = true,
-    val error: String? = null
+    val allUsers: List<DirectoryUser> = emptyList(),
+    val blockedUsers: Set<String> = emptySet(),
+    val sendingInvitationUserIds: Set<String> = emptySet(),
+    val sentInvitationUserIds: Set<String> = emptySet(),
+    val blockingUserIds: Set<String> = emptySet(),
+    val unblockingUserIds: Set<String> = emptySet(),
+    val statusMessage: String? = null,
+    val errorMessage: String? = null,
+    val isLoading: Boolean = true
 ) {
-    /**
-     * A computed property that returns a filtered list of users based on the searchQuery.
-     * This logic now lives with the state, making it easily testable and reusable.
-     */
-    val filteredUsers: List<User>
-        get() = if (searchQuery.isBlank()) {
-            allUsers
-        } else {
-            allUsers.filter { user ->
-                user.name?.contains(searchQuery, ignoreCase = true) == true
+    val filteredUsers: List<DirectoryUser>
+        get() {
+            val cleanQuery = searchQuery.trim()
+            val visibleUsers = allUsers.filter { user -> user.uid !in blockedUsers }
+            if (cleanQuery.isBlank()) return visibleUsers
+
+            return visibleUsers.filter { user ->
+                user.name.contains(cleanQuery, ignoreCase = true) ||
+                    user.username.contains(cleanQuery, ignoreCase = true)
             }
         }
+
+    val blockedUserCount: Int
+        get() = blockedUsers.size
+
+    val visibleUserCount: Int
+        get() = allUsers.count { user -> user.uid !in blockedUsers }
 }

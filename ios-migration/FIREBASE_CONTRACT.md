@@ -86,6 +86,11 @@ Functions currently called from client side:
 - `declineBlindDateInvitation`
 - `rejoinBlindDate`
 - `getSecureExchangeRate`
+- `getAfriexInstitutions`
+- `resolveAfriexAccount`
+- `searchRecipientAddress`
+- `saveVerifiedBeneficiary`
+- `refreshSavedBeneficiaryVerification`
 - `createBeneficiaryVerification`
 - `initiateTransfer`
 - `payForAgentRole`

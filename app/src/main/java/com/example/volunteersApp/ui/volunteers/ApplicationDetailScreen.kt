@@ -1,5 +1,6 @@
-package com.example.volunteersApp.ui.volunteers
+@file:OptIn(ExperimentalMaterial3Api::class)
 
+package com.example.volunteersApp.ui.volunteers
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -58,7 +59,7 @@ import com.example.volunteersApp.models.Resource
 import com.example.volunteersApp.ui.profile.UserProfile
 import kotlinx.coroutines.flow.collectLatest
 
-@OptIn(ExperimentalMaterial3Api::class)
+
 @Composable
 fun ApplicationDetailScreen(
     eventId: String,

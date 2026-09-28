@@ -1,8 +1,10 @@
 package com.example.volunteersApp.wallet
 
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import com.example.volunteersApp.chat.UserDirectoryActivity
 import com.example.volunteersApp.ui.theme.VolunteersAppTheme
 
 /**
@@ -22,6 +24,15 @@ class TransactActivity : ComponentActivity() {
                     onBack = {
                         // Standard Activity back behavior
                         finish()
+                    },
+                    onNavigateToPayments = {
+                        startActivity(Intent(this, PaymentsActivity::class.java))
+                    },
+                    onNavigateToUserDirectory = {
+                        startActivity(Intent(this, UserDirectoryActivity::class.java))
+                    },
+                    onNavigateToTransactionHistory = {
+                        startActivity(Intent(this, TransactionActivity::class.java))
                     }
                 )
             }

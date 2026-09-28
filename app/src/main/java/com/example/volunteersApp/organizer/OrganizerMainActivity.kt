@@ -10,8 +10,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.example.volunteersApp.general.LoginActivity
 import com.example.volunteersApp.R
+import com.example.volunteersApp.ui.main.DateHubNav
 import com.example.volunteersApp.ui.main.MainViewModel
+import com.example.volunteersApp.ui.main.SocialInboxNav
 import com.example.volunteersApp.ui.theme.VolunteersAppTheme
+import com.example.volunteersApp.wallet.WalletNav
 
 /**
  * Modernized Organizer Main Activity.
@@ -21,8 +24,24 @@ class OrganizerMainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    private fun offerNavigationFromLaunchIntent(intent: Intent?) {
+        SocialInboxNav.pendingRouteFromLaunchIntent(intent)?.let { route ->
+            viewModel.offerComposeNavigation(route)
+            return
+        }
+        WalletNav.pendingRouteFromLaunchIntent(intent)?.let { route ->
+            viewModel.offerComposeNavigation(route)
+            return
+        }
+        if (DateHubNav.shouldOpenBlindDateFromIntent(intent)) {
+            viewModel.offerComposeNavigation("date_eva")
+            viewModel.offerPendingBlindDateDeepLink()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        offerNavigationFromLaunchIntent(intent)
 
         setContent {
             VolunteersAppTheme {
@@ -33,7 +52,8 @@ class OrganizerMainActivity : ComponentActivity() {
                 } else {
                     OrganizerMainScreen(
                         uiState = uiState,
-                        onSignOut = { promptLogout() }
+                        onSignOut = { promptLogout() },
+                        activityMainViewModel = viewModel
                     )
                 }
             }
@@ -65,5 +85,16 @@ class OrganizerMainActivity : ComponentActivity() {
         }
         startActivity(intent)
         finish()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        offerNavigationFromLaunchIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.onAppForeground()
     }
 }

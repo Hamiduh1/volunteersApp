@@ -22,6 +22,9 @@ module.exports = {
   ignorePatterns: [
     "/lib/**/*", // Ignore built files.
     "/generated/**/*", // Ignore generated files.
+    // Immutable recovery snapshot: compile it, but do not require a full
+    // style migration before preserving its deployed function identities.
+    "/src/legacyDeployedFunctions/**/*",
   ],
   plugins: [
     "@typescript-eslint",

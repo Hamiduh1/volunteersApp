@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Date
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 /**
  * Modern State container for the Events Screen.
@@ -31,7 +32,7 @@ data class EventUiState(
 
 class EventViewModel : ViewModel() {
     private val db = Firebase.firestore
-    private val eventsRef = db.collection(EVENTS_COLLECTION)
+    private val eventsRef = db.collection(FirestoreCollection.EVENTS)
 
     private val _uiState = MutableStateFlow(EventUiState())
     val uiState: StateFlow<EventUiState> = _uiState.asStateFlow()
@@ -117,7 +118,6 @@ class EventViewModel : ViewModel() {
 
     companion object {
         private const val TAG = "EventViewModel"
-        private const val EVENTS_COLLECTION = "events"
         private const val FIELD_STATUS = "status"
         private const val FIELD_EVENT_DATE_TIME = "eventDateTime"
         private const val FIELD_CATEGORY = "category"

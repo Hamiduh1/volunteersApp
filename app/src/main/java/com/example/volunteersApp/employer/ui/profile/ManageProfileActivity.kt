@@ -21,7 +21,8 @@ class ManageProfileActivity : ComponentActivity() {
             VolunteersAppTheme {
                 EmployerProfileScreen(
                     viewModel = viewModel,
-                    onBack = { finish() }
+                    onBack = { finish() },
+                    onProfileSaved = { finish() }
                 )
             }
         }

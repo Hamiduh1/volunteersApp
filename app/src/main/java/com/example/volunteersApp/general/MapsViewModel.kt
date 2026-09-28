@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 class MapsViewModel : ViewModel() {
     private val db = Firebase.firestore
@@ -33,7 +34,7 @@ class MapsViewModel : ViewModel() {
                     "locationName" to locationName,
                     "geoPoint" to GeoPoint(latLng.latitude, latLng.longitude)
                 )
-                db.collection("events").document(eventId).update(updates).await()
+                db.collection(FirestoreCollection.EVENTS).document(eventId).update(updates).await()
                 _mapEvent.emit(Resource.Success(Unit))
             } catch (e: Exception) {
                 _mapEvent.emit(Resource.Error(e.localizedMessage ?: "Failed to save location"))

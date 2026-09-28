@@ -11,21 +11,44 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.volunteersApp.VertexViewModel
+import com.example.volunteersApp.ui.shared.AiResponseDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EmployerPostedJobsScreen(
     viewModel: EmployerPostedJobsViewModel,
+    vertexViewModel: VertexViewModel = viewModel(),
     onBack: () -> Unit,
     onEditJob: (String) -> Unit,
     onViewApplicants: (String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val aiResponse by vertexViewModel.generatedResponse.collectAsState()
     var jobToDelete by remember { mutableStateOf<JobPosting?>(null) }
+    var showAiResponse by remember { mutableStateOf(false) }
+    var pendingAiQuery by remember { mutableStateOf(false) }
+
+    LaunchedEffect(aiResponse) {
+        if (pendingAiQuery && aiResponse != null) {
+            showAiResponse = true
+            pendingAiQuery = false
+        }
+    }
+
+    if (showAiResponse) {
+        AiResponseDialog(
+            generatedText = aiResponse.orEmpty(),
+            onDismiss = {
+                showAiResponse = false
+                vertexViewModel.clearResponse()
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -39,7 +62,27 @@ fun EmployerPostedJobsScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                ),
+                actions = {
+                    IconButton(
+                        onClick = {
+                            pendingAiQuery = true
+                            vertexViewModel.generate(
+                                buildString {
+                                    append("Summarize this employer's job status in one clear paragraph and 3 action items.\n")
+                                    append("Total jobs: ${uiState.jobs.size}\n")
+                                    append(
+                                        uiState.jobs.joinToString("\n") { job ->
+                                            "${job.title ?: "Untitled"} (${job.status ?: "open"})"
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "AI Summary")
+                    }
+                }
             )
         }
     ) { padding ->
@@ -61,9 +104,18 @@ fun EmployerPostedJobsScreen(
                         modifier = Modifier.align(Alignment.Center).padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Default.WorkOutline, null, modifier = Modifier.size(64.dp), tint = Color.Gray)
+                        Icon(
+                            Icons.Default.WorkOutline,
+                            null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Spacer(Modifier.height(16.dp))
-                        Text("No jobs posted yet.", color = Color.Gray, textAlign = TextAlign.Center)
+                        Text(
+                            "No jobs posted yet.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
                 else -> {
@@ -90,13 +142,17 @@ fun EmployerPostedJobsScreen(
     jobToDelete?.let { job ->
         AlertDialog(
             onDismissRequest = { jobToDelete = null },
-            title = { Text("Delete Job") },
-            text = { Text("Are you sure you want to delete '${job.title}'?") },
+            title = { Text("Remove job?") },
+            text = {
+                Text(
+                    "Unused jobs are deleted. If anyone has applied, the job will be closed and kept in history."
+                )
+            },
             confirmButton = {
                 TextButton(onClick = { 
                     viewModel.deleteJob(job)
                     jobToDelete = null 
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { jobToDelete = null }) { Text("Cancel") }
@@ -123,14 +179,22 @@ fun PostedJobCard(
                 
                 val isClosed = job.status?.lowercase() == "closed"
                 Surface(
-                    color = (if (isClosed) Color.Red else Color(0xFF4CAF50)).copy(alpha = 0.1f),
+                    color = if (isClosed) {
+                        MaterialTheme.colorScheme.errorContainer
+                    } else {
+                        MaterialTheme.colorScheme.primaryContainer
+                    },
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
                         text = if (isClosed) "CLOSED" else "OPEN",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isClosed) Color.Red else Color(0xFF4CAF50),
+                        color = if (isClosed) {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        } else {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        },
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -149,7 +213,10 @@ fun PostedJobCard(
                     label = { Text("Edit") },
                     leadingIcon = { Icon(Icons.Default.Edit, null, modifier = Modifier.size(18.dp)) }
                 )
-                IconButton(onClick = onToggleStatus) {
+                IconButton(
+                    onClick = onToggleStatus,
+                    enabled = !job.retainedForHistory && !job.closeEntries
+                ) {
                     Icon(if (job.status?.lowercase() == "closed") Icons.Default.LockOpen else Icons.Default.Lock, null)
                 }
                 IconButton(onClick = onDelete) {

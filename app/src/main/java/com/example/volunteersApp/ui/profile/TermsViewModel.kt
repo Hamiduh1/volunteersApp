@@ -4,10 +4,13 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreAppConfigDocument
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 /**
  * Represents the UI state for the Terms & Conditions screen.
@@ -30,11 +33,13 @@ class TermsViewModel : ViewModel() {
 
     companion object {
         private const val TAG = "TermsViewModel"
-        private const val CONFIG_COLLECTION = "app_config"
-        private const val TERMS_DOC_ID = "terms_and_conditions"
     }
 
     init {
+        loadTerms()
+    }
+
+    fun refreshTerms() {
         loadTerms()
     }
 
@@ -42,7 +47,14 @@ class TermsViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = TermsUiState.Loading
             try {
-                val document = db.collection(CONFIG_COLLECTION).document(TERMS_DOC_ID).get().await()
+                val primaryDoc = db.collection(FirestoreCollection.APP_CONFIG)
+                    .document(FirestoreAppConfigDocument.TERMS_AND_CONDITIONS).get().await()
+                val document = if (primaryDoc.exists()) {
+                    primaryDoc
+                } else {
+                    db.collection(FirestoreCollection.APP_CONFIG_LEGACY_CAMEL)
+                        .document(FirestoreAppConfigDocument.TERMS_AND_CONDITIONS).get().await()
+                }
 
                 if (document != null && document.exists()) {
                     val textContent = document.getString("text")
@@ -57,6 +69,14 @@ class TermsViewModel : ViewModel() {
                     Log.w(TAG, "Terms document does not exist.")
                     _uiState.value = TermsUiState.Error("Terms and Conditions document not found.")
                 }
+            } catch (e: FirebaseFirestoreException) {
+                Log.e(TAG, "Error fetching terms document", e)
+                val message = if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    "Permission denied while loading policy content. Deploy Firestore rules and try again."
+                } else {
+                    e.localizedMessage ?: "An unknown Firestore error occurred while fetching data."
+                }
+                _uiState.value = TermsUiState.Error(message)
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching terms document", e)
                 _uiState.value = TermsUiState.Error(e.localizedMessage ?: "An unknown error occurred while fetching data.")

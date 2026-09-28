@@ -18,8 +18,8 @@ class ChatActivity : ComponentActivity() {
         // This line allows composables to control the window insets (like for the keyboard).
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        val chatId = intent.getStringExtra("CHAT_ID")
-        val otherUserId = intent.getStringExtra("OTHER_USER_ID")
+        val chatId = intent.getStringExtra(EXTRA_CHAT_ID)
+        val otherUserId = intent.getStringExtra(EXTRA_OTHER_USER_ID)
 
         if (chatId == null || otherUserId == null) {
             Toast.makeText(this, "Could not open chat.", Toast.LENGTH_SHORT).show()
@@ -41,6 +41,20 @@ class ChatActivity : ComponentActivity() {
                     onNavigateUp = { finish() }
                 )
             }
+        }
+    }
+
+    companion object {
+        private const val EXTRA_CHAT_ID = "CHAT_ID"
+        private const val EXTRA_OTHER_USER_ID = "OTHER_USER_ID"
+
+        fun newIntent(
+            context: android.content.Context,
+            chatId: String,
+            otherUserId: String
+        ) = android.content.Intent(context, ChatActivity::class.java).apply {
+            putExtra(EXTRA_CHAT_ID, chatId)
+            putExtra(EXTRA_OTHER_USER_ID, otherUserId)
         }
     }
 }

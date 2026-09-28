@@ -2,7 +2,6 @@ package com.example.volunteersApp.ui.main
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
@@ -14,18 +13,47 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.volunteersApp.employer.ui.main.EmployerMainScreen
 import com.example.volunteersApp.general.LoginActivity
-import com.example.volunteersApp.models.UserType
+import com.example.volunteersApp.jokes.MindLoomNav
 import com.example.volunteersApp.organizer.OrganizerMainScreen
 import com.example.volunteersApp.ui.theme.VolunteersAppTheme
+import com.example.volunteersApp.ui.volunteers.VolunteerOpportunitiesScreen
+import com.example.volunteersApp.ui.volunteers.VolunteerOpportunitiesViewModel
+import com.example.volunteersApp.ui.volunteers.VolunteerOpportunityTab
+import com.example.volunteersApp.wallet.WalletNav
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
+import java.util.Locale
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    private fun offerNavigationFromLaunchIntent(intent: Intent?) {
+        SocialInboxNav.pendingRouteFromLaunchIntent(intent)?.let { route ->
+            viewModel.offerComposeNavigation(route)
+            return
+        }
+        MindLoomNav.pendingRouteFromLaunchIntent(intent)?.let { route ->
+            viewModel.offerComposeNavigation(route)
+            return
+        }
+        WalletNav.pendingRouteFromLaunchIntent(intent)?.let { route ->
+            viewModel.offerComposeNavigation(route)
+            return
+        }
+        if (DateHubNav.shouldOpenBlindDateFromIntent(intent)) {
+            viewModel.offerComposeNavigation("date_eva")
+            viewModel.offerPendingBlindDateDeepLink()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        offerNavigationFromLaunchIntent(intent)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // The App Check initialization logic has been moved to VolunteersApplication.kt
@@ -37,11 +65,9 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(uiState.isLoggedIn, uiState.isLoading) {
                     if (!uiState.isLoading && !uiState.isLoggedIn) {
-                        val intent = Intent(this@MainActivity, LoginActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        if (Firebase.auth.currentUser != null) {
+                            viewModel.reconcileAuthSession()
                         }
-                        startActivity(intent)
-                        finish()
                     }
                 }
 
@@ -56,32 +82,53 @@ class MainActivity : ComponentActivity() {
                     }
 
                     uiState.isLoggedIn -> {
-                        // Get role from intent first, then from the ViewModel state.
-                        val roleString = intent.getStringExtra("USER_TYPE") ?: uiState.role
+                        val roleValue = uiState.role
+                            ?.trim()
+                            ?.lowercase(Locale.ROOT)
 
-                        // Safely convert the string to a UserType enum, defaulting to VOLUNTEER.
-                        val userType = try {
-                            roleString?.let { UserType.valueOf(it.uppercase()) } ?: UserType.VOLUNTEER
-                        } catch (e: IllegalArgumentException) {
-                            UserType.VOLUNTEER
-                        }
-
-                        when (userType) {
-                            UserType.EMPLOYER -> EmployerMainScreen(uiState = uiState, onSignOut = { viewModel.signOut() })
-                            UserType.ORGANIZER -> OrganizerMainScreen(uiState = uiState, onSignOut = { viewModel.signOut() })
-                            UserType.VOLUNTEER -> MainScreen(
+                        when (roleValue) {
+                            "employer" -> EmployerMainScreen(
                                 uiState = uiState,
-                                onSignOut = { viewModel.signOut() }
+                                onSignOut = { viewModel.signOut() },
+                                activityMainViewModel = viewModel
+                            )
+                            "organizer" -> OrganizerMainScreen(
+                                uiState = uiState,
+                                onSignOut = { viewModel.signOut() },
+                                activityMainViewModel = viewModel
+                            )
+                            else -> MainScreen(
+                                uiState = uiState,
+                                onSignOut = { viewModel.signOut() },
+                                activityMainViewModel = viewModel
                             )
                         }
                     }
 
                     else -> {
-                        // Empty background while redirecting
-                        Box(modifier = Modifier.fillMaxSize())
+                        // Visitors may browse callable-backed opportunities, but applying
+                        // deliberately routes them into the existing sign-in flow.
+                        VolunteerOpportunitiesScreen(
+                            initialTab = VolunteerOpportunityTab.EVENTS,
+                            viewModel = viewModel<VolunteerOpportunitiesViewModel>(),
+                            onSignInRequested = {
+                                startActivity(Intent(this@MainActivity, LoginActivity::class.java))
+                            },
+                        )
                     }
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        offerNavigationFromLaunchIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.onAppForeground()
     }
 }

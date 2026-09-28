@@ -21,9 +21,9 @@ class ChatInboxFragment : Fragment() {
 
             setContent {
                 VolunteersAppTheme {
-                    // It hosts the main screen and passes the NavController
-                    // so the "Chats" tab can navigate to a specific chat.
-                    ChatInboxScreen(navController = findNavController())
+                    ChatInboxScreen(
+                        navController = findNavController(),
+                    )
                 }
             }
         }

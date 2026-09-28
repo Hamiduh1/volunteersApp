@@ -3,7 +3,8 @@ package com.example.volunteersApp.wallet
 import com.google.gson.annotations.SerializedName
 import retrofit2.http.GET
 import retrofit2.http.Path
-
+// this file is not use, have correctly moved this logic to
+// the server-side inside your getSecureExchangeRate Cloud Function.
 /**
  * Modern Interface for External Exchange Rate API.
  * Used to calculate accurate cross-border fees for global volunteers.

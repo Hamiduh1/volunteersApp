@@ -6,7 +6,9 @@ enum FirestoreCollection: String, CaseIterable {
     case employers
     case events
     case jobs
+    case jobPosts
     case applications
+    case eventApplications = "event_applications"
     case liveSessions = "live_sessions"
     case joinRequests = "join_requests"
     case chats
@@ -20,10 +22,17 @@ enum FirestoreCollection: String, CaseIterable {
     case garageSalePayments = "garage_sale_payments"
     case appConfig = "app_config"
     case system
+    case settings
     case howToUseTips
+    case galleryUploads
     case generalSupportItems = "general_support_items"
     case amlCftContent = "aml_cft_content"
     case userReports = "user_reports"
+    case userReportsLegacy = "userReports"
+    case blindDateProfiles
+    case blindDateInvitations
+    case blindDateSentInvitations
+    case datingProfiles = "dating_profiles"
 }
 
 enum FirestoreSubcollection: String {
@@ -33,13 +42,16 @@ enum FirestoreSubcollection: String {
     case invitations
     case chatInvitations = "chat_invitations"
     case blindDateInvitations
+    case blindDateSentInvitations
     case hostedEvents
     case jokes
     case followers
     case following
     case applications
+    case eventApplications = "event_applications"
     case messages
     case callLogs = "call_logs"
+    case incomingCallSessions = "incoming_call_sessions"
     case comments
 }
 
@@ -50,6 +62,8 @@ enum FirestoreCollectionGroup: String {
 
 enum CallableFunction: String, CaseIterable {
     case getAgoraRtcToken
+    case createCallSession
+    case createLiveReplayAccessLink
     case requestEmailVerificationCode
     case verifyEmailVerificationCode
     case bootstrapOwnerSelf
@@ -58,6 +72,9 @@ enum CallableFunction: String, CaseIterable {
     case declineBlindDateInvitation
     case rejoinBlindDate
     case getSecureExchangeRate
+    case getAfriexInstitutions
+    case saveVerifiedBeneficiary
+    case refreshSavedBeneficiaryVerification
     case createBeneficiaryVerification
     case initiateTransfer
     case payForAgentRole
@@ -77,6 +94,7 @@ enum CallableFunction: String, CaseIterable {
     case supportGetUserAccountDetails
     case adminListPayoutRequests
     case adminReversePayoutRequestsCallable
+    case getRecipientPayoutMethods
 }
 
 enum StorageFolder: String {
@@ -84,6 +102,7 @@ enum StorageFolder: String {
     case eventImages = "event_images"
     case blindDateMedia = "blind_date_media"
     case datingImages = "dating_images"
+    case galleryUploads = "gallery_uploads"
     case jokeImages = "joke_images"
     case jokeVideos = "joke_videos"
     case jokeDocs = "joke_docs"

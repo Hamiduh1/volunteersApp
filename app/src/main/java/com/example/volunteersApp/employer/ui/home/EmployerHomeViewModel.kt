@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FirestoreSubcollection
 
 data class EmployerHomeUiState(
     val welcomeMessage: String = "Welcome!",
@@ -42,15 +44,19 @@ class EmployerHomeViewModel : ViewModel() {
             val userId = auth.currentUser?.uid ?: return@launch
 
             try {
-                val jobsSnapshot = db.collection("jobs").whereEqualTo("employerId", userId).get().await()
-                val applicationCount = jobsSnapshot.documents.sumOf { doc ->
-                    doc.getLong("applicationCount") ?: 0
-                }
+                val jobsSnapshot = db.collection(FirestoreCollection.JOBS)
+                    .whereEqualTo("employerUid", userId)
+                    .get()
+                    .await()
+                val applicationsSnapshot = db.collection(FirestoreSubcollection.APPLICATIONS)
+                    .whereEqualTo("employerUid", userId)
+                    .get()
+                    .await()
 
                 _uiState.update {
                     it.copy(
                         jobCount = jobsSnapshot.size(),
-                        applicationCount = applicationCount.toInt(),
+                        applicationCount = applicationsSnapshot.size(),
                         isLoading = false
                     )
                 }

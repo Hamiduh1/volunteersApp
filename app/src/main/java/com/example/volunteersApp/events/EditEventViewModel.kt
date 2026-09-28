@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FirestoreSubcollection
+import com.example.volunteersApp.firebase.StorageFolder
 
 data class EditEventUiState(
     val initialEvent: EventModel? = null,
@@ -39,7 +42,7 @@ class EditEventViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                val doc = db.collection("events").document(eventId).get().await()
+                val doc = db.collection(FirestoreCollection.EVENTS).document(eventId).get().await()
                 val event = doc.toObject(EventModel::class.java)
                 _uiState.update { it.copy(initialEvent = event, isLoading = false) }
             } catch (e: Exception) {
@@ -70,7 +73,9 @@ class EditEventViewModel : ViewModel() {
 
                 // 1. Upload new image if the user picked one, which overwrites the URL.
                 newImageUri?.let {
-                    val ref = storage.reference.child("event_images/${UUID.randomUUID()}.jpg")
+                    val ref = storage.reference.child(
+                        StorageFolder.eventImage(organizerId, eventId, "${UUID.randomUUID()}.jpg")
+                    )
                     ref.putFile(it).await()
                     finalImageUrl = ref.downloadUrl.await().toString()
                     // Optional: In a production app, you might want to delete the old image here.
@@ -81,9 +86,9 @@ class EditEventViewModel : ViewModel() {
 
                 // 2. Perform Batch Write
                 db.runBatch { batch ->
-                    val eventRef = db.collection("events").document(eventId)
-                    val summaryRef = db.collection("users").document(organizerId)
-                        .collection("hostedEvents").document(eventId)
+                    val eventRef = db.collection(FirestoreCollection.EVENTS).document(eventId)
+                    val summaryRef = db.collection(FirestoreCollection.USERS).document(organizerId)
+                        .collection(FirestoreSubcollection.HOSTED_EVENTS).document(eventId)
 
                     // A) Update the main event document.
                     batch.update(eventRef, finalUpdates)

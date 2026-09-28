@@ -33,12 +33,13 @@ class LiveStreamsFragment : Fragment() {
                         viewModel = viewModel,
                         onBack = { findNavController().popBackStack() },
                         onStreamClick = { session ->
-                            // Handle Clicks: Launch LiveStreamActivity as a viewer
-                            val intent = Intent(requireContext(), LiveStreamActivity::class.java).apply {
-                                putExtra("CHANNEL_NAME", session.agoraChannelName)
-                                putExtra("IS_HOST", false) // User is joining as a viewer
-                            }
-                            startActivity(intent)
+                            startActivity(
+                                LiveLaunchIntent.liveRoomIntent(
+                                    context = requireContext(),
+                                    target = LiveLaunchTarget(sessionId = session.sessionId),
+                                    isHost = false,
+                                )
+                            )
                         }
                     )
                 }

@@ -2,6 +2,7 @@ package com.example.volunteersApp.streams
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -18,6 +19,9 @@ class StartStreamActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val sourceType = intent.getStringExtra(EXTRA_SOURCE_TYPE)?.trim()?.ifBlank { null } ?: "standalone"
+        val linkedEventId = intent.getStringExtra(EXTRA_EVENT_ID)?.trim()?.ifBlank { null }
+        viewModel.setLaunchContext(sourceType, linkedEventId)
 
         setContent {
             VolunteersAppTheme {
@@ -26,12 +30,16 @@ class StartStreamActivity : ComponentActivity() {
                     viewModel.events.collectLatest { event ->
                         when (event) {
                             is StartStreamEvent.Success -> {
-                                val intent = Intent(this@StartStreamActivity, LiveStreamActivity::class.java).apply {
-                                    putExtra("CHANNEL_NAME", event.sessionId)
-                                    putExtra("IS_HOST", true)
-                                    putExtra("SHARE_LINK", event.shareLink)
+                                event.mindLoomMessage?.let { message ->
+                                    Toast.makeText(this@StartStreamActivity, message, Toast.LENGTH_LONG).show()
                                 }
-                                startActivity(intent)
+                                startActivity(
+                                    LiveLaunchIntent.liveRoomIntent(
+                                        context = this@StartStreamActivity,
+                                        target = LiveLaunchTarget(sessionId = event.sessionId),
+                                        isHost = true,
+                                    )
+                                )
                                 finish()
                             }
                         }
@@ -41,13 +49,15 @@ class StartStreamActivity : ComponentActivity() {
                 StartStreamScreen(
                     viewModel = viewModel,
                     onBack = { finish() },
-                    onStreamStarted = {
-                        // This is intentionally left blank because navigation is handled
-                        // by a LaunchedEffect within this activity, which observes the
-                        // same view model event. This avoids duplicate navigation logic.
-                    }
+                    onStreamStarted = { },
+                    offerShareChooserOnStart = false,
                 )
             }
         }
+    }
+
+    companion object {
+        const val EXTRA_SOURCE_TYPE = "extra_live_source_type"
+        const val EXTRA_EVENT_ID = "extra_live_event_id"
     }
 }

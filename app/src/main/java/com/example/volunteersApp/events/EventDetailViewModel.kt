@@ -3,6 +3,7 @@ package com.example.volunteersApp.events
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.firebase.CallableFunction
 import com.example.volunteersApp.firebase.FunctionsClient
 import com.example.volunteersApp.jobs.JobDetailViewModel.ApplicationStatus
 import com.example.volunteersApp.models.EventModel
@@ -18,6 +19,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FirestoreSubcollection
+import com.example.volunteersApp.wallet.isPendingCommercePaymentStatus
+import com.example.volunteersApp.wallet.normalizeCommercePaymentStatus
+import com.example.volunteersApp.wallet.parseProviderCollectionOutcome
 
 data class EventDetailUiState(
     val event: EventModel? = null,
@@ -26,7 +32,10 @@ data class EventDetailUiState(
     val error: String? = null,
     val isOrganizer: Boolean = false,
     val applicationStatus: ApplicationStatus = ApplicationStatus.UNKNOWN,
-    val walletBalance: Double = 0.0
+    val paymentCollectionStatus: String? = null,
+    val isPaymentCollectionPending: Boolean = false,
+    val paymentCollectionDetail: String? = null,
+    val checkoutUrl: String? = null
 )
 
 class EventDetailViewModel : ViewModel() {
@@ -50,13 +59,11 @@ class EventDetailViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                val eventDocDeferred = db.collection("events").document(eventId).get()
-                val userDocDeferred = db.collection("users").document(userId).get()
-                val applicationDocDeferred = db.collection("events").document(eventId)
-                    .collection("applications").document(userId).get()
+                val eventDocDeferred = db.collection(FirestoreCollection.EVENTS).document(eventId).get()
+                val applicationDocDeferred = db.collection(FirestoreCollection.EVENTS).document(eventId)
+                    .collection(FirestoreSubcollection.APPLICATIONS).document(userId).get()
 
                 val eventDoc = eventDocDeferred.await()
-                val userDoc = userDocDeferred.await()
                 val applicationDoc = applicationDocDeferred.await()
 
                 val event = eventDoc.toObject(EventModel::class.java)
@@ -66,20 +73,24 @@ class EventDetailViewModel : ViewModel() {
                 }
 
                 val isOrganizer = event.organizerId == userId
-                val wallet = userDoc.get("wallet") as? Map<*, *>
-                val balance = (wallet?.get("balance") as? Number)?.toDouble() ?: 0.0
+                val paymentStatus = normalizeCommercePaymentStatus(
+                    applicationDoc.getString("paymentStatus")
+                        ?: applicationDoc.getString("paymentCollectionStatus")
+                        ?: applicationDoc.getString("collectionStatus")
+                )
+                val paymentPending = isPendingCommercePaymentStatus(paymentStatus)
+                val paymentDetail = applicationDoc.getString("paymentDetail")
+                    ?: applicationDoc.getString("paymentMessage")
 
-                // FIX: Corrected the logic to determine the status.
-                // The `isOrganizer` flag is handled separately by the UI.
                 val status = if (applicationDoc.exists()) {
                     when (applicationDoc.getString("status")?.lowercase()) {
-                        "pending" -> ApplicationStatus.APPLIED_PENDING
+                        "pending", "pending_payment" -> ApplicationStatus.APPLIED_PENDING
                         "approved", "accepted" -> ApplicationStatus.APPROVED
                         "rejected" -> ApplicationStatus.REJECTED
                         else -> ApplicationStatus.UNKNOWN
                     }
                 } else if (event.closeEntries) {
-                    ApplicationStatus.JOB_CLOSED // Using JOB_CLOSED as it represents the same UI state
+                    ApplicationStatus.JOB_CLOSED
                 } else {
                     ApplicationStatus.CAN_APPLY
                 }
@@ -87,9 +98,11 @@ class EventDetailViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(
                         event = event,
-                        walletBalance = balance,
-                        isOrganizer = isOrganizer, // This is what the UI will use to show/hide the management bar
+                        isOrganizer = isOrganizer,
                         applicationStatus = status,
+                        paymentCollectionStatus = paymentStatus,
+                        isPaymentCollectionPending = paymentPending,
+                        paymentCollectionDetail = paymentDetail,
                         isLoading = false
                     )
                 }
@@ -105,24 +118,41 @@ class EventDetailViewModel : ViewModel() {
         val currentState = _uiState.value
         val event = currentState.event ?: return
 
-        if (event.eventFee > 0 && currentState.walletBalance < event.eventFee) {
-            viewModelScope.launch { _actionResult.emit(Resource.Error("Insufficient wallet balance.")) }
-            return
-        }
-
         viewModelScope.launch {
             _uiState.update { it.copy(isActionLoading = true) }
             try {
                 val result = FunctionsClient.callMap(
-                    "applyForEvent",
+                    CallableFunction.APPLY_FOR_EVENT,
                     mapOf("eventId" to eventId)
                 )
-                val success = result?.get("success") as? Boolean ?: false
-                if (!success) {
-                    throw IllegalStateException("Event signup failed. Please try again.")
+                val outcome = parseProviderCollectionOutcome(result)
+                val success = result?.get("success") as? Boolean ?: outcome.isAccessUnlocked
+                val checkoutUrl = result?.get("checkoutUrl") as? String
+                if (!success && !outcome.isPending) {
+                    throw IllegalStateException(
+                        outcome.message.ifBlank { "Event signup failed. Please try again." }
+                    )
                 }
 
+                val message = when {
+                    event.eventFee <= 0 -> "Application submitted."
+                    outcome.isAccessUnlocked -> outcome.message.ifBlank { "Payment confirmed. Application submitted." }
+                    outcome.isPending -> outcome.message.ifBlank {
+                        "Provider payment is processing. Your application unlocks after confirmation."
+                    }
+                    else -> outcome.message.ifBlank { "Application submitted." }
+                }
                 _actionResult.emit(Resource.Success(Unit))
+                if (outcome.isPending || !checkoutUrl.isNullOrBlank()) {
+                    _uiState.update {
+                        it.copy(
+                            isPaymentCollectionPending = true,
+                            paymentCollectionStatus = outcome.paymentStatus ?: "pending",
+                            paymentCollectionDetail = message,
+                            checkoutUrl = checkoutUrl
+                        )
+                    }
+                }
                 loadEventDetails(eventId)
 
             } catch (e: Exception) {
@@ -134,12 +164,16 @@ class EventDetailViewModel : ViewModel() {
         }
     }
 
+    fun consumeCheckoutUrl() {
+        _uiState.update { it.copy(checkoutUrl = null) }
+    }
+
     fun updateEntryStatus(eventId: String, closeEntries: Boolean) {
         if (!_uiState.value.isOrganizer) return
         viewModelScope.launch {
             _uiState.update { it.copy(isActionLoading = true) }
             try {
-                db.collection("events").document(eventId)
+                db.collection(FirestoreCollection.EVENTS).document(eventId)
                     .update("closeEntries", closeEntries)
                     .await()
 

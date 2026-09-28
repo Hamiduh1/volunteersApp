@@ -1,395 +1,1070 @@
-package com.example.volunteersApp.streams
+﻿package com.example.volunteersApp.streams
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+
+
 import androidx.compose.foundation.background
+
 import androidx.compose.foundation.layout.Arrangement
+
 import androidx.compose.foundation.layout.Box
+
 import androidx.compose.foundation.layout.Column
+
 import androidx.compose.foundation.layout.PaddingValues
+
 import androidx.compose.foundation.layout.Row
+
 import androidx.compose.foundation.layout.Spacer
+
 import androidx.compose.foundation.layout.fillMaxSize
+
 import androidx.compose.foundation.layout.fillMaxWidth
+
 import androidx.compose.foundation.layout.height
+
 import androidx.compose.foundation.layout.padding
+
 import androidx.compose.foundation.layout.size
+
 import androidx.compose.foundation.layout.width
+
 import androidx.compose.foundation.lazy.LazyColumn
+
 import androidx.compose.foundation.lazy.items
+
 import androidx.compose.foundation.shape.CircleShape
+
 import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Clear
+
 import androidx.compose.material.icons.filled.LiveTv
+
 import androidx.compose.material.icons.filled.Person
+
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.WifiTethering
+
+import androidx.compose.material.icons.filled.Visibility
+
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+
 import androidx.compose.material3.CircularProgressIndicator
+
+import androidx.compose.material3.ElevatedButton
+
 import androidx.compose.material3.ExperimentalMaterial3Api
+
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
+
 import androidx.compose.material3.MaterialTheme
+
 import androidx.compose.material3.Scaffold
+
 import androidx.compose.material3.SnackbarDuration
+
 import androidx.compose.material3.SnackbarHost
+
 import androidx.compose.material3.SnackbarHostState
+
 import androidx.compose.material3.Surface
+
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+
 import androidx.compose.runtime.Composable
+
 import androidx.compose.runtime.LaunchedEffect
+
 import androidx.compose.runtime.collectAsState
+
 import androidx.compose.runtime.getValue
+
 import androidx.compose.runtime.remember
+
 import androidx.compose.runtime.rememberCoroutineScope
+
 import androidx.compose.ui.Alignment
+
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+
+import androidx.compose.ui.draw.clip
+
 import androidx.compose.ui.graphics.Brush
+
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+
+import androidx.compose.ui.platform.LocalContext
+
 import androidx.compose.ui.text.font.FontWeight
+
 import androidx.compose.ui.text.style.TextAlign
+
 import androidx.compose.ui.text.style.TextOverflow
+
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+
 import com.google.accompanist.swiperefresh.SwipeRefresh
+
 import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
+
+import com.google.firebase.Firebase
+
+import com.google.firebase.auth.auth
+
 import kotlinx.coroutines.launch
 
+
+
 @OptIn(ExperimentalMaterial3Api::class)
+
 @Composable
+
 fun LiveStreamsScreen(
+
     viewModel: LiveStreamsViewModel,
+
     onBack: () -> Unit,
+
     onStreamClick: (LiveSession) -> Unit
+
 ) {
+
     val uiState by viewModel.uiState.collectAsState()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
     val snackbarHostState = remember { SnackbarHostState() }
+
     val scope = rememberCoroutineScope()
+
     val filteredSessions = uiState.filteredSessions
 
-    // Accompanist SwipeRefresh state is much simpler
+    val context = LocalContext.current
+
+    val currentUserId = Firebase.auth.currentUser?.uid
+
     val swipeRefreshState = rememberSwipeRefreshState(isRefreshing = uiState.isLoading)
 
-    LaunchedEffect(uiState.error) {
-        if (uiState.error != null) {
+
+
+    LaunchedEffect(uiState.replayLinkError) {
+
+        if (uiState.replayLinkError != null) {
+
             scope.launch {
+
+                snackbarHostState.showSnackbar(uiState.replayLinkError!!, duration = SnackbarDuration.Long)
+
+                viewModel.clearReplayLinkError()
+
+            }
+
+        }
+
+    }
+
+
+
+    LaunchedEffect(uiState.requestSubmissionError) {
+
+        if (uiState.requestSubmissionError != null) {
+
+            scope.launch {
+
                 snackbarHostState.showSnackbar(
-                    message = uiState.error!!,
-                    duration = SnackbarDuration.Long
+
+                    message = uiState.requestSubmissionError!!,
+
+                    duration = SnackbarDuration.Short
+
                 )
-                viewModel.resetError()
+
+                viewModel.clearRequestError()
+
             }
+
         }
+
     }
 
-    Scaffold(
-        modifier = Modifier
-            .fillMaxSize()
-            .nestedScroll(scrollBehavior.nestedScrollConnection),
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        topBar = {
-            if (uiState.isSearching) {
-                SearchAppBar(
-                    query = uiState.searchQuery,
-                    onQueryChange = viewModel::onSearchQueryChange,
-                    onClose = viewModel::toggleSearch
-                )
-            } else {
-                LargeTopAppBar(
-                    title = {
-                        Column {
-                            Text("Live Now", fontWeight = FontWeight.ExtraBold)
-                            Text(
-                                "Discover active broadcasts",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = viewModel::toggleSearch) {
-                            Icon(Icons.Default.Search, contentDescription = "Search Streams")
-                        }
-                    },
-                    scrollBehavior = scrollBehavior
-                )
-            }
-        }
-    ) { padding ->
-        // BYPASS: Use SwipeRefresh instead of Box + PullToRefreshContainer
-        SwipeRefresh(
-            state = swipeRefreshState,
-            onRefresh = viewModel::onRefresh,
-            modifier = Modifier.padding(padding)
-        ) {
-            if (uiState.isLoading && filteredSessions.isEmpty()) {
-                // Don't show the full-screen loading view, as SwipeRefresh shows an indicator
-                // Keep the box to center the placeholder if needed later.
-                Box(modifier = Modifier.fillMaxSize())
-            } else if (filteredSessions.isEmpty()) {
-                // Wrap Empty state in a scrollable container so pull-to-refresh works on it
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    item { EmptyStreamsPlaceholder(isSearching = uiState.isSearching) }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
-                ) {
-                    items(filteredSessions, key = { it.agoraChannelName }) { session ->
-                        ModernStreamCard(
-                            session = session,
-                            onClick = { onStreamClick(session) }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SearchAppBar(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onClose: () -> Unit
-) {
-    val focusRequester = remember { FocusRequester() }
+    val liveCount = filteredSessions.count { it.isLive }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
 
-    TopAppBar(
-        title = {
-            TextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester),
-                placeholder = { Text("Search by title, description, or host...") },
-                singleLine = true,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    disabledContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
-                )
-            )
-        },
-        navigationIcon = {
-            IconButton(onClick = onClose) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close Search")
-            }
-        },
-        actions = {
-            AnimatedVisibility(visible = query.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
-                IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Default.Clear, contentDescription = "Clear Search")
-                }
-            }
-        }
-    )
-}
 
-@Composable
-fun ModernStreamCard(session: LiveSession, onClick: () -> Unit) {
-    val cardColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    LiveStudioTheme {
 
-    Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = cardColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)
-                            )
-                        )
-                    )
+        Scaffold(
+
+            modifier = Modifier.fillMaxSize(),
+
+            containerColor = LiveStudioBackground,
+
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+
+        ) { padding ->
+
+            SwipeRefresh(
+
+                state = swipeRefreshState,
+
+                onRefresh = viewModel::onRefresh,
+
+                modifier = Modifier.padding(padding)
+
             ) {
-                Row(
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .align(Alignment.TopStart),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        color = Color.Red,
-                        shape = CircleShape
-                    ) {
-                        Box(modifier = Modifier.size(8.dp))
-                    }
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "LIVE",
-                        color = Color.White,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 12.sp,
-                        letterSpacing = 1.sp
+
+                when {
+
+                    uiState.isLoading && filteredSessions.isEmpty() && uiState.error == null -> LoadingView()
+
+                    else -> LiveStreamsContent(
+
+                        uiState = uiState,
+
+                        filteredSessions = filteredSessions,
+
+                        liveCount = liveCount,
+
+                        currentUserId = currentUserId,
+
+                        onBack = onBack,
+
+                        onStreamClick = onStreamClick,
+
+                        viewModel = viewModel,
+
+                        context = context,
+
                     )
+
                 }
+
+            }
+
+        }
+
+    }
+
+}
+
+
+
+@Composable
+
+private fun LiveStreamsContent(
+
+    uiState: LiveStreamsUiState,
+
+    filteredSessions: List<LiveSession>,
+
+    liveCount: Int,
+
+    currentUserId: String?,
+
+    onBack: () -> Unit,
+
+    onStreamClick: (LiveSession) -> Unit,
+
+    viewModel: LiveStreamsViewModel,
+
+    context: android.content.Context,
+
+) {
+
+    LazyColumn(
+
+        modifier = Modifier.fillMaxSize(),
+
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+
+    ) {
+
+        item(key = "studio_header") {
+
+            if (uiState.isSearching) {
+
+                LiveStudioSearchBar(
+
+                    value = uiState.searchQuery,
+
+                    onValueChange = viewModel::onSearchQueryChange,
+
+                    onClear = { viewModel.onSearchQueryChange("") },
+
+                    onClose = viewModel::toggleSearch,
+
+                )
+
+            } else {
+
+                LiveStudioHeader(
+
+                    liveCount = liveCount,
+
+                    onBack = onBack,
+
+                    onSearch = viewModel::toggleSearch,
+
+                    onRefresh = viewModel::onRefresh,
+
+                )
+
+            }
+
+        }
+
+
+
+        if (!uiState.isSearching) {
+
+            item(key = "studio_hero") {
+
+                LiveStudioHeroCard(liveCount = liveCount)
+
+            }
+
+        }
+
+
+
+        val studioError = uiState.error
+        if (studioError != null) {
+
+            item(key = "studio_error") {
+
+                LiveStudioErrorBanner(
+
+                    message = studioError,
+
+                    onRetry = viewModel::onRefresh,
+
+                    onDismiss = viewModel::resetError,
+
+                )
+
+            }
+
+        }
+
+
+
+        if (filteredSessions.isNotEmpty() || !uiState.isSearching) {
+
+            item(key = "studio_filters") {
+
+                LiveStudioFilterRow(
+
+                    selectedFilter = uiState.studioFilter,
+
+                    selectedFeed = uiState.studioFeed,
+
+                    onFilterSelected = viewModel::onStudioFilterChange,
+
+                    onFeedSelected = viewModel::onStudioFeedChange,
+
+                )
+
+            }
+
+        }
+
+
+
+        if (filteredSessions.isEmpty()) {
+
+            item(key = "studio_empty") {
+
+                EmptyStreamsPlaceholder(isSearching = uiState.isSearching)
+
+            }
+
+        } else {
+
+            items(filteredSessions, key = { it.sessionId }) { session ->
+
+                ModernStreamCard(
+
+                    session = session,
+
+                    onOpenFullScreen = {
+
+                        if (session.isLive) onStreamClick(session)
+
+                    },
+
+                    onWatchReplay = {
+
+                        context.startActivity(
+
+                            LiveArchivePlayerIntent.create(
+
+                                context = context,
+
+                                sessionId = session.sessionId,
+
+                                title = session.title,
+
+                            )
+
+                        )
+
+                    },
+
+                    onRequestJoin = if (session.isLive && session.stageAccessMode == LiveStageAccessMode.REQUEST_TO_JOIN) {
+
+                        { viewModel.submitJoinRequest(it) }
+
+                    } else {
+
+                        null
+
+                    },
+
+                    isRequestPending = uiState.pendingRequestStreamIds.contains(session.sessionId) ||
+
+                        uiState.submittingRequestStreamId == session.sessionId,
+
+                    isJoined = session.sessionId in uiState.acceptedStreamIds,
+
+                    isReplayLoading = uiState.replayLinkLoadingId == session.sessionId,
+
+                    canOpenLive = canOpenLiveFromFeed(
+
+                        session = session,
+
+                        isJoined = session.sessionId in uiState.acceptedStreamIds,
+
+                        currentUserId = currentUserId,
+
+                        followingHostIds = uiState.followingHostIds,
+
+                        acceptedEventIds = uiState.acceptedEventIds,
+
+                    ),
+
+                    canWatchReplay = session.canWatchReplay(
+
+                        currentUserId = currentUserId,
+
+                        followingHostIds = uiState.followingHostIds,
+
+                    ),
+
+                )
+
+            }
+
+        }
+
+    }
+
+}
+
+
+
+@Composable
+
+fun ModernStreamCard(
+
+    session: LiveSession,
+
+    onOpenFullScreen: () -> Unit,
+
+    onWatchReplay: (() -> Unit)? = null,
+
+    onRequestJoin: ((LiveSession) -> Unit)? = null,
+
+    isRequestPending: Boolean = false,
+
+    isJoined: Boolean = false,
+
+    isReplayLoading: Boolean = false,
+
+    canOpenLive: Boolean = true,
+
+    canWatchReplay: Boolean = true,
+
+) {
+
+    val cardGradient = when {
+
+        session.isLive -> listOf(Color(0xFFB42318), Color(0xFFE53935))
+
+        session.isArchiveReady -> listOf(Color(0xFF1D4ED8), Color(0xFF3B82F6))
+
+        else -> listOf(Color(0xFF475569), Color(0xFF64748B))
+
+    }
+
+
+
+    Surface(
+
+        onClick = {
+
+            when {
+
+                session.isLive && !isRequestPending && canOpenLive -> onOpenFullScreen()
+
+                session.isArchiveReady && canWatchReplay -> onWatchReplay?.invoke()
+
+            }
+
+        },
+
+        modifier = Modifier.fillMaxWidth(),
+
+        shape = RoundedCornerShape(18.dp),
+
+        color = LiveStudioSurface,
+
+        shadowElevation = 1.dp,
+
+        tonalElevation = 0.dp,
+
+    ) {
+
+        Column {
+
+            Box(
+
+                modifier = Modifier
+
+                    .fillMaxWidth()
+
+                    .height(6.dp)
+
+                    .background(Brush.horizontalGradient(cardGradient))
+
+            )
+
+            Column(modifier = Modifier.padding(14.dp)) {
+
+                Row(
+
+                    modifier = Modifier.fillMaxWidth(),
+
+                    horizontalArrangement = Arrangement.SpaceBetween,
+
+                    verticalAlignment = Alignment.CenterVertically,
+
+                ) {
+
+                    LiveStatusPill(
+
+                        label = when {
+
+                            session.isLive -> "LIVE"
+
+                            session.isArchiveReady -> "REPLAY"
+
+                            else -> "ENDED"
+
+                        },
+
+                        isLive = session.isLive,
+
+                    )
+
+                    LiveStatusPill(
+
+                        label = session.viewAccessMode.labelShort,
+
+                        isLive = false,
+
+                    )
+
+                }
+
+
+
+                Spacer(Modifier.height(12.dp))
+
+
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+
+                    Box(
+
+                        modifier = Modifier
+
+                            .size(42.dp)
+
+                            .clip(CircleShape)
+
+                            .background(LiveStudioAccentSoft),
+
+                        contentAlignment = Alignment.Center,
+
+                    ) {
+
+                        Text(
+
+                            text = session.hostName.firstOrNull()?.uppercase() ?: "?",
+
+                            style = MaterialTheme.typography.titleMedium,
+
+                            fontWeight = FontWeight.Bold,
+
+                            color = LiveStudioAccent,
+
+                        )
+
+                    }
+
+                    Spacer(Modifier.width(12.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+
+                        Text(
+
+                            text = session.title.ifBlank { "Live Session" },
+
+                            style = MaterialTheme.typography.titleMedium,
+
+                            fontWeight = FontWeight.SemiBold,
+
+                            maxLines = 1,
+
+                            overflow = TextOverflow.Ellipsis,
+
+                        )
+
+                        Text(
+
+                            text = session.hostName.ifBlank { "Host" },
+
+                            style = MaterialTheme.typography.bodySmall,
+
+                            color = LiveStudioMuted,
+
+                            maxLines = 1,
+
+                            overflow = TextOverflow.Ellipsis,
+
+                        )
+
+                    }
+
+                    if (session.isLive) {
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+
+                            Icon(
+
+                                Icons.Default.Visibility,
+
+                                contentDescription = null,
+
+                                modifier = Modifier.size(14.dp),
+
+                                tint = LiveStudioMuted,
+
+                            )
+
+                            Spacer(Modifier.width(4.dp))
+
+                            Text(
+
+                                text = "${session.viewerCount}",
+
+                                style = MaterialTheme.typography.labelMedium,
+
+                                color = LiveStudioMuted,
+
+                                fontWeight = FontWeight.Medium,
+
+                            )
+
+                        }
+
+                    }
+
+                }
+
+
+
+                if (session.description.isNotBlank()) {
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+
+                        text = session.description,
+
+                        style = MaterialTheme.typography.bodySmall,
+
+                        color = LiveStudioMuted,
+
+                        maxLines = 2,
+
+                        overflow = TextOverflow.Ellipsis,
+
+                    )
+
+                }
+
+
+
+                Spacer(Modifier.height(14.dp))
+
+
+
+                StreamActionButton(
+
+                    session = session,
+
+                    onOpenFullScreen = onOpenFullScreen,
+
+                    onWatchReplay = onWatchReplay,
+
+                    onRequestJoin = onRequestJoin,
+
+                    isRequestPending = isRequestPending,
+
+                    isJoined = isJoined,
+
+                    isReplayLoading = isReplayLoading,
+
+                    canOpenLive = canOpenLive,
+
+                    canWatchReplay = canWatchReplay,
+
+                )
+
+            }
+
+        }
+
+    }
+
+}
+
+
+
+@Composable
+
+private fun StreamActionButton(
+
+    session: LiveSession,
+
+    onOpenFullScreen: () -> Unit,
+
+    onWatchReplay: (() -> Unit)?,
+
+    onRequestJoin: ((LiveSession) -> Unit)?,
+
+    isRequestPending: Boolean,
+
+    isJoined: Boolean,
+
+    isReplayLoading: Boolean,
+
+    canOpenLive: Boolean,
+
+    canWatchReplay: Boolean,
+
+) {
+
+    if (onRequestJoin != null) {
+
+        ElevatedButton(
+
+            onClick = {
+
+                if (!isRequestPending && !isJoined) onRequestJoin(session)
+
+            },
+
+            enabled = !isRequestPending && !isJoined,
+
+            modifier = Modifier.fillMaxWidth(),
+
+            shape = RoundedCornerShape(12.dp),
+
+            colors = ButtonDefaults.elevatedButtonColors(
+
+                containerColor = LiveStudioAccent,
+
+                contentColor = Color.White,
+
+            ),
+
+        ) {
+
+            when {
+
+                isJoined -> Text("Joined", fontWeight = FontWeight.SemiBold)
+
+                isRequestPending -> Text("Requesting...", fontWeight = FontWeight.SemiBold)
+
+                else -> Text("Request to join stage", fontWeight = FontWeight.SemiBold)
+
+            }
+
+        }
+
+        return
+
+    }
+
+
+
+    ElevatedButton(
+
+        onClick = {
+
+            when {
+
+                session.isLive && canOpenLive -> onOpenFullScreen()
+
+                session.isArchiveReady && canWatchReplay -> onWatchReplay?.invoke()
+
+            }
+
+        },
+
+        enabled = (session.isLive && canOpenLive) ||
+
+            (session.isArchiveReady && !isReplayLoading && canWatchReplay),
+
+        modifier = Modifier.fillMaxWidth(),
+
+        shape = RoundedCornerShape(12.dp),
+
+        colors = ButtonDefaults.elevatedButtonColors(
+
+            containerColor = LiveStudioAccent,
+
+            contentColor = Color.White,
+
+            disabledContainerColor = Color(0x1F767680),
+
+            disabledContentColor = LiveStudioMuted,
+
+        ),
+
+    ) {
+
+        if (isReplayLoading) {
+
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+
+        } else {
+
+            Text(
+
+                when {
+
+                    session.isLive && !canOpenLive -> "Restricted"
+
+                    session.isArchiveReady && !canWatchReplay -> "Private replay"
+
+                    session.isLive -> "Watch live"
+
+                    session.isArchiveReady -> "Watch replay"
+
+                    else -> "Ended"
+
+                },
+
+                fontWeight = FontWeight.SemiBold,
+
+            )
+
+        }
+
+    }
+
+}
+
+
+
+private fun canOpenLiveFromFeed(
+
+    session: LiveSession,
+
+    isJoined: Boolean,
+
+    currentUserId: String?,
+
+    followingHostIds: Set<String>,
+
+    acceptedEventIds: Set<String>,
+
+): Boolean {
+
+    if (!session.isLive) return false
+
+    if (!currentUserId.isNullOrBlank() && currentUserId == session.hostId) return true
+
+    return when (session.viewAccessMode) {
+
+        LiveViewAccessMode.PUBLIC -> true
+
+        LiveViewAccessMode.FOLLOWERS_ONLY -> session.hostId in followingHostIds
+
+        LiveViewAccessMode.INVITE_ONLY -> isJoined
+
+        LiveViewAccessMode.ACCEPTED_EVENT_VOLUNTEERS ->
+
+            session.linkedEventId?.trim()?.takeIf { it.isNotBlank() } in acceptedEventIds
+
+    }
+
+}
+
+
+
+@Composable
+
+private fun LoadingView() {
+
+    Column(
+
+        modifier = Modifier.fillMaxSize(),
+
+        horizontalAlignment = Alignment.CenterHorizontally,
+
+        verticalArrangement = Arrangement.Center
+
+    ) {
+
+        CircularProgressIndicator(strokeWidth = 3.dp, color = LiveStudioAccent)
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+
+            "Tuning into streams...",
+
+            style = MaterialTheme.typography.bodyMedium,
+
+            color = LiveStudioMuted,
+
+            fontWeight = FontWeight.Medium,
+
+        )
+
+    }
+
+}
+
+
+
+@Composable
+
+private fun EmptyStreamsPlaceholder(isSearching: Boolean) {
+
+    val title = if (isSearching) "No results found" else "Quiet on the set"
+
+    val message = if (isSearching) {
+
+        "Try different keywords or clear your search."
+
+    } else {
+
+        "No live broadcasts match this filter. Pull down to refresh."
+
+    }
+
+
+
+    Surface(
+
+        modifier = Modifier.fillMaxWidth(),
+
+        shape = RoundedCornerShape(18.dp),
+
+        color = LiveStudioSurface,
+
+    ) {
+
+        Column(
+
+            modifier = Modifier.padding(32.dp),
+
+            horizontalAlignment = Alignment.CenterHorizontally,
+
+        ) {
+
+            Box(
+
+                modifier = Modifier
+
+                    .size(72.dp)
+
+                    .clip(CircleShape)
+
+                    .background(LiveStudioAccentSoft),
+
+                contentAlignment = Alignment.Center,
+
+            ) {
 
                 Icon(
-                    Icons.Default.WifiTethering,
+
+                    imageVector = if (isSearching) Icons.Default.Search else Icons.Default.LiveTv,
+
                     contentDescription = null,
-                    modifier = Modifier
-                        .size(80.dp)
-                        .align(Alignment.Center)
-                        .graphicsLayer(alpha = 0.15f),
-                    tint = Color.White
+
+                    modifier = Modifier.size(36.dp),
+
+                    tint = LiveStudioAccent,
+
                 )
+
             }
 
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    text = session.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Spacer(Modifier.height(16.dp))
 
-                Spacer(Modifier.height(4.dp))
+            Text(
 
-                Text(
-                    text = session.description.ifEmpty { "Join the conversation and see what's happening live!" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 20.sp
-                )
+                text = title,
 
-                Spacer(Modifier.height(16.dp))
+                style = MaterialTheme.typography.titleLarge,
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            modifier = Modifier.size(28.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = CircleShape
-                        ) {
-                            Icon(
-                                Icons.Default.Person,
-                                contentDescription = null,
-                                modifier = Modifier.padding(6.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = session.hostName,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                fontWeight = FontWeight.Bold,
 
-                    TextButton(
-                        onClick = onClick,
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Text("Watch Now", fontWeight = FontWeight.Black)
-                    }
-                }
-            }
-        }
-    }
-}
+                color = LiveStudioInk,
 
-@Composable
-private fun LoadingView() {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        CircularProgressIndicator(strokeWidth = 3.dp)
-        Spacer(Modifier.height(16.dp))
-        Text("Tuning into streams...", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-    }
-}
-
-@Composable
-private fun EmptyStreamsPlaceholder(isSearching: Boolean) {
-    val title = if (isSearching) "No Results Found" else "Quiet on the set..."
-    val message = if (isSearching) {
-        "Try adjusting your search terms to find what you're looking for."
-    } else {
-        "There aren't any live broadcasts right now. Check back later to connect with the community!"
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Surface(
-                modifier = Modifier.size(120.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                shape = CircleShape
-            ) {}
-            Icon(
-                imageVector = if (isSearching) Icons.Default.Search else Icons.Default.LiveTv,
-                contentDescription = null,
-                modifier = Modifier.size(60.dp),
-                tint = MaterialTheme.colorScheme.outline
             )
+
+            Text(
+
+                text = message,
+
+                style = MaterialTheme.typography.bodyMedium,
+
+                color = LiveStudioMuted,
+
+                textAlign = TextAlign.Center,
+
+                modifier = Modifier.padding(top = 6.dp),
+
+            )
+
         }
-        Spacer(Modifier.height(24.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.ExtraBold
-        )
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyLarge,
-            color = Color.Gray,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 8.dp)
-        )
+
     }
+
 }
+
+
+
+private val LiveViewAccessMode.labelShort: String
+
+    get() = when (this) {
+
+        LiveViewAccessMode.PUBLIC -> "Public"
+
+        LiveViewAccessMode.FOLLOWERS_ONLY -> "Followers"
+
+        LiveViewAccessMode.INVITE_ONLY -> "Invite"
+
+        LiveViewAccessMode.ACCEPTED_EVENT_VOLUNTEERS -> "Event"
+
+    }
+
+

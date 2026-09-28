@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.organizer
 
 import androidx.compose.foundation.layout.Arrangement
@@ -18,8 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,8 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,6 +44,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.accompanist.swiperefresh.SwipeRefresh
+import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import com.example.volunteersApp.VertexViewModel
 import com.example.volunteersApp.models.EventModel
 import com.example.volunteersApp.models.EventWithVolunteerCount
@@ -53,14 +53,10 @@ import com.example.volunteersApp.models.Resource
 import com.example.volunteersApp.ui.shared.AiResponseDialog
 
 /**
- * Modernized OrganizerSummaryScreen using Material 3 and StateFlow.
+ * Modernized OrganizerSummaryScreen using Material 3, Accompanist SwipeRefresh, and StateFlow.
  * Handles summary metrics and actionable suggestions for event organizers.
- * This screen is powered by the OrganizerActivityViewModel.kt.
- * This ViewModel is responsible for fetching all the necessary data
- * from different parts of your database and combining it into
- * the summary view you see on the screen:
+ * Features: Pull-to-refresh capability, AI-powered suggestions, volunteer metrics, responsive design.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrganizerSummaryScreen(
     viewModel: OrganizerActivityViewModel,
@@ -71,7 +67,8 @@ fun OrganizerSummaryScreen(
 ) {
     // Collect the unified state from the ViewModel's StateFlow
     val uiState by viewModel.uiState.collectAsState()
-    val pullToRefreshState = rememberPullToRefreshState()
+    val isRefreshing = uiState.isLoading
+    val swipeRefreshState = rememberSwipeRefreshState(isRefreshing = isRefreshing)
 
     // --- Vertex AI State ---
     val aiResponse by vertexViewModel.generatedResponse.collectAsState()
@@ -95,9 +92,8 @@ fun OrganizerSummaryScreen(
         )
     }
 
-    PullToRefreshBox(
-        state = pullToRefreshState,
-        isRefreshing = uiState.isLoading,
+    SwipeRefresh(
+        state = swipeRefreshState,
         onRefresh = { viewModel.refreshData() },
         modifier = Modifier.fillMaxSize()
     ) {
@@ -165,6 +161,7 @@ fun OrganizerSummaryScreen(
         }
     }
 }
+
 
 @Composable
 fun SummarySectionHeader(title: String, icon: ImageVector) {

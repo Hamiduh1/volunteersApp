@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.ui.profile
 
 import androidx.compose.foundation.background
@@ -10,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -26,7 +29,6 @@ import androidx.compose.ui.unit.sp
  * Provides a high-end, readable interface for legal documentation.
  * Features text selection, structured layout, and Material 3 design.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TermsConditionsScreen(
     onNavigateUp: () -> Unit,
@@ -91,7 +93,7 @@ fun TermsConditionsScreen(
                             style = MaterialTheme.typography.bodyLarge
                         )
                         Spacer(modifier = Modifier.height(24.dp))
-                        Button(onClick = { /* ViewModel could have a refresh function */ }) {
+                        Button(onClick = { viewModel.refreshTerms() }) {
                             Text("Retry")
                         }
                     }

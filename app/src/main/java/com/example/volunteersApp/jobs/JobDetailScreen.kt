@@ -15,7 +15,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -114,7 +113,7 @@ fun JobDetailContent(job: Job) {
         if (job.responsibilities.isNotEmpty()) {
             Text("Responsibilities", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             job.responsibilities.forEach { resp ->
-                Text("• $resp", style = MaterialTheme.typography.bodyMedium)
+                Text("- $resp", style = MaterialTheme.typography.bodyMedium)
             }
         }
 
@@ -139,20 +138,19 @@ fun ApplyBottomBar(
 ) {
     Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
         Box(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            val (buttonText, color, enabled) = when (applicationStatus) {
-                JobDetailViewModel.ApplicationStatus.CAN_APPLY -> Triple("Apply Now", MaterialTheme.colorScheme.primary, true)
-                JobDetailViewModel.ApplicationStatus.APPLIED_PENDING -> Triple("Application Sent", Color.Gray, false)
-                JobDetailViewModel.ApplicationStatus.APPROVED -> Triple("Application Approved", Color(0xFF4CAF50), false)
-                JobDetailViewModel.ApplicationStatus.REJECTED -> Triple("Not Selected", Color.Red, false)
-                JobDetailViewModel.ApplicationStatus.JOB_CLOSED -> Triple("Job Closed", Color.Gray, false)
-                else -> Triple("Checking Status...", Color.Gray, false)
+            val (buttonText, enabled) = when (applicationStatus) {
+                JobDetailViewModel.ApplicationStatus.CAN_APPLY -> "Apply now" to true
+                JobDetailViewModel.ApplicationStatus.APPLIED_PENDING -> "Application sent" to false
+                JobDetailViewModel.ApplicationStatus.APPROVED -> "Application approved" to false
+                JobDetailViewModel.ApplicationStatus.REJECTED -> "Not selected" to false
+                JobDetailViewModel.ApplicationStatus.JOB_CLOSED -> "Applications closed" to false
+                else -> "Checking application status" to false
             }
 
             Button(
                 onClick = onApplyClicked,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 enabled = enabled,
-                colors = ButtonDefaults.buttonColors(containerColor = color),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(buttonText, fontWeight = FontWeight.Bold, fontSize = 16.sp)

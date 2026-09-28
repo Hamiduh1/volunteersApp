@@ -3,10 +3,14 @@ package com.example.volunteersApp.streams
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-// Import the LiveSession data class
-import com.example.volunteersApp.streams.LiveSession
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.chat.ensureFirestoreListenerPreflight
+import com.example.volunteersApp.chat.logFirestorePermissionDeniedDiagnostics
 import com.google.firebase.Firebase
+import com.google.firebase.app
 import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,12 +24,24 @@ import java.util.UUID
 data class StartStreamUiState(
     val title: String = "",
     val description: String = "",
+    val viewAccessMode: LiveViewAccessMode = LiveViewAccessMode.PUBLIC,
+    val stageAccessMode: LiveStageAccessMode = LiveStageAccessMode.REQUEST_TO_JOIN,
+    val replayVisibility: LiveReplayVisibility = LiveReplayVisibility.FOLLOWERS_ONLY,
+    val notifyFollowersOnStart: Boolean = true,
+    val postToMindLoomOnStart: Boolean = true,
+    val chatEnabled: Boolean = true,
+    val launchSourceType: String = "standalone",
+    val linkedEventId: String? = null,
     val isLoading: Boolean = false,
     val error: String? = null
 )
 
 sealed class StartStreamEvent {
-    data class Success(val sessionId: String, val shareLink: String) : StartStreamEvent()
+    data class Success(
+        val sessionId: String,
+        val shareLink: String,
+        val mindLoomMessage: String? = null,
+    ) : StartStreamEvent()
 }
 
 class StartStreamViewModel : ViewModel() {
@@ -39,28 +55,32 @@ class StartStreamViewModel : ViewModel() {
     private val _events = MutableSharedFlow<StartStreamEvent>()
     val events = _events.asSharedFlow()
 
-    fun onTitleChange(newTitle: String) {
-        _uiState.update { it.copy(title = newTitle) }
+    fun onTitleChange(newTitle: String) = _uiState.update { it.copy(title = newTitle.take(120)) }
+    fun onDescriptionChange(newDescription: String) = _uiState.update { it.copy(description = newDescription.take(2_000)) }
+    fun onViewAccessModeChange(mode: LiveViewAccessMode) = _uiState.update { it.copy(viewAccessMode = mode) }
+    fun onStageAccessModeChange(mode: LiveStageAccessMode) = _uiState.update { it.copy(stageAccessMode = mode) }
+    fun onReplayVisibilityChange(mode: LiveReplayVisibility) = _uiState.update { it.copy(replayVisibility = mode) }
+    fun onNotifyFollowersChange(enabled: Boolean) = _uiState.update { it.copy(notifyFollowersOnStart = enabled) }
+    fun onPostToMindLoomChange(enabled: Boolean) = _uiState.update { it.copy(postToMindLoomOnStart = enabled) }
+    fun onChatEnabledChange(enabled: Boolean) = _uiState.update { it.copy(chatEnabled = enabled) }
+
+    fun setLaunchSourceType(sourceType: String) =
+        _uiState.update { it.copy(launchSourceType = sourceType.ifBlank { "standalone" }) }
+
+    fun setLaunchContext(sourceType: String, linkedEventId: String?) {
+        val eventId = linkedEventId?.trim()?.takeIf { it.isNotBlank() }
+        _uiState.update {
+            it.copy(
+                launchSourceType = if (eventId != null) "event" else sourceType.ifBlank { "standalone" },
+                linkedEventId = eventId,
+            )
+        }
     }
 
-    fun onDescriptionChange(newDescription: String) {
-        _uiState.update { it.copy(description = newDescription) }
-    }
-
-    /**
-     * New function to allow the UI to reset the error state.
-     */
-    fun resetError() {
-        _uiState.update { it.copy(error = null) }
-    }
+    fun resetError() = _uiState.update { it.copy(error = null) }
 
     fun startStream() {
         val state = _uiState.value
-        if (state.title.isBlank()) {
-            _uiState.update { it.copy(error = "Title cannot be empty") }
-            return
-        }
-
         val currentUser = auth.currentUser ?: run {
             _uiState.update { it.copy(error = "User not logged in") }
             return
@@ -69,33 +89,163 @@ class StartStreamViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
+                // Auth + App Check must succeed before the create write. Firestore often surfaces
+                // App Check / auth failures as PERMISSION_DENIED on live_sessions.
+                ensureLiveCreatePreflight(currentUser.uid)
+
+                val activeSession = runCatching {
+                    db.collection(FirestoreCollection.LIVE_SESSIONS)
+                        .whereEqualTo("hostId", currentUser.uid)
+                        .whereIn("status", listOf("LIVE", "live", "active"))
+                        .limit(1)
+                        .get()
+                        .await()
+                }.onFailure { error ->
+                    Log.w(TAG, "Active-session precheck skipped", error)
+                }.getOrNull()
+
+                if (activeSession != null && !activeSession.isEmpty) {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "You already have an active live session. End it before starting another."
+                        )
+                    }
+                    return@launch
+                }
+
                 val sessionId = UUID.randomUUID().toString()
+                val channelName = "live-${currentUser.uid}-${System.currentTimeMillis()}".take(64)
                 val hostName = currentUser.displayName.takeIf { !it.isNullOrBlank() } ?: "Anonymous Host"
+                val safeTitle = state.title.trim().ifBlank { "Live Session" }.take(120)
+                val normalizedUsername = currentUser.displayName
+                    ?.trim()
+                    ?.removePrefix("@")
+                    ?.takeIf { it.isNotBlank() }
+                val sharePath = "${LiveShareConstants.WEB_LIVE_PATH}?sessionId=$sessionId&hostId=${currentUser.uid}"
+                val shareUrl = "${LiveShareConstants.WEB_SHARE_HOST}$sharePath"
 
-                // FIX: Use a map to explicitly set the server timestamp.
-                // This is more reliable than relying on @ServerTimestamp with POJOs, which can have issues.
-                val liveSessionData = mapOf(
-                    "agoraChannelName" to sessionId,
-                    "title" to state.title,
-                    "description" to state.description,
+                // Match iOS LiveRepository.startLiveSession core fields (status LIVE uppercase).
+                // Avoid writing explicit nulls — some rule variants reject unknown null keys.
+                val liveSessionData = hashMapOf<String, Any>(
+                    "agoraChannelName" to channelName,
+                    "channelName" to channelName,
+                    "title" to safeTitle,
+                    "description" to state.description.trim().take(2_000),
                     "hostId" to currentUser.uid,
+                    "hostUid" to currentUser.uid,
                     "hostName" to hostName,
-                    "hostProfilePicUrl" to currentUser.photoUrl?.toString(),
-                    "status" to "live",
-                    "startTime" to com.google.firebase.firestore.FieldValue.serverTimestamp(), // Set server-side timestamp
+                    "status" to "LIVE",
+                    "sourceType" to state.launchSourceType.ifBlank { "standalone" },
+                    "sharePath" to sharePath,
+                    "shareUrl" to shareUrl,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "startTime" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp(),
                     "viewerCount" to 0L,
-                    "endTime" to null
+                    "viewAccessMode" to state.viewAccessMode.raw,
+                    "stageAccessMode" to state.stageAccessMode.raw,
+                    "replayVisibility" to state.replayVisibility.raw,
+                    "notifyFollowers" to state.notifyFollowersOnStart,
+                    "notifyFollowersOnStart" to state.notifyFollowersOnStart,
+                    "chatEnabled" to state.chatEnabled,
+                    "acceptedVolunteerIds" to emptyList<String>(),
+                    "blockedViewerIds" to emptyList<String>()
                 )
+                if (!normalizedUsername.isNullOrBlank()) {
+                    liveSessionData["hostUsername"] = normalizedUsername
+                }
+                state.linkedEventId?.let { eventId ->
+                    liveSessionData["sourceType"] = "event"
+                    liveSessionData["sourceId"] = eventId
+                    liveSessionData["linkedEventId"] = eventId
+                }
+                currentUser.photoUrl?.toString()?.takeIf { it.isNotBlank() }?.let { url ->
+                    liveSessionData["hostProfilePicUrl"] = url
+                }
 
-                db.collection("live_sessions").document(sessionId).set(liveSessionData).await()
+                db.collection(FirestoreCollection.LIVE_SESSIONS).document(sessionId).set(liveSessionData).await()
 
-                val shareLink = "https://lvcaapp.com/stream/$sessionId"
-                _events.emit(StartStreamEvent.Success(sessionId, shareLink))
+                val shareLink = try {
+                    LiveRepository.createLiveShareAccessLink(sessionId)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Signed share link unavailable; using deep link fallback", e)
+                    LiveShareConstants.appDeepLink(
+                        sessionId = sessionId,
+                        hostId = currentUser.uid,
+                    )
+                }
 
+                val mindLoomMessage = if (state.postToMindLoomOnStart) {
+                    val sessionSnapshot = LiveSession(
+                        sessionId = sessionId,
+                        title = safeTitle,
+                        description = state.description.trim(),
+                        hostId = currentUser.uid,
+                        hostName = hostName,
+                        status = "LIVE",
+                        viewAccessMode = state.viewAccessMode,
+                        replayVisibility = state.replayVisibility,
+                    )
+                    MindLoomLivePostWriter.postLiveSession(sessionSnapshot, shareLink)
+                        .fold(
+                            onSuccess = { "Shared to MindLoom." },
+                            onFailure = { error ->
+                                Log.w(TAG, "Auto MindLoom post skipped", error)
+                                "Live started, but MindLoom could not be updated. You can retry from Host tools."
+                            },
+                        )
+                } else {
+                    null
+                }
+
+                _uiState.update { it.copy(isLoading = false) }
+                _events.emit(StartStreamEvent.Success(sessionId, shareLink, mindLoomMessage))
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create live session", e)
-                _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
+                if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    logFirestorePermissionDeniedDiagnostics(TAG, "live_sessions create")
+                }
+                _uiState.update {
+                    it.copy(isLoading = false, error = userMessageForLiveCreateFailure(e))
+                }
             }
         }
+    }
+
+    private suspend fun ensureLiveCreatePreflight(uid: String) {
+        try {
+            auth.currentUser?.getIdToken(true)?.await()
+                ?: throw IllegalStateException("Sign in again before going live.")
+        } catch (e: Exception) {
+            Log.w(TAG, "Live create ID token refresh failed (uid=$uid)", e)
+            throw IllegalStateException("Sign in again before going live.")
+        }
+
+        if (!ensureFirestoreListenerPreflight(TAG)) {
+            val projectId = runCatching { Firebase.app.options.projectId }.getOrNull().orEmpty()
+            Log.w(TAG, "Live create preflight failed (uid=$uid, projectId=$projectId)")
+            throw IllegalStateException(
+                "We couldn't verify this device for l" +
+                        "" +
+                        "" +
+                        "ive streaming. Register your App Check debug token " +
+                    "in Firebase Console (Logcat tag: FirebaseAppCheck), restart the app, then try again."
+            )
+        }
+    }
+
+    private fun userMessageForLiveCreateFailure(error: Throwable): String {
+        if (error is IllegalStateException && !error.message.isNullOrBlank()) {
+            return error.message.orEmpty()
+        }
+        if (error is FirebaseFirestoreException &&
+            error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED
+        ) {
+            return "We couldn't start the broadcast — Firestore denied the write. Sign out and back in, " +
+                "register your App Check debug token (debug builds), deploy firestore.rules to this Firebase " +
+                "project, then try again."
+        }
+        return "We couldn't start the broadcast. Check your connection and try again."
     }
 }

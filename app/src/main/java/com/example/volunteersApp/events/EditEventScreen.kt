@@ -1,6 +1,7 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.events
 
-import android.app.DatePickerDialog
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,7 +28,6 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
@@ -37,7 +37,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.ripple
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -62,8 +67,9 @@ import java.util.Calendar
 import java.util.Locale
 
 /**
- * Screen for editing an existing volunteering event.
- * Matches modern EventModel properties and fixes CircularProgressIndicator parameters.
+ * Modern screen for editing an existing volunteering event.
+ * Uses Material 3 design with Compose date picker, image upload, category selection, and form validation.
+ * Features: Updated ripple implementation, responsive layout, professional error handling.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,12 +130,20 @@ fun EditEventScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Edit Event Details") },
+                title = { 
+                    Column {
+                        Text("Edit Event Details", fontWeight = FontWeight.Bold)
+                        Text("Update event information", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
         }
     ) { padding ->
@@ -154,7 +168,7 @@ fun EditEventScreen(
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(),
+                            indication = androidx.compose.material3.ripple(),
                             onClick = { imagePicker.launch("image/*") }
                         ),
                     contentAlignment = Alignment.Center
@@ -288,15 +302,30 @@ fun EditEventScreen(
     }
 
     if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = calendar.value.timeInMillis
+        )
         DatePickerDialog(
-            context,
-            { _, year, month, day ->
-                calendar.value.set(year, month, day)
-                showDatePicker = false
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let {
+                            calendar.value.timeInMillis = it
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("OK")
+                }
             },
-            calendar.value.get(Calendar.YEAR),
-            calendar.value.get(Calendar.MONTH),
-            calendar.value.get(Calendar.DAY_OF_MONTH)
-        ).show()
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
     }
 }

@@ -67,7 +67,7 @@ fun CommunityHomeScreen(
             titleResId = R.string.feature_browse_users_title,
             descriptionResId = R.string.feature_browse_users_description,
             icon = Icons.Default.People,
-            color = Color(0xFF4CAF50),
+            color = DirectoryA11yPalette.accent,
             navigationAction = R.id.action_communityHomeFragment_to_userDirectoryFragment
         ),
         CommunityFeature(
@@ -88,14 +88,14 @@ fun CommunityHomeScreen(
             titleResId = R.string.feature_marketplace_title,
             descriptionResId = R.string.feature_marketplace_description,
             icon = Icons.Default.Storefront,
-            color = Color(0xFF9C27B0),
+            color = com.example.volunteersApp.marketplace.MarketplaceA11yPalette.loopEntryAccent,
             navigationAction = R.id.action_communityHomeFragment_to_marketplaceFragment
         ),
         CommunityFeature(
             titleResId = R.string.feature_advertisements_title,
             descriptionResId = R.string.feature_advertisements_description,
             icon = Icons.Default.Campaign,
-            color = Color(0xFFFF5722),
+            color = com.example.volunteersApp.advertisement.SponsoredA11yPalette.loopEntryAccent,
             navigationAction = R.id.action_communityHomeFragment_to_advertisementFragment
         )
     )
@@ -127,7 +127,8 @@ fun CommunityHomeScreen(
                 Text(
                     text = "Explore the loop. Discover features designed to bring your community together.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium,
+                    color = DirectoryA11yPalette.textSecondary,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
             }
@@ -189,7 +190,8 @@ fun ModernFeatureCard(
             Text(
                 text = stringResource(feature.titleResId),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.ExtraBold,
+                fontWeight = FontWeight.Bold,
+                color = DirectoryA11yPalette.textPrimary,
                 textAlign = TextAlign.Center,
                 lineHeight = 20.sp
             )
@@ -197,8 +199,9 @@ fun ModernFeatureCard(
             Text(
                 text = stringResource(feature.descriptionResId),
                 style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = DirectoryA11yPalette.textSecondary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )

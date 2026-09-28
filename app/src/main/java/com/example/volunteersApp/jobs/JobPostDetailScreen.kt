@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.jobs
 
 import androidx.compose.foundation.layout.*
@@ -8,8 +10,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -19,10 +24,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// CORRECTED: Import the standardized JobPosting model
-import com.example.volunteersApp.jobs.JobPosting
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun JobPostDetailScreen(
     jobPostId: String,
@@ -38,7 +39,7 @@ fun JobPostDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Opportunity Details") },
+                title = { Text("Opportunity") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -54,9 +55,9 @@ fun JobPostDetailScreen(
             uiState.jobPost?.let { job ->
                 ApplyPostBottomBar(
                     isApplied = uiState.isApplied,
+                    isOpen = job.status.orEmpty().ifBlank { "open" }.equals("open", ignoreCase = true),
                     isLoading = uiState.isLoading,
-                    // CORRECTED: Pass both jobId and the job object
-                    onApply = { viewModel.submitApplication(jobPostId, job) }
+                    onApply = { viewModel.submitApplication(jobPostId) }
                 )
             }
         }
@@ -91,7 +92,6 @@ private fun JobPostDetailContent(job: JobPosting) {
         // REMOVED: Obsolete imageUrl field from the UI
 
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            // Header: Title & Organization
             Text(
                 text = job.title ?: "Details Unavailable",
                 style = MaterialTheme.typography.headlineSmall,
@@ -105,27 +105,30 @@ private fun JobPostDetailContent(job: JobPosting) {
 
             HorizontalDivider()
 
-            // Key Details
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                job.date?.let { JobDetailRow(Icons.Default.CalendarToday, "${it} at ${job.time}") }
-                // CORRECTED: Use locationName
+                job.date?.let {
+                    JobDetailRow(
+                        Icons.Default.CalendarToday,
+                        listOfNotNull(it, job.time?.takeIf(String::isNotBlank)).joinToString(" at ")
+                    )
+                }
                 job.locationName?.let { JobDetailRow(Icons.Default.LocationOn, it) }
                 job.category?.let { JobDetailRow(Icons.Default.Business, it) }
-                // REMOVED: Obsolete skills and urgency fields
+                job.jobTitle?.takeIf { it.isNotBlank() }?.let { JobDetailRow(Icons.Default.Badge, it) }
+                job.volunteersNeeded.takeIf { it > 0 }?.let {
+                    JobDetailRow(Icons.Default.Groups, "$it volunteers needed")
+                }
             }
 
             HorizontalDivider()
 
-            // Description
             Text("Description", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(
                 text = job.description ?: "No description provided.",
                 style = MaterialTheme.typography.bodyLarge
             )
 
-            // REMOVED: Obsolete requirements field
-
-            Spacer(modifier = Modifier.height(80.dp)) // Padding for bottom bar
+            Spacer(modifier = Modifier.height(88.dp))
         }
     }
 }
@@ -142,25 +145,31 @@ private fun JobDetailRow(icon: ImageVector, text: String, tint: Color = Material
 @Composable
 private fun ApplyPostBottomBar(
     isApplied: Boolean,
+    isOpen: Boolean,
     isLoading: Boolean,
     onApply: () -> Unit
 ) {
+    val label = when {
+        isApplied -> "Application submitted"
+        !isOpen -> "Applications closed"
+        else -> "Apply to this opportunity"
+    }
     Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
         Box(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Button(
                 onClick = onApply,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
-                enabled = !isApplied && !isLoading,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isApplied) Color.Gray else MaterialTheme.colorScheme.primary
-                )
+                enabled = isOpen && !isApplied && !isLoading,
+                shape = RoundedCornerShape(12.dp)
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
                 } else {
                     Text(
-                        text = if (isApplied) "ALREADY APPLIED" else "APPLY NOW",
+                        text = label,
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
                     )

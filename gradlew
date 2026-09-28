@@ -43,6 +43,13 @@ cd "$SAVED" >/dev/null
 APP_NAME="Gradle"
 APP_BASE_NAME=`basename "$0"`
 
+# Keep Gradle's user home inside the project by default so builds do not depend
+# on a broken or partially cleaned global cache under C:\Users\16147\.gradle.
+if [ -z "$GRADLE_USER_HOME" ] ; then
+    GRADLE_USER_HOME="$APP_HOME/.gradle-codex-run8"
+    export GRADLE_USER_HOME
+fi
+
 # Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
 

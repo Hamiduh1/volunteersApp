@@ -3,13 +3,11 @@ package com.example.volunteersApp.jobs
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.volunteersApp.models.Job // Assuming this import, though the model is defined below
+import com.example.volunteersApp.models.Job
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.ServerTimestamp
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,26 +15,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import java.util.Date
-
-// --- FIX: Define or update the Job data class to include employerId ---
-// If 'Job' is in another file like 'com.example.volunteersApp.models.Job',
-// make sure that file is updated with this structure.
-data class Job(
-    @DocumentId
-    val jobId: String = "",
-    val title: String = "",
-    val description: String = "",
-    val employerId: String = "", // Corrected field name
-    val companyName: String = "",
-    val location: String = "",
-    val status: JobStatus = JobStatus.OPEN,
-    @ServerTimestamp
-    val postedDate: Date? = null
-)
-
-enum class JobStatus { OPEN, CLOSED }
-
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FirestoreSubcollection
+import com.example.volunteersApp.firebase.CallableFunction
+import com.example.volunteersApp.firebase.FunctionsClient
 
 data class JobDetailUiState(
     val job: Job? = null,
@@ -69,7 +51,7 @@ class JobDetailViewModel : ViewModel() {
         applicationListener?.remove()
         _uiState.update { it.copy(isLoading = true, error = null) }
 
-        jobListener = db.collection("jobs").document(jobId)
+        jobListener = db.collection(FirestoreCollection.JOBS).document(jobId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     _uiState.update { it.copy(isLoading = false, error = error.localizedMessage) }
@@ -97,51 +79,90 @@ class JobDetailViewModel : ViewModel() {
             return
         }
 
-        applicationListener = db.collection("jobs").document(jobId)
-            .collection("applications").document(currentUser.uid)
+        applicationListener = db.collection(FirestoreSubcollection.APPLICATIONS)
+            .whereEqualTo("jobId", jobId)
+            .whereEqualTo("userId", currentUser.uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     _uiState.update { it.copy(error = "Status check failed") }
                     return@addSnapshotListener
                 }
 
-                val status = if (snapshot != null && snapshot.exists()) {
-                    val appStatus = snapshot.getString("status") ?: "unknown"
-                    when (appStatus.lowercase()) {
-                        "pending" -> ApplicationStatus.APPLIED_PENDING
-                        "approved" -> ApplicationStatus.APPROVED
-                        "rejected" -> ApplicationStatus.REJECTED
-                        else -> ApplicationStatus.UNKNOWN
+                val status = if (snapshot != null && !snapshot.isEmpty) {
+                    val newestDoc = snapshot.documents.maxByOrNull { doc ->
+                        doc.getTimestamp("lastUpdatedAt")?.toDate()?.time
+                            ?: doc.getTimestamp("appliedAt")?.toDate()?.time
+                            ?: doc.getTimestamp("appliedDate")?.toDate()?.time
+                            ?: 0L
                     }
+                    parseApplicationStatus(newestDoc?.getString("status"))
                 } else {
-                    if (jobStatus == "open") ApplicationStatus.CAN_APPLY else ApplicationStatus.JOB_CLOSED
+                    // Legacy fallback for old records stored only under jobs/{jobId}/applications/{uid}.
+                    viewModelScope.launch {
+                        val legacyStatus = resolveLegacySubcollectionStatus(jobId, currentUser.uid)
+                        _uiState.update { state ->
+                            state.copy(
+                                applicationStatus = legacyStatus
+                                    ?: if (jobStatus == "open") ApplicationStatus.CAN_APPLY else ApplicationStatus.JOB_CLOSED
+                            )
+                        }
+                    }
+                    null
                 }
 
-                _uiState.update { it.copy(applicationStatus = status) }
+                if (status != null) {
+                    _uiState.update { it.copy(applicationStatus = status) }
+                }
             }
     }
 
+    private suspend fun resolveLegacySubcollectionStatus(
+        jobId: String,
+        userId: String
+    ): ApplicationStatus? {
+        return try {
+            val legacyDoc = db.collection(FirestoreCollection.JOBS).document(jobId)
+                .collection(FirestoreSubcollection.APPLICATIONS).document(userId)
+                .get()
+                .await()
+            if (legacyDoc.exists()) parseApplicationStatus(legacyDoc.getString("status")) else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun parseApplicationStatus(rawStatus: String?): ApplicationStatus {
+        return when (rawStatus?.trim()?.lowercase()) {
+            "pending", "viewed", "waitlisted" -> ApplicationStatus.APPLIED_PENDING
+            "approved", "accepted", "attended", "completed" -> ApplicationStatus.APPROVED
+            "rejected", "rejected_by_employer", "withdrawn" -> ApplicationStatus.REJECTED
+            else -> ApplicationStatus.UNKNOWN
+        }
+    }
+
     fun applyForJob(job: Job) {
-        val currentUser = auth.currentUser ?: return
+        if (auth.currentUser == null) {
+            _uiState.update { it.copy(error = "Please sign in before applying.") }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             try {
-                val applicationData = hashMapOf(
-                    "jobId" to job.jobId,
-                    "userId" to currentUser.uid,
-                    "volunteerName" to (currentUser.displayName ?: "Anonymous User"),
-                    "status" to "pending",
-                    "appliedDate" to FieldValue.serverTimestamp(),
-                    // --- FIX: Use the correct field name 'employerId' from the Job object ---
-                    "employerId" to job.employerId,
-                    "jobTitle" to job.title
+                val normalizedJobId = job.jobId.trim()
+                if (normalizedJobId.isBlank()) {
+                    throw IllegalStateException("This opportunity is unavailable.")
+                }
+                val result = FunctionsClient.callMap(
+                    CallableFunction.APPLY_FOR_JOB,
+                    mapOf("jobId" to normalizedJobId)
                 )
-                db.collection("jobs").document(job.jobId)
-                    .collection("applications").document(currentUser.uid)
-                    .set(applicationData).await()
+                if (result?.get("success") != true) {
+                    throw IllegalStateException("Could not submit your application. Please try again.")
+                }
+                _uiState.update { it.copy(applicationStatus = ApplicationStatus.APPLIED_PENDING) }
             } catch (e: Exception) {
                 Log.e(TAG, "Apply failed", e)
-                _uiState.update { it.copy(error = "Could not submit application.") }
+                _uiState.update { it.copy(error = e.message ?: "Could not submit application.") }
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
             }

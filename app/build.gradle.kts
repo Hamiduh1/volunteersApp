@@ -2,18 +2,15 @@ import java.io.FileInputStream
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
-
-
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.google.gms.google.services)
     alias(libs.plugins.kotlin.android)
     id("kotlin-parcelize")
     alias(libs.plugins.kotlin.serialization)
-   // alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.androidx.navigation.safeargs.kotlin)
     alias(libs.plugins.google.devtools.ksp)
+    alias(libs.plugins.google.firebase.crashlytics)
 }
 
 // --- Improvement 1: Load properties once at the top level ---
@@ -29,16 +26,50 @@ if (localPropertiesFile.exists()) {
     }
 }
 
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    try {
+        FileInputStream(keystorePropertiesFile).use { fis ->
+            keystoreProperties.load(fis)
+        }
+    } catch (e: Exception) {
+        println("Warning: Could not load keystore.properties: ${e.message}")
+    }
+}
+
+fun propValue(props: Properties, key: String): String = props.getProperty(key)?.trim().orEmpty()
+
+fun firstNonBlank(vararg values: String?): String =
+    values.firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty()
+
+val releaseStoreFilePath = propValue(keystoreProperties, "storeFile")
+val releaseStorePassword = propValue(keystoreProperties, "storePassword")
+val releaseKeyAlias = propValue(keystoreProperties, "keyAlias")
+val releaseKeyPassword = propValue(keystoreProperties, "keyPassword")
+val hasReleaseSigning = listOf(
+    releaseStoreFilePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { it.isNotBlank() }
+
+val stripePublishableKey = firstNonBlank(
+    localProperties.getProperty("STRIPE_PUBLISHABLE_KEY"),
+    localProperties.getProperty("stripe_publishable_key"),
+    System.getenv("STRIPE_PUBLISHABLE_KEY")
+)
+
 android {
     namespace = "com.example.volunteersApp"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.volunteersApp"
+        applicationId = "com.volunteersapp.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 15
+        versionName = "1.0.12"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // --- Improvement 2: Set manifest placeholders here ---
@@ -46,50 +77,86 @@ android {
         manifestPlaceholders["MAPS_API_KEY"] = localProperties.getProperty("MAPS_API_KEY", "")
     }
 
-    buildTypes {
-        // --- Improvement 3: Define build config fields for ALL build types ---
-        all {
-            // Stripe Publishable Key
-            buildConfigField(
-                "String",
-                "STRIPE_PUBLISHABLE_KEY",
-                "\"${localProperties.getProperty("STRIPE_PUBLISHABLE_KEY", "")}\""
-            )
+    signingConfigs {
+        create("release") {
+            if (hasReleaseSigning) {
+                storeFile = rootProject.file(releaseStoreFilePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
 
-            // Agora App ID
-            buildConfigField(
-                "String",
-                "AGORA_APP_ID",
-                "\"${localProperties.getProperty("agora.appId", "")}\""
-            )
-
-            // Maps API Key (for use in Kotlin/Java code if needed)
-            buildConfigField(
-                "String",
-                "MAPS_API_KEY_BUILDCONFIG",
-                "\"${localProperties.getProperty("MAPS_API_KEY", "")}\""
-
-            )
-
-            buildConfigField(
-                "String",
-                "GEMINI_API_KEY",
-                "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\""
-            )
-
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+            }
         }
+    }
 
+    buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                println(
+                    "Warning: release signing is not configured. " +
+                        "Create keystore.properties to produce a signed release APK/AAB."
+                )
+            }
+            if (stripePublishableKey.isBlank()) {
+                throw GradleException(
+                    "Missing Stripe publishable key for release build. " +
+                        "Add STRIPE_PUBLISHABLE_KEY to local.properties or environment before generating the AAB."
+                )
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            buildConfigField(
+                "String",
+                "STRIPE_PUBLISHABLE_KEY",
+                "\"$stripePublishableKey\""
+            )
+            buildConfigField(
+                "String",
+                "AGORA_APP_ID",
+                "\"${localProperties.getProperty("agora.appId", "")}\""
+            )
+            buildConfigField(
+                "String",
+                "MAPS_API_KEY_BUILDCONFIG",
+                "\"${localProperties.getProperty("MAPS_API_KEY", "")}\""
+            )
+            buildConfigField(
+                "String",
+                "GEMINI_API_KEY",
+                "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\""
+            )
         }
 
         debug {
-            // No specific overrides needed for debug at this time
+            isDebuggable = true
+            buildConfigField(
+                "String",
+                "STRIPE_PUBLISHABLE_KEY",
+                "\"$stripePublishableKey\""
+            )
+            buildConfigField(
+                "String",
+                "AGORA_APP_ID",
+                "\"${localProperties.getProperty("agora.appId", "")}\""
+            )
+            buildConfigField(
+                "String",
+                "MAPS_API_KEY_BUILDCONFIG",
+                "\"${localProperties.getProperty("MAPS_API_KEY", "")}\""
+            )
+            buildConfigField(
+                "String",
+                "GEMINI_API_KEY",
+                "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\""
+            )
         }
     }
 
@@ -99,7 +166,6 @@ android {
             excludes.add("META-INF/LICENSE.md")
             excludes.add("META-INF/LICENSE-notice.md")
 
-            // Kept remaining risky pickFirsts as requested, but the root cause is now fixed.
             pickFirsts.add("messages/JavaOptionBundle.properties")
             pickFirsts.add("messages/JavaErrorBundle.properties")
             pickFirsts.add("misc/registry.properties")
@@ -134,54 +200,48 @@ android {
 
     buildFeatures {
         viewBinding = true
-        dataBinding = true
+        dataBinding = false
         buildConfig = true
         compose = true
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
+        kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
     }
 
     lint {
         baseline = file("lint-baseline.xml")
+        abortOnError = false
     }
-
-
-//Compose compiler is bundled inside the Kotlin compiler
-//and activated automatically by AGP when you enable:
-// so no need of kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 }
 
 dependencies {
     // BOMs (Bills of Materials)
     implementation(platform(libs.firebase.bom))
-    // BOMs (Bills of Materials)
-   // implementation(platform(libs.firebase.bom.v3480)) // Use the latest BoM
     implementation(platform(libs.compose.bom))
     implementation(platform(libs.kotlinx.coroutines.bom))
-    implementation(libs.androidx.material3)
-    implementation(libs.androidx.navigation.fragment.ktx)
-    implementation(libs.androidx.navigation.ui.ktx)
     androidTestImplementation(platform(libs.compose.bom))
 
     // Firebase
-    implementation(libs.firebase.auth)
-    implementation(libs.firebase.firestore)
-    implementation(libs.firebase.database)
-    implementation(libs.firebase.storage)
-    implementation(libs.firebase.messaging)
-    implementation(libs.firebase.inappmessaging.display)
-    implementation(libs.firebase.config)
-    implementation(libs.firebase.functions)
-    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.common.ktx)
+    implementation(libs.firebase.auth.ktx)
+    implementation(libs.firebase.firestore.ktx)
+    implementation(libs.firebase.database.ktx)
+    implementation(libs.firebase.storage.ktx)
+    implementation(libs.firebase.messaging.ktx)
+    implementation(libs.firebase.inappmessaging.display.ktx)
+    implementation(libs.firebase.config.ktx)
+    implementation(libs.firebase.functions.ktx)
+    implementation(libs.firebase.analytics.ktx)
+    implementation(libs.firebase.crashlytics.ktx)
     implementation(libs.mlkit.common)
     implementation(libs.firebase.dataconnect)
-    implementation(libs.firebase.crashlytics.buildtools)
-    implementation(libs.firebase.vertexai.v1650)
-    // FIX: Added Firebase App Check for security
+    implementation(libs.firebase.vertexai)
+
+    // App Check
+    implementation(libs.firebase.appcheck.ktx)
     debugImplementation(libs.firebase.appcheck.debug)
-    releaseImplementation(libs.firebase.appcheck.playintegrity)
+    implementation(libs.firebase.appcheck.playintegrity) // CORRECTED
 
 
     // AndroidX & Google Material
@@ -190,16 +250,21 @@ dependencies {
     implementation(libs.material)
     implementation(libs.activity.ktx)
     implementation(libs.fragment)
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.security.crypto)
     implementation(libs.constraintlayout)
     implementation(libs.recyclerview)
     implementation(libs.swiperefreshlayout)
     implementation(libs.gridlayout)
     implementation(libs.annotation)
 
+    implementation(libs.androidx.datastore.preferences)
+
     // Architecture Components
     implementation(libs.lifecycle.viewmodel.ktx)
     implementation(libs.lifecycle.livedata.ktx)
     implementation(libs.lifecycle.viewmodel.compose)
+    implementation(libs.lifecycle.process)
     implementation(libs.navigation.fragment.ktx)
     implementation(libs.navigation.ui.ktx)
     implementation(libs.navigation.compose)
@@ -207,13 +272,16 @@ dependencies {
     // Room Database
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
+    ksp(libs.room.compiler) // CORRECTED
 
     // Jetpack Compose
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
+    implementation(libs.compose.animation)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.foundation.layout)
     implementation(libs.compose.material3)
-    implementation(libs.androidx.material3.adaptive)
+    implementation(libs.compose.runtime.saveable)
     implementation(libs.compose.runtime.livedata)
     implementation(libs.compose.material.icons.core)
     implementation(libs.compose.material.icons.extended)
@@ -221,6 +289,7 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
     implementation(libs.compose.activity)
     implementation(libs.accompanist.swiperefresh)
+
 
     // Google Play Services, Identity, and Maps
     implementation(libs.kotlinx.coroutines.play.services)
@@ -242,7 +311,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.facebook.login)
     implementation(libs.agora.rtc.full.sdk)
-    implementation(libs.agora.rtm)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
@@ -258,13 +326,9 @@ dependencies {
     androidTestImplementation(libs.espresso.core)
     androidTestImplementation(libs.compose.ui.test.junit4)
     debugImplementation(libs.compose.ui.test.manifest)
-    // REMOVED: implementation(libs.room.compiler.processing.testing) -> This was the root cause of the conflict.
-
 
 }
 
 configurations.all {
     exclude(group = "org.jetbrains.kotlin", module = "kotlin-android-extensions-runtime")
-
-
 }

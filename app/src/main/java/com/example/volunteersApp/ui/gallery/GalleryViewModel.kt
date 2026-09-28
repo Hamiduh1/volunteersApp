@@ -3,8 +3,11 @@ package com.example.volunteersApp.ui.gallery
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.StorageFolder
 import com.example.volunteersApp.models.ImgUpload
 import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import com.google.firebase.storage.storage
@@ -25,6 +28,7 @@ data class GalleryUiState(
 class GalleryViewModel : ViewModel() {
     private val db = Firebase.firestore
     private val storage = Firebase.storage
+    private val auth = Firebase.auth
     private val _uiState = MutableStateFlow(GalleryUiState())
     val uiState = _uiState.asStateFlow()
 
@@ -33,7 +37,7 @@ class GalleryViewModel : ViewModel() {
     }
 
     private fun listenForImages() {
-        db.collection("galleryUploads")
+        db.collection(FirestoreCollection.GALLERY_UPLOADS)
             .orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
@@ -49,16 +53,24 @@ class GalleryViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, uploadProgress = 0f) }
             try {
+                val currentUser = auth.currentUser
+                    ?: throw IllegalStateException("You must be logged in to upload gallery images.")
                 val fileName = "${eventName.replace(" ", "_")}_${System.currentTimeMillis()}.jpg"
-                val ref = storage.reference.child("gallery_uploads/$fileName")
+                val storagePath = StorageFolder.galleryUpload(currentUser.uid, fileName)
+                val ref = storage.reference.child(storagePath)
 
                 // Upload Task
                 ref.putFile(uri).await()
                 val downloadUrl = ref.downloadUrl.await().toString()
 
                 // Save to Firestore
-                val newUpload = ImgUpload(name = eventName, imageUrl = downloadUrl)
-                db.collection("galleryUploads").add(newUpload).await()
+                val newUpload = ImgUpload(
+                    name = eventName,
+                    imageUrl = downloadUrl,
+                    imagePathInStorage = storagePath,
+                    uploaderId = currentUser.uid
+                )
+                db.collection(FirestoreCollection.GALLERY_UPLOADS).add(newUpload).await()
 
                 _uiState.update { it.copy(isLoading = false, uploadProgress = 0f) }
             } catch (e: Exception) {

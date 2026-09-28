@@ -2,11 +2,12 @@ package com.example.volunteersApp.organizer
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.volunteersApp.wallet.Beneficiary
-import com.example.volunteersApp.wallet.Transaction
+import com.example.volunteersApp.firebase.CallableFunction
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FunctionsClient
+import com.example.volunteersApp.wallet.resolveProviderWalletSnapshot
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,20 +15,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
-// This enum is still needed by WithdrawScreen, so it's correct to keep it here
-// as a central point for wallet-related enumerations.
-enum class WithdrawalType {
-    Account, Beneficiary, AppUser
-}
-
 data class OrganizerWalletUiState(
-    val balance: Double = 0.0,
-    val transactions: List<Transaction> = emptyList(),
-    // This is no longer needed here as it's handled by WithdrawViewModel
-    // val beneficiaries: List<Beneficiary> = emptyList(),
+    val mirroredSettlementBalance: Double = 0.0,
+    val hasBusinessPayoutSetup: Boolean = false,
+    val payoutStatusNote: String? = null,
+    val incomeSourceNote: String? = null,
+    val internalTransfersDisabled: Boolean = true,
     val isLoading: Boolean = false,
     val error: String? = null,
-    // Success messages are handled by WithdrawViewModel now
     val successMessage: String? = null
 )
 
@@ -43,32 +38,44 @@ class OrganizerWalletViewModel : ViewModel() {
         fetchWalletData()
     }
 
-    // This is the primary function of this ViewModel now
     private fun fetchWalletData() {
         val userId = auth.currentUser?.uid ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                // Fetch wallet balance
-                val userDoc = db.collection("users").document(userId).get().await()
-                val wallet = userDoc.get("wallet") as? Map<*, *>
-                val balance = (wallet?.get("balance") as? Number)?.toDouble() ?: 0.0
+                val userDoc = db.collection(FirestoreCollection.USERS).document(userId).get().await()
+                val walletDoc = db.collection(FirestoreCollection.WALLETS).document(userId).get().await()
+                val providerWallet = resolveProviderWalletSnapshot(walletDoc, userDoc)
+                val connectStatus = FunctionsClient.callMap(CallableFunction.GET_CONNECT_ACCOUNT_STATUS)
+                val nestedConnectStatus = connectStatus?.get("data") as? Map<*, *>
+                val hasBusinessPayoutSetup =
+                    connectStatus?.get("payoutsEnabled") == true ||
+                        nestedConnectStatus?.get("payoutsEnabled") == true
 
-                // Fetch a small number of recent transactions for the summary view
-                val transactionsSnapshot = db.collection("users").document(userId)
-                    .collection("transactions")
-                    .orderBy("timestamp", Query.Direction.DESCENDING)
-                    .limit(5) // Only fetch 5 for the main wallet screen
-                    .get()
-                    .await()
+                val mirroredBalance = if (providerWallet.isMirrorBacked) {
+                    providerWallet.balance
+                } else {
+                    0.0
+                }
+                val incomeSourceNote = when {
+                    providerWallet.isMirrorBacked && hasBusinessPayoutSetup ->
+                        "Mirrored Stripe business settlement balance (read-only)."
+                    else ->
+                        "Organizer earnings appear after provider settlement confirms."
+                }
+                val payoutStatusNote = if (hasBusinessPayoutSetup) {
+                    "Stripe Connect Business Payouts is active for eligible organizer earnings."
+                } else {
+                    "Finish Stripe Connect Business Payouts setup in Payment Methods before receiving paid organizer earnings."
+                }
 
-                val transactions = transactionsSnapshot.toObjects(Transaction::class.java)
-
-                // Beneficiaries are no longer fetched here
                 _uiState.update {
                     it.copy(
-                        balance = balance,
-                        transactions = transactions,
+                        mirroredSettlementBalance = mirroredBalance,
+                        hasBusinessPayoutSetup = hasBusinessPayoutSetup,
+                        payoutStatusNote = payoutStatusNote,
+                        incomeSourceNote = incomeSourceNote,
+                        internalTransfersDisabled = true,
                         isLoading = false
                     )
                 }

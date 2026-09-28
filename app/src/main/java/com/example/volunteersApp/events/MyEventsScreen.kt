@@ -23,6 +23,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.volunteersApp.R
+import com.example.volunteersApp.models.OpportunityStatus
 
 @Composable
 fun MyEventsScreen(
@@ -64,7 +66,7 @@ fun MyEventsScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = uiState.filter.ordinal) {
-            val tabs = listOf("Applied", "Upcoming", "Attended")
+            val tabs = listOf("Updates", "Upcoming", "Past")
             tabs.forEachIndexed { index, title ->
                 Tab(
                     selected = uiState.filter.ordinal == index,
@@ -95,7 +97,10 @@ fun MyEventsScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(uiState.events, key = { it.registration.registrationId }) { item ->
+                    items(
+                        uiState.events,
+                        key = { item -> "${item.event.eventId}_${item.registration.registrationId}" }
+                    ) { item ->
                         EventCard(
                             eventItem = item,
                             onCardClick = { onEventClick(item.event.eventId, item.registration.registrationId) },
@@ -110,8 +115,12 @@ fun MyEventsScreen(
     showWithdrawDialog?.let { item ->
         AlertDialog(
             onDismissRequest = { showWithdrawDialog = null },
-            title = { Text("Withdraw Application") },
-            text = { Text("Are you sure you want to withdraw from '${item.event.title}'?") },
+            title = { Text("Withdraw application?") },
+            text = {
+                Text(
+                    "This keeps the application in your activity history and lets the organizer know you withdrew from '${item.event.title}'."
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.withdrawFromEvent(item.event.eventId, item.registration.registrationId)
@@ -119,7 +128,7 @@ fun MyEventsScreen(
                 }) { Text("Withdraw") }
             },
             dismissButton = {
-                TextButton(onClick = { showWithdrawDialog = null }) { Text("Cancel") }
+                TextButton(onClick = { showWithdrawDialog = null }) { Text("Keep application") }
             }
         )
     }
@@ -142,15 +151,38 @@ fun EventCard(
             Text(eventItem.event.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(eventItem.registration.formattedEventDate, style = MaterialTheme.typography.bodySmall)
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Circle,
-                    contentDescription = "Status",
-                    tint = eventItem.registration.statusColor,
-                    modifier = Modifier.size(10.dp)
+            if (!eventItem.event.isActive || eventItem.event.closeEntries ||
+                eventItem.event.status == OpportunityStatus.CLOSED
+            ) {
+                Text(
+                    text = "Event closed by the organizer. Your application remains in activity history.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(eventItem.registration.statusEnum.displayName, style = MaterialTheme.typography.labelLarge)
+            }
+
+            Surface(
+                color = eventItem.registration.statusColor.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Circle,
+                        contentDescription = null,
+                        tint = eventItem.registration.statusColor,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        eventItem.registration.statusEnum.displayName,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = eventItem.registration.statusColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             if (eventItem.registration.canWithdraw()) {
@@ -160,6 +192,12 @@ fun EventCard(
                 ) {
                     Text("Withdraw", color = MaterialTheme.colorScheme.error)
                 }
+            } else if (eventItem.registration.requiresSupportForCancellation()) {
+                Text(
+                    text = "Paid registrations are handled through support so payment history stays accurate.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

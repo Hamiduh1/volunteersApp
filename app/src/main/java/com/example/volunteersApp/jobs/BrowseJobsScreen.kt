@@ -1,6 +1,5 @@
 package com.example.volunteersApp.jobs
 
-import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +16,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
@@ -26,12 +24,12 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,13 +37,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import com.example.volunteersApp.models.Resource
-import com.google.firebase.auth.FirebaseAuth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,23 +49,8 @@ fun BrowseJobsScreen(
     onJobClick: (String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     var expanded by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        viewModel.actionResult.collect { resource ->
-            when (resource) {
-                is Resource.Success -> {
-                    Toast.makeText(context, "Application submitted!", Toast.LENGTH_SHORT).show()
-                }
-                is Resource.Error -> {
-                    Toast.makeText(context, resource.message, Toast.LENGTH_LONG).show()
-                }
-                else -> {}
-            }
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -80,7 +60,7 @@ fun BrowseJobsScreen(
                         value = uiState.searchQuery,
                         onValueChange = { viewModel.setSearchQuery(it) },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Search jobs...") },
+                        placeholder = { Text("Search opportunities") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -123,9 +103,16 @@ fun BrowseJobsScreen(
         ) {
             if (uiState.isLoading && uiState.jobs.isEmpty()) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            } else if (uiState.error != null) {
+                Text(
+                    text = "We could not load opportunities. Please try again.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp)
+                )
             } else if (uiState.jobs.isEmpty()) {
                 Text(
-                    text = "No jobs found.",
+                    text = "No opportunities found.",
                     modifier = Modifier.align(Alignment.Center),
                     style = MaterialTheme.typography.bodyLarge
                 )
@@ -136,23 +123,11 @@ fun BrowseJobsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(uiState.jobs, key = { it.postingId }) { job ->
+                        val isAlreadyApplied = uiState.appliedJobIds.contains(job.postingId)
                         JobCard(
                             job = job,
-                            onClick = { onJobClick(job.postingId) },
-                            onApply = {
-                                val user = FirebaseAuth.getInstance().currentUser
-                                if (user != null) {
-                                    viewModel.applyForJob(
-                                        jobId = job.postingId,
-                                        volunteerUid = user.uid,
-                                        jobTitle = job.title ?: "",
-                                        employerId = job.employerUid ?: "",
-                                        employerName = job.organizationName ?: ""
-                                    )
-                                } else {
-                                    Toast.makeText(context, "Please login to apply", Toast.LENGTH_SHORT).show()
-                                }
-                            }
+                            isAlreadyApplied = isAlreadyApplied,
+                            onClick = { onJobClick(job.postingId) }
                         )
                     }
                 }
@@ -164,8 +139,8 @@ fun BrowseJobsScreen(
 @Composable
 fun JobCard(
     job: JobPosting,
-    onClick: () -> Unit,
-    onApply: () -> Unit
+    isAlreadyApplied: Boolean,
+    onClick: () -> Unit
 ) {
     ElevatedCard(
         onClick = onClick,
@@ -190,12 +165,28 @@ fun JobCard(
                 maxLines = 2
             )
             Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                onClick = onApply,
-                modifier = Modifier.align(Alignment.End),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Apply Now")
+            if (isAlreadyApplied) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(
+                        text = "Application submitted",
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                    )
+                }
+            } else {
+                OutlinedButton(
+                    onClick = onClick,
+                    modifier = Modifier.align(Alignment.End),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("View details")
+                }
             }
         }
     }

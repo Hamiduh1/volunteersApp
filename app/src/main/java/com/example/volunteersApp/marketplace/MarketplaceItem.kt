@@ -6,11 +6,23 @@ import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
 import java.util.Date
 
+enum class MarketplaceMediaKind {
+    IMAGE,
+    VIDEO
+}
 
+@Keep
+data class MarketplaceGallerySlot(
+    val kind: MarketplaceMediaKind,
+    /** Image URL, or video poster / thumbnail when available. */
+    val previewUrl: String,
+    /** Playback URL for video items. */
+    val videoUrl: String? = null
+)
 
 /**
- * Modern Data Class for Marketplace items.
- * Updated to support Global active locations and immersive browsing.
+ * Mirrors the iOS `MarketplaceItemRecord` contract.
+ * Firestore may still contain extra keys such as `isDeleted`; they are ignored here.
  */
 @Keep
 @IgnoreExtraProperties
@@ -25,16 +37,34 @@ data class MarketplaceItem(
     val sellerId: String = "",
     val sellerPhone: String = "",
     val imageUrls: List<String> = emptyList(),
-
-    // --- NEW: Global Location Support ---
-    val locationName: String = "Global", // e.g. "Kampala, Uganda" or "Online"
-    val countryCode: String = "INT", // ISO 3166-1 alpha-3 code (e.g. "UGA", "CHN")
-    val latitude: Double = 0.0, // Added for map/location features
-    val longitude: Double = 0.0, // Added for map/location features
-
-
-    val status: String = "AVAILABLE", // The fix is here
-
+    /**
+     * Normalized gallery (images + videos). Populated from Firestore `media[]` when present;
+     * otherwise derived from [imageUrls] in [galleryForPager].
+     */
+    val gallerySlots: List<MarketplaceGallerySlot> = emptyList(),
+    /**
+     * Total gallery slots (photos + videos) from Firestore `media[]` when present.
+     * Use `-1` to mean “derive from gallery / imageUrls only” for legacy documents.
+     */
+    val mediaCount: Int = -1,
+    val locationName: String = "",
+    val countryCode: String = "INT",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val status: String = "AVAILABLE",
     @ServerTimestamp
     val timestamp: Date? = null
-)
+) {
+    fun galleryForPager(): List<MarketplaceGallerySlot> =
+        if (gallerySlots.isNotEmpty()) {
+            gallerySlots
+        } else {
+            imageUrls.map { MarketplaceGallerySlot(MarketplaceMediaKind.IMAGE, previewUrl = it, videoUrl = null) }
+        }
+
+    fun resolvedMediaCount(): Int = when {
+        mediaCount >= 0 -> mediaCount
+        gallerySlots.isNotEmpty() -> gallerySlots.size
+        else -> imageUrls.size
+    }
+}

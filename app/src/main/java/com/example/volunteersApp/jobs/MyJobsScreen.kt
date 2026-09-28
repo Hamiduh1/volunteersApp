@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.jobs
 
 import android.widget.Toast
@@ -10,10 +12,10 @@ import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -22,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.volunteersApp.models.Resource
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MyJobsScreen(
     viewModel: MyJobsViewModel,
@@ -67,9 +68,9 @@ fun MyJobsScreen(
                             onClick = { viewModel.setFilter(filter) },
                             text = { 
                                 val text = when (filter) {
-                                    MyJobsViewModel.JobFilter.APPLIED -> "Applied"
+                                    MyJobsViewModel.JobFilter.APPLIED -> "Updates"
                                     MyJobsViewModel.JobFilter.APPROVED -> "Upcoming"
-                                    MyJobsViewModel.JobFilter.COMPLETED -> "Attended"
+                                    MyJobsViewModel.JobFilter.COMPLETED -> "Completed"
                                 }
                                 Text(
                                     text = text,
@@ -85,6 +86,13 @@ fun MyJobsScreen(
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (uiState.isLoading && uiState.filteredJobs.isEmpty()) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            } else if (uiState.error != null) {
+                Text(
+                    text = uiState.error.orEmpty(),
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp)
+                )
             } else if (uiState.filteredJobs.isEmpty()) {
                 EmptyJobsPlaceholder(uiState.selectedFilter)
             } else {
@@ -93,10 +101,10 @@ fun MyJobsScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(uiState.filteredJobs, key = { it.job.jobId }) { jobWithStatus ->
+                    items(uiState.filteredJobs, key = { it.job.postingId }) { jobWithStatus ->
                         MyJobCard(
                             jobWithStatus = jobWithStatus,
-                            onClick = { onJobClick(jobWithStatus.job.jobId) },
+                            onClick = { onJobClick(jobWithStatus.job.postingId) },
                             onWithdraw = { jobToWithdraw = jobWithStatus }
                         )
                     }
@@ -113,7 +121,7 @@ fun MyJobsScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.withdrawFromJob(jobWithStatus.job.jobId)
+                        viewModel.withdrawFromJob(jobWithStatus.job.postingId)
                         jobToWithdraw = null
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
@@ -149,7 +157,7 @@ fun MyJobCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = job.title,
+                    text = job.title ?: "Untitled Job",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
@@ -165,7 +173,7 @@ fun MyJobCard(
                 Icon(Icons.Default.Business, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = job.employerName,
+                    text = job.organizationName ?: "Unknown Organization",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.secondary
                 )
@@ -174,18 +182,29 @@ fun MyJobCard(
             Spacer(Modifier.height(4.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.CalendarMonth, null, modifier = Modifier.size(16.dp), tint = Color.Gray)
+                Icon(
+                    Icons.Default.CalendarMonth,
+                    null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = "Deadline: ${job.applicationDeadline?.toDate()?.let { 
-                        java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(it)
-                    } ?: "N/A"}",
+                    text = "Schedule: ${listOfNotNull(job.date, job.time).joinToString(" ").ifBlank { "TBD" }}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            if (jobWithStatus.applicationStatus.equals("pending", ignoreCase = true)) {
+            if (job.closeEntries || job.retainedForHistory || job.status.equals("closed", ignoreCase = true)) {
+                Text(
+                    text = "This job is closed. Your application remains in activity history.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (jobWithStatus.applicationStatus.trim().lowercase() in setOf("pending", "viewed", "waitlisted")) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(
                     onClick = onWithdraw,
@@ -204,21 +223,27 @@ fun MyJobCard(
 
 @Composable
 private fun StatusChip(status: String) {
-    val color = when (status.lowercase()) {
-        "approved", "accepted" -> Color(0xFF4CAF50) // Green
-        "pending" -> Color(0xFFFF9800) // Orange
-        else -> Color.Gray
+    val (containerColor, contentColor) = when (status.trim().lowercase()) {
+        "approved", "accepted", "attended", "completed" ->
+            MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+        "rejected", "rejected_by_employer" ->
+            MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        "pending", "viewed", "waitlisted" ->
+            MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+        "withdrawn" ->
+            MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Surface(
-        color = color.copy(alpha = 0.1f),
+        color = containerColor,
         shape = RoundedCornerShape(8.dp)
     ) {
         Text(
             text = status.uppercase(),
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
-            color = color,
+            color = contentColor,
             fontWeight = FontWeight.ExtraBold
         )
     }
@@ -227,7 +252,7 @@ private fun StatusChip(status: String) {
 @Composable
 private fun EmptyJobsPlaceholder(filter: MyJobsViewModel.JobFilter) {
     val message = when (filter) {
-        MyJobsViewModel.JobFilter.APPLIED -> "You have no pending applications."
+        MyJobsViewModel.JobFilter.APPLIED -> "You have no application updates."
         MyJobsViewModel.JobFilter.APPROVED -> "You have no upcoming jobs."
         MyJobsViewModel.JobFilter.COMPLETED -> "You have no attended jobs."
     }
@@ -236,7 +261,7 @@ private fun EmptyJobsPlaceholder(filter: MyJobsViewModel.JobFilter) {
         Text(
             text = message,
             style = MaterialTheme.typography.bodyLarge,
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
     }

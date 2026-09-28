@@ -10,7 +10,6 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.fragment.findNavController
-import com.example.volunteersApp.chat.ChatInboxFragmentDirections
 import com.example.volunteersApp.ui.theme.VolunteersAppTheme
 
 /**
@@ -46,6 +45,28 @@ class ChatListFragment : Fragment() {
                                 otherUserId
                             )
                             findNavController().navigate(action)
+                        },
+                        onAudioCall = { chatId, otherUserId ->
+                            // Start call via Activity intent (no nav action needed)
+                            requireContext().startActivity(
+                                CallActivity.newIntent(
+                                    requireContext(),
+                                    chatId,
+                                    otherUserId,
+                                    CallType.AUDIO
+                                )
+                            )
+                        },
+                        onVideoCall = { chatId, otherUserId ->
+                            // Start call via Activity intent (no nav action needed)
+                            requireContext().startActivity(
+                                CallActivity.newIntent(
+                                    requireContext(),
+                                    chatId,
+                                    otherUserId,
+                                    CallType.VIDEO
+                                )
+                            )
                         }
                     )
                 }

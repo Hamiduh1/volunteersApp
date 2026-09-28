@@ -1,7 +1,6 @@
 package com.example.volunteersApp.jobs
 
 import com.google.firebase.Timestamp
-import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
 
@@ -11,7 +10,6 @@ import com.google.firebase.firestore.ServerTimestamp
  */
 @IgnoreExtraProperties
 data class JobPosting(
-    @DocumentId
     val postingId: String = "",
 
     val employerUid: String? = null,
@@ -28,6 +26,10 @@ data class JobPosting(
     val category: String? = null,
     val volunteersNeeded: Int = 0,
     val status: String? = "open",
+    // Canonical deadline used for discovery and server-side application checks.
+    val applicationDeadline: Timestamp? = null,
+    val closeEntries: Boolean = false,
+    val retainedForHistory: Boolean = false,
 
     @ServerTimestamp
     val timestamp: Timestamp? = null

@@ -1,0 +1,232 @@
+{
+  "source": "https://docs.afriex.com/api-reference/supported-currencies",
+  "docsIndex": "https://docs.afriex.com/llms.txt",
+  "syncedAt": "2026-09-06",
+  "notes": [
+    "LIVE = product-ready; COMING_SOON = show Coming soon; UNSUPPORTED = omit from pickers",
+    "Local BANK_ACCOUNT payout and USD SWIFT payout are separate rails — SWIFT covers 100 countries for USD international disbursement",
+    "Nigeria has no MOBILE_MONEY payout — BANK_ACCOUNT + VIRTUAL_BANK_ACCOUNT only",
+    "Sierra Leone currency is SLE per Afriex",
+    "CNY BANK_ACCOUNT payout requires recipient phone, ID type, and ID number",
+    "EUR bank payouts use SEPA (IBAN required); GBP payouts use Faster Payments",
+    "USD SWIFT requires recipient email, recipient address, SWIFT/BIC, and transaction invoice",
+    "USDC/USDT crypto deposit is LIVE in production from 100+ countries; payout not offered",
+    "This file is the provider rail catalog, not the production account entitlement. Confirmed account terms live in 11_PRODUCTION_ACCOUNT_TERMS_2026-09-02.md."
+  ],
+  "productionAccountTerms": {
+    "localBankPayoutIso2": ["NG", "GH", "KE", "ZA", "EG"],
+    "payoutLimitUsdEquivalent": {"perTransaction": 2000, "perUtcDay": 5000},
+    "mobileMoney": "Payout and collection corridors require the explicit account agreement; Ghana and Kenya fees are in the MSA.",
+    "swiftUsdProviderFeeRate": 0.0025,
+    "mobileMoneyPayoutUatIso2": [
+      "BJ", "BW", "CM", "CG", "CI", "ET", "GH", "GM", "GN", "KE",
+      "MG", "MW", "MZ", "RW", "SN", "SL", "TZ", "UG", "ZM"
+    ],
+    "paymentMethodResolveMobileMoneyIso2": [
+      "NG", "GH", "ET", "KE", "MG", "MW", "MZ", "RW", "TZ", "UG", "CM", "CG",
+      "GA", "CF", "CI", "BF", "ML", "SN", "TG", "BJ", "NE", "GN", "ZM"
+    ],
+    "mobileMoneyPayoutUatNotInPublicResolveIso2": ["BW", "GM", "SL"],
+    "mobileMoneyRouteValidationUatIso2": [
+      "BJ", "BW", "CM", "CG", "CI", "ET", "GH", "GM", "GN", "KE",
+      "MG", "MW", "MZ", "RW", "SN", "SL", "TZ", "UG", "ZM"
+    ],
+    "mobileMoneyNameEnquiryIso2": ["NG", "GH"],
+    "paymentMethodResolveContract": "GET /payment-method/resolve uses channel, accountNumber (the E.164 phone for MOBILE_MONEY), and countryCode. institutionCode is documented as required for BANK_ACCOUNT only.",
+    "paymentMethodResolveProductionGate": "Afriex confirmed on 2026-09-07 that all 19 agreed UAT payout corridors support route validation. Recipient-name enquiry is a separate capability available only for NG and GH; other corridors must use the customer-confirmed name after route validation."
+  },
+  "rails": {
+    "BANK_ACCOUNT": "Bank Account",
+    "VIRTUAL_BANK_ACCOUNT": "Virtual Account",
+    "POOL_ACCOUNT": "Pool Account",
+    "MOBILE_MONEY": "Mobile Money",
+    "SWIFT": "SWIFT",
+    "INTERAC": "Interac",
+    "UPI": "UPI",
+    "WE_CHAT": "WeChat Pay",
+    "ALIPAY": "Alipay",
+    "CRYPTO": "Crypto",
+    "PAYBILL_TILL": "Paybill / Till"
+  },
+  "swiftPayoutRequirements": {
+    "currency": "USD",
+    "channel": "SWIFT",
+    "requiredFields": [
+      "recipientEmail",
+      "recipientAddress",
+      "swiftOrBic",
+      "transactionInvoice"
+    ],
+    "institutionLookup": "GET /payment-method/institution?channel=SWIFT&countryCode={iso2}"
+  },
+  "swiftPayoutByRegion": {
+    "Africa": [
+      "DZ", "BJ", "BW", "BF", "CM", "CF", "CG", "CI", "CD", "EG", "ET", "GA", "GM", "GH", "GN", "GW",
+      "KE", "MG", "MW", "ML", "MA", "MZ", "NA", "NE", "NG", "RW", "SN", "SL", "ZA", "SS", "TZ", "TG",
+      "TN", "UG", "ZM", "ZW"
+    ],
+    "Americas": [
+      "AR", "BR", "CA", "CL", "CO", "HT", "MX", "PE", "US", "UY"
+    ],
+    "Europe": [
+      "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GI", "GR", "HU", "IE", "IT",
+      "LV", "LI", "LT", "LU", "MT", "NL", "NO", "PL", "PT", "RO", "RU", "SK", "SI", "ES", "SE", "CH",
+      "UA", "GB"
+    ],
+    "AsiaPacific": [
+      "AU", "BD", "CN", "HK", "ID", "IN", "JP", "KR", "KW", "MY", "NZ", "PH", "PK", "QA", "SA", "SG",
+      "TH", "TR", "AE", "VN"
+    ]
+  },
+  "swiftPayoutLiveIso2": [
+    "DZ", "BJ", "BW", "BF", "CM", "CF", "CG", "CI", "CD", "EG", "ET", "GA", "GM", "GH", "GN", "GW",
+    "KE", "MG", "MW", "ML", "MA", "MZ", "NA", "NE", "NG", "RW", "SN", "SL", "ZA", "SS", "TZ", "TG",
+    "TN", "UG", "ZM", "ZW",
+    "AR", "BR", "CA", "CL", "CO", "HT", "MX", "PE", "US", "UY",
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GI", "GR", "HU", "IE", "IT",
+    "LV", "LI", "LT", "LU", "MT", "NL", "NO", "PL", "PT", "RO", "RU", "SK", "SI", "ES", "SE", "CH",
+    "UA", "GB",
+    "AU", "BD", "CN", "HK", "ID", "IN", "JP", "KR", "KW", "MY", "NZ", "PH", "PK", "QA", "SA", "SG",
+    "TH", "TR", "AE", "VN"
+  ],
+  "localBankPayoutLiveIso2": [
+    "CM", "CI", "EG", "ET", "GH", "KE", "NG", "RW", "SN", "ZA", "UG",
+    "US",
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV",
+    "LT", "LU", "MT", "NL", "NO", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "UA", "GB",
+    "CN", "IN", "PK"
+  ],
+  "bankPayoutLiveIso2": [
+    "CM", "CI", "EG", "ET", "GH", "KE", "NG", "RW", "SN", "ZA", "UG",
+    "US",
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV",
+    "LT", "LU", "MT", "NL", "NO", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "UA", "GB",
+    "CN", "IN", "PK"
+  ],
+  "europeBankPayoutLiveIso2": [
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV",
+    "LT", "LU", "MT", "NL", "NO", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "UA", "GB"
+  ],
+  "africaLocalBankPayoutLiveIso2": [
+    "CM", "CI", "EG", "ET", "GH", "KE", "NG", "RW", "SN", "ZA", "UG"
+  ],
+  "mobileMoneyDepositLiveIso2": ["BJ", "CM", "CI", "ET", "KE", "TZ", "UG"],
+  "mobileMoneyDepositComingSoonIso2": ["BF", "CG", "GA", "GH", "MW", "MZ", "RW", "SL", "ZM"],
+  "mobileMoneyPayoutLiveIso2": [
+    "BJ", "BW", "CM", "CG", "CI", "EG", "ET", "GA", "GM", "GH", "GN", "GW",
+    "KE", "MG", "MW", "MZ", "RW", "SN", "SL", "TZ", "UG", "ZM", "PK"
+  ],
+  "mobileMoneyPayoutComingSoonIso2": ["BF", "CF", "CD", "ML", "MA", "SS", "TG"],
+  "virtualAccountDepositLiveIso2": ["KE", "NG", "US"],
+  "virtualAccountDepositComingSoonIso2": [
+    "GH",
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV",
+    "LT", "LU", "MT", "NL", "NO", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "UA", "GB"
+  ],
+  "interacComingSoonIso2": ["CA"],
+  "digitalAssets": [
+    {"asset": "USDC", "deposit": "LIVE", "payout": "UNSUPPORTED", "coverage": "100+ countries globally"},
+    {"asset": "USDT", "deposit": "LIVE", "payout": "UNSUPPORTED", "coverage": "100+ countries globally"}
+  ],
+  "countries": [
+    {"name": "Benin", "iso2": "BJ", "currency": "XOF", "region": "Africa", "deposit": {"MOBILE_MONEY": "LIVE"}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Botswana", "iso2": "BW", "currency": "BWP", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Burkina Faso", "iso2": "BF", "currency": "XOF", "region": "Africa", "deposit": {"MOBILE_MONEY": "COMING_SOON"}, "payout": {"MOBILE_MONEY": "COMING_SOON", "SWIFT": "LIVE"}},
+    {"name": "Cameroon", "iso2": "CM", "currency": "XAF", "region": "Africa", "deposit": {"MOBILE_MONEY": "LIVE"}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Central African Republic", "iso2": "CF", "currency": "XAF", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "COMING_SOON", "SWIFT": "LIVE"}},
+    {"name": "Republic of the Congo", "iso2": "CG", "currency": "XAF", "region": "Africa", "deposit": {"MOBILE_MONEY": "COMING_SOON"}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Cote d'Ivoire", "iso2": "CI", "currency": "XOF", "region": "Africa", "deposit": {"MOBILE_MONEY": "LIVE"}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Democratic Republic of the Congo", "iso2": "CD", "currency": "CDF", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "COMING_SOON", "SWIFT": "LIVE"}},
+    {"name": "Egypt", "iso2": "EG", "currency": "EGP", "region": "Africa", "deposit": {}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Ethiopia", "iso2": "ET", "currency": "ETB", "region": "Africa", "deposit": {"MOBILE_MONEY": "LIVE"}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Gabon", "iso2": "GA", "currency": "XAF", "region": "Africa", "deposit": {"MOBILE_MONEY": "COMING_SOON"}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Gambia", "iso2": "GM", "currency": "GMD", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Ghana", "iso2": "GH", "currency": "GHS", "region": "Africa", "deposit": {"MOBILE_MONEY": "COMING_SOON", "VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Guinea", "iso2": "GN", "currency": "GNF", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Guinea-Bissau", "iso2": "GW", "currency": "XOF", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Kenya", "iso2": "KE", "currency": "KES", "region": "Africa", "deposit": {"MOBILE_MONEY": "LIVE", "VIRTUAL_BANK_ACCOUNT": "LIVE"}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "PAYBILL_TILL": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Madagascar", "iso2": "MG", "currency": "MGA", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Malawi", "iso2": "MW", "currency": "MWK", "region": "Africa", "deposit": {"MOBILE_MONEY": "COMING_SOON"}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Mali", "iso2": "ML", "currency": "XOF", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "COMING_SOON", "SWIFT": "LIVE"}},
+    {"name": "Morocco", "iso2": "MA", "currency": "MAD", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "COMING_SOON", "SWIFT": "LIVE"}},
+    {"name": "Mozambique", "iso2": "MZ", "currency": "MZN", "region": "Africa", "deposit": {"MOBILE_MONEY": "COMING_SOON"}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Namibia", "iso2": "NA", "currency": "NAD", "region": "Africa", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Niger", "iso2": "NE", "currency": "XOF", "region": "Africa", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Nigeria", "iso2": "NG", "currency": "NGN", "region": "Africa", "deposit": {"VIRTUAL_BANK_ACCOUNT": "LIVE"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Rwanda", "iso2": "RW", "currency": "RWF", "region": "Africa", "deposit": {"MOBILE_MONEY": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Senegal", "iso2": "SN", "currency": "XOF", "region": "Africa", "deposit": {}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Sierra Leone", "iso2": "SL", "currency": "SLE", "region": "Africa", "deposit": {"MOBILE_MONEY": "COMING_SOON"}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "South Africa", "iso2": "ZA", "currency": "ZAR", "region": "Africa", "deposit": {}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "South Sudan", "iso2": "SS", "currency": "SSP", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "COMING_SOON", "SWIFT": "LIVE"}},
+    {"name": "Tanzania", "iso2": "TZ", "currency": "TZS", "region": "Africa", "deposit": {"MOBILE_MONEY": "LIVE"}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Togo", "iso2": "TG", "currency": "XOF", "region": "Africa", "deposit": {}, "payout": {"MOBILE_MONEY": "COMING_SOON", "SWIFT": "LIVE"}},
+    {"name": "Tunisia", "iso2": "TN", "currency": "TND", "region": "Africa", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Uganda", "iso2": "UG", "currency": "UGX", "region": "Africa", "deposit": {"MOBILE_MONEY": "LIVE"}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Zambia", "iso2": "ZM", "currency": "ZMW", "region": "Africa", "deposit": {"MOBILE_MONEY": "COMING_SOON"}, "payout": {"MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Zimbabwe", "iso2": "ZW", "currency": "ZWL", "region": "Africa", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Argentina", "iso2": "AR", "currency": "ARS", "region": "Americas", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Brazil", "iso2": "BR", "currency": "BRL", "region": "Americas", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Canada", "iso2": "CA", "currency": "CAD", "region": "Americas", "deposit": {"INTERAC": "COMING_SOON"}, "payout": {"INTERAC": "COMING_SOON", "SWIFT": "LIVE"}},
+    {"name": "Chile", "iso2": "CL", "currency": "CLP", "region": "Americas", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Colombia", "iso2": "CO", "currency": "COP", "region": "Americas", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Haiti", "iso2": "HT", "currency": "HTG", "region": "Americas", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Mexico", "iso2": "MX", "currency": "MXN", "region": "Americas", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Peru", "iso2": "PE", "currency": "PEN", "region": "Americas", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "United States", "iso2": "US", "currency": "USD", "region": "Americas", "deposit": {"VIRTUAL_BANK_ACCOUNT": "LIVE"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Uruguay", "iso2": "UY", "currency": "UYU", "region": "Americas", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Austria", "iso2": "AT", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Belgium", "iso2": "BE", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Bulgaria", "iso2": "BG", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Croatia", "iso2": "HR", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Cyprus", "iso2": "CY", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Czech Republic", "iso2": "CZ", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Denmark", "iso2": "DK", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Estonia", "iso2": "EE", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Finland", "iso2": "FI", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "France", "iso2": "FR", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Germany", "iso2": "DE", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Gibraltar", "iso2": "GI", "currency": "GIP", "region": "Europe", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Greece", "iso2": "GR", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Hungary", "iso2": "HU", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Ireland", "iso2": "IE", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Italy", "iso2": "IT", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Latvia", "iso2": "LV", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Liechtenstein", "iso2": "LI", "currency": "CHF", "region": "Europe", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Lithuania", "iso2": "LT", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Luxembourg", "iso2": "LU", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Malta", "iso2": "MT", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Netherlands", "iso2": "NL", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Norway", "iso2": "NO", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Poland", "iso2": "PL", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Portugal", "iso2": "PT", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Romania", "iso2": "RO", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Russia", "iso2": "RU", "currency": "RUB", "region": "Europe", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Slovakia", "iso2": "SK", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Slovenia", "iso2": "SI", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Spain", "iso2": "ES", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Sweden", "iso2": "SE", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Switzerland", "iso2": "CH", "currency": "CHF", "region": "Europe", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Ukraine", "iso2": "UA", "currency": "EUR", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "United Kingdom", "iso2": "GB", "currency": "GBP", "region": "Europe", "deposit": {"VIRTUAL_BANK_ACCOUNT": "COMING_SOON"}, "payout": {"BANK_ACCOUNT": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Australia", "iso2": "AU", "currency": "AUD", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Bangladesh", "iso2": "BD", "currency": "BDT", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "China", "iso2": "CN", "currency": "CNY", "region": "AsiaPacific", "deposit": {}, "payout": {"BANK_ACCOUNT": "LIVE", "WE_CHAT": "LIVE", "ALIPAY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Hong Kong", "iso2": "HK", "currency": "HKD", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Indonesia", "iso2": "ID", "currency": "IDR", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "India", "iso2": "IN", "currency": "INR", "region": "AsiaPacific", "deposit": {}, "payout": {"BANK_ACCOUNT": "LIVE", "UPI": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Japan", "iso2": "JP", "currency": "JPY", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "South Korea", "iso2": "KR", "currency": "KRW", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Kuwait", "iso2": "KW", "currency": "KWD", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Malaysia", "iso2": "MY", "currency": "MYR", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "New Zealand", "iso2": "NZ", "currency": "NZD", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Philippines", "iso2": "PH", "currency": "PHP", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Pakistan", "iso2": "PK", "currency": "PKR", "region": "AsiaPacific", "deposit": {}, "payout": {"BANK_ACCOUNT": "LIVE", "MOBILE_MONEY": "LIVE", "SWIFT": "LIVE"}},
+    {"name": "Qatar", "iso2": "QA", "currency": "QAR", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Saudi Arabia", "iso2": "SA", "currency": "SAR", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Singapore", "iso2": "SG", "currency": "SGD", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Thailand", "iso2": "TH", "currency": "THB", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Turkey", "iso2": "TR", "currency": "TRY", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "United Arab Emirates", "iso2": "AE", "currency": "AED", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}},
+    {"name": "Vietnam", "iso2": "VN", "currency": "VND", "region": "AsiaPacific", "deposit": {}, "payout": {"SWIFT": "LIVE"}}
+  ]
+}

@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.Locale
+import java.util.UUID
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.StorageFolder
 
 /**
  * Data class to hold the complete user profile state for the UI.
@@ -54,7 +58,7 @@ class ProfileViewModel : ViewModel() {
      */
     private fun listenToUserProfile(userId: String) {
         _isLoading.value = true
-        val userDocRef = db.collection("users").document(userId)
+        val userDocRef = db.collection(FirestoreCollection.USERS).document(userId)
 
         userProfileListener = userDocRef.addSnapshotListener { snapshot, error ->
             if (error != null) {
@@ -64,12 +68,21 @@ class ProfileViewModel : ViewModel() {
             }
 
             if (snapshot != null && snapshot.exists()) {
+                val phone = snapshot.getString("phone")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: snapshot.getString("phoneNumber")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "N/A"
+                val profileUrl = snapshot.getString("profilePictureUrl")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: snapshot.getString("profileImageUrl")
+
                 _userProfile.value = UserProfile(
                     uid = userId,
                     username = snapshot.getString("username") ?: snapshot.getString("name") ?: "N/A",
                     email = snapshot.getString("email") ?: auth.currentUser?.email ?: "N/A",
-                    phone = snapshot.getString("phone") ?: "N/A",
-                    profilePictureUrl = snapshot.getString("profilePictureUrl"),
+                    phone = phone,
+                    profilePictureUrl = profileUrl,
                     role = snapshot.getString("role") ?: "volunteer"
                 )
             } else {
@@ -86,14 +99,33 @@ class ProfileViewModel : ViewModel() {
         val currentUser = auth.currentUser ?: return
         _isLoading.value = true
 
-        val imageRef = storage.reference.child("profile_images/${currentUser.uid}.$fileExtension")
+        val normalizedExtension = fileExtension.trim().lowercase(Locale.US)
+            .ifBlank { "jpg" }
+        val fileName = "${UUID.randomUUID()}.$normalizedExtension"
+        // Storage rules expect: profile_images/{userId}/{fileName}
+        val imageRef = storage.reference.child(StorageFolder.profileImage(currentUser.uid, fileName))
+        val contentType = when (normalizedExtension) {
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            else -> "image/jpeg"
+        }
 
         viewModelScope.launch {
             try {
-                imageRef.putFile(imageUri).await()
+                imageRef.putFile(
+                    imageUri,
+                    com.google.firebase.storage.StorageMetadata.Builder()
+                        .setContentType(contentType)
+                        .build()
+                ).await()
                 val downloadUrl = imageRef.downloadUrl.await().toString()
-                db.collection("users").document(currentUser.uid)
-                    .update("profilePictureUrl", downloadUrl)
+                db.collection(FirestoreCollection.USERS).document(currentUser.uid)
+                    .update(
+                        mapOf(
+                            "profilePictureUrl" to downloadUrl,
+                            "profileImageUrl" to downloadUrl
+                        )
+                    )
                     .await()
                 Log.d("ProfileViewModel", "Profile image updated successfully.")
             } catch (e: Exception) {

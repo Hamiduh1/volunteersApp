@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 // Using a SharedFlow for one-time events like showing a Toast
 sealed interface AccountEvent {
@@ -27,7 +28,6 @@ class AccountSettingsViewModel : ViewModel() {
 
     companion object {
         private const val TAG = "AccountSettingsVM"
-        private const val USERS_COLLECTION = "users" // Ensure this matches your Firestore
         private const val PROFILE_PIC_URL_FIELD = "url"
     }
 
@@ -40,7 +40,7 @@ class AccountSettingsViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val userDocRef = db.collection(USERS_COLLECTION).document(currentUser.uid)
+                val userDocRef = db.collection(FirestoreCollection.USERS).document(currentUser.uid)
                 // FieldValue.delete() removes the field from the document
                 val updates = mapOf(PROFILE_PIC_URL_FIELD to FieldValue.delete())
 

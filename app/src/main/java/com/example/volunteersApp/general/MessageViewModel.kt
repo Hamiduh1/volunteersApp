@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreSubcollection
 
 class MessageViewModel : ViewModel() {
     private val db = Firebase.firestore
@@ -27,7 +28,7 @@ class MessageViewModel : ViewModel() {
     }
 
     private fun observeMessages() {
-        db.collection("messages")
+        db.collection(FirestoreSubcollection.MESSAGES)
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .limitToLast(50)
             .addSnapshotListener { snapshot, error ->
@@ -52,7 +53,7 @@ class MessageViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                db.collection("messages").add(newMessage).await()
+                db.collection(FirestoreSubcollection.MESSAGES).add(newMessage).await()
             } catch (e: Exception) {
                 // Handle error
             }

@@ -3,7 +3,6 @@ pluginManagement {
         gradlePluginPortal()
         google()
         mavenCentral()
-        maven("https://download.agora.io/maven")
     }
 
     resolutionStrategy {
@@ -26,6 +25,7 @@ dependencyResolutionManagement {
         mavenCentral()
         maven { url = uri("https://jitpack.io") }
         maven { url = uri("https://download.agora.io/maven") }
+        maven { url = uri("https://maps.googleapis.com/maps/maven") }
     }
 }
 

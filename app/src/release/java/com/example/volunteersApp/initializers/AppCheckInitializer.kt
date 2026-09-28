@@ -1,18 +1,20 @@
 package com.example.volunteersApp.initializers
 
 import android.content.Context
+import android.util.Log
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 
-/**
- * This is the RELEASE version of the AppCheckInitializer.
- * It will only be included in release builds.
- */
+/** Installs Play Integrity for production Firebase App Check enforcement. */
 object AppCheckInitializer {
     fun install(context: Context) {
-        val firebaseAppCheck = FirebaseAppCheck.getInstance()
-        firebaseAppCheck.installAppCheckProviderFactory(
-            PlayIntegrityAppCheckProviderFactory.getInstance()
+        FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
+            PlayIntegrityAppCheckProviderFactory.getInstance(),
+            true,
+        )
+        Log.i(
+            "AppCheckInitializer",
+            "Play Integrity App Check provider installed for ${context.packageName}."
         )
     }
 }

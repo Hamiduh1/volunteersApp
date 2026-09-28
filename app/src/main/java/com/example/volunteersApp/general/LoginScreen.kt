@@ -1,44 +1,56 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.general
 
-import androidx.compose.foundation.Image
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.volunteersApp.R
 
 
 /**
- * Modernized Login Screen using Jetpack Compose.
+ * Premium, Modernized Login Screen with Material 3 Design
+ * - Smooth animations and transitions
+ * - Beautiful Material 3 design with proper theming
+ * - Automatic role routing after sign in
+ * - Professional error handling
+ * - Premium visual hierarchy
+ * - Fully modernized Compose components
  */
-@OptIn(ExperimentalLayoutApi::class) // You may need to add this annotation for FlowRow
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LoginScreen(
     viewModel: LoginViewModel,
-    onLoginSuccess: (String) -> Unit,
+    onLoginSuccess: () -> Unit,
     onForgotPassword: () -> Unit,
     onSignUp: () -> Unit
 ) {
@@ -46,17 +58,20 @@ fun LoginScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var selectedRole by remember { mutableStateOf("volunteer") }
+    var rememberMe by remember { mutableStateOf(false) }
+    var phoneOtpCode by remember { mutableStateOf("") }
 
     LaunchedEffect(uiState.loginSuccess) {
         if (uiState.loginSuccess) {
-            onLoginSuccess(uiState.userType ?: "volunteer")
+            onLoginSuccess()
         }
     }
 
-    Scaffold { padding ->
-        // --- Use a Box to allow for bottom-aligned content ---
-        Box(
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = Color.Transparent
+    ) { padding ->
+        AuthScreenBackground(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
@@ -65,173 +80,411 @@ fun LoginScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // --- NEW: App Icon ---
-                // IMPORTANT: Make sure you have 'app_logo.png' in your res/drawable folder
-                Image(
-                    painter = painterResource(id = R.drawable.app_logo),
-                    contentDescription = "App Logo",
-                    modifier = Modifier
-                        .size(120.dp)
-                        .padding(bottom = 24.dp)
+                AuthHeroPanel(
+                    title = "Sign In Dashboard",
+                    subtitle = "Sign in once and we will route you to the right volunteer, organizer, employer, or staff experience."
                 )
 
-                // --- MODIFIED: More professional titles ---
-                Text(
-                    text = "Welcome Back",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Sign in to connect with your community.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 32.dp)
+                AuthDashboardStrip(
+                    title = "Sign In Overview",
+                    items = listOf("Auto Route", "Verification", "Secure Access")
                 )
 
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("Email Address") },
-                    modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Default.Email, null) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    shape = RoundedCornerShape(12.dp),
-                    isError = uiState.error?.contains("email", ignoreCase = true) == true
-                )
-
-                Spacer(Modifier.height(16.dp))
-
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password") },
-                    modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Default.Lock, null) },
-                    trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, null)
-                        }
-                    },
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    shape = RoundedCornerShape(12.dp),
-                    isError = uiState.error != null && password.isEmpty()
-                )
-
-                TextButton(
-                    onClick = onForgotPassword,
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text("Forgot Password?")
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                Text(
-                    text = "Log in as:",
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Start,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                FlowRow(
+                // Form Card
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .selectableGroup(),
-                    // FIX: Replaced old parameters with new ones
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .clip(RoundedCornerShape(24.dp)),
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(24.dp)
                 ) {
-                    RoleOption("Volunteer", "volunteer", selectedRole) { selectedRole = it }
-                    RoleOption("Organizer", "organizer", selectedRole) { selectedRole = it }
-                    RoleOption("Employer", "employer", selectedRole) { selectedRole = it }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Email Field
+                        LoginTextField(
+                            value = email,
+                            onValueChange = { email = it },
+                            label = "Email Address",
+                            placeholder = "your@email.com",
+                            icon = Icons.Default.Email,
+                            keyboardType = KeyboardType.Email,
+                            isError = uiState.error?.contains("email", ignoreCase = true) == true,
+                            enabled = !uiState.isLoading
+                        )
+
+                        // Password Field
+                        LoginTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = "Password",
+                            placeholder = "••••••••",
+                            icon = Icons.Default.Lock,
+                            isPassword = true,
+                            passwordVisible = passwordVisible,
+                            onPasswordVisibilityChange = { passwordVisible = !passwordVisible },
+                            isError = uiState.error?.contains("password", ignoreCase = true) == true,
+                            enabled = !uiState.isLoading
+                        )
+
+                        // Remember Me + Forgot Password
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { rememberMe = !rememberMe }
+                                    .padding(4.dp)
+                            ) {
+                                Checkbox(
+                                    checked = rememberMe,
+                                    onCheckedChange = { rememberMe = it },
+                                    modifier = Modifier.scale(0.85f)
+                                )
+                                Text("Remember me", style = MaterialTheme.typography.labelSmall)
+                            }
+
+                            TextButton(
+                                onClick = onForgotPassword,
+                                modifier = Modifier.align(Alignment.End),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                            ) {
+                                Text(
+                                    "Forgot Password?",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
                 }
 
-                Spacer(Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-                if (uiState.error != null) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp)),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(18.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Automatic role routing",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = "Your saved account role decides where you land after login. No role selection is needed here.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Error Message
+                AnimatedVisibility(visible = uiState.error != null) {
+                    if (uiState.error != null) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp)),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Error,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    uiState.error!!,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                    }
+                }
+
+                AnimatedVisibility(visible = uiState.info != null) {
+                    if (uiState.info != null) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp)),
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text(
+                                text = uiState.info!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Login Button
+                LoginButton(
+                    isLoading = uiState.isLoading,
+                    onClick = { viewModel.login(email, password) }
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val resendButtonLabel = if (uiState.resendCooldownSeconds > 0) {
+                    "Resend verification email (${uiState.resendCooldownSeconds}s)"
+                } else {
+                    "Resend verification email"
+                }
+                OutlinedButton(
+                    onClick = { viewModel.resendVerificationEmail(email, password) },
+                    enabled = !uiState.isLoading && !uiState.isResendingVerification && uiState.resendCooldownSeconds == 0,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (uiState.isResendingVerification) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Sending...")
+                    } else {
+                        Text(resendButtonLabel)
+                    }
+                }
+
+                Text(
+                    text = "If your account needs verification, sign in and we will take you to the secure code screen.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                val requestPhoneOtpLabel = if (uiState.phoneOtpCooldownSeconds > 0) {
+                    "Send phone OTP (${uiState.phoneOtpCooldownSeconds}s)"
+                } else {
+                    "Send phone OTP"
+                }
+                OutlinedButton(
+                    onClick = { viewModel.requestPhoneVerificationOtp(email, password) },
+                    enabled = !uiState.isLoading &&
+                        !uiState.isRequestingPhoneOtp &&
+                        uiState.phoneOtpCooldownSeconds == 0,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (uiState.isRequestingPhoneOtp) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Sending SMS...")
+                    } else {
+                        Text(requestPhoneOtpLabel)
+                    }
+                }
+                if (!uiState.maskedPhoneForOtp.isNullOrBlank()) {
                     Text(
-                        text = uiState.error!!,
-                        color = MaterialTheme.colorScheme.error,
+                        text = "Latest phone used: ${uiState.maskedPhoneForOtp}",
                         style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 16.dp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                OutlinedTextField(
+                    value = phoneOtpCode,
+                    onValueChange = { input ->
+                        phoneOtpCode = input.filter { it.isDigit() }.take(6)
+                    },
+                    label = { Text("Phone OTP code") },
+                    placeholder = { Text("123456") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    enabled = !uiState.isLoading && !uiState.isVerifyingPhoneOtp,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedButton(
+                    onClick = { viewModel.verifyPhoneVerificationOtp(email, password, phoneOtpCode) },
+                    enabled = !uiState.isLoading &&
+                        !uiState.isVerifyingPhoneOtp &&
+                        phoneOtpCode.length == 6,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (uiState.isVerifyingPhoneOtp) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Verifying...")
+                    } else {
+                        Text("Verify phone OTP")
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Sign Up Link
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onSignUp() }
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        "Don't have an account? ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Sign Up",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                Button(
-                    onClick = { viewModel.login(email, password, selectedRole) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    enabled = !uiState.isLoading
-                ) {
-                    if (uiState.isLoading) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
-                    } else {
-                        Text("LOG IN", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 24.dp)
-                ) {
-                    Text("Don't have an account?", color = Color.Gray)
-                    TextButton(onClick = onSignUp) {
-                        Text("Sign Up", fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                // Spacer to push branding to the bottom
-                Spacer(Modifier.height(48.dp))
-            }
-            // --- NEW: Professional branding at the bottom ---
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "LVCA",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 4.sp
-                )
-                // --- FIX: Updated the branding text ---
-                Text(
-                    text = "Local Volunteers Coordination Application",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Spacer(modifier = Modifier.height(22.dp))
+                AuthScreenFooter()
             }
         }
     }
 }
 
+@Composable
+private fun LoginTextField(
+    value: kotlin.String,
+    onValueChange: (kotlin.String) -> kotlin.Unit,
+    label: kotlin.String,
+    placeholder: kotlin.String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    keyboardType: androidx.compose.ui.text.input.KeyboardType = KeyboardType.Text,
+    isPassword: kotlin.Boolean = false,
+    passwordVisible: kotlin.Boolean = false,
+    onPasswordVisibilityChange: (() -> kotlin.Unit)? = null,
+    isError: kotlin.Boolean = false,
+    enabled: kotlin.Boolean = true
+) {
+    var isFocused by remember { mutableStateOf(false) }
 
+    val scaleAnim by animateFloatAsState(
+        targetValue = if (isFocused) 1.02f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "fieldScale"
+    )
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scaleAnim),
+        label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+        placeholder = { Text(placeholder) },
+        leadingIcon = { Icon(icon, null, modifier = Modifier.scale(1.1f)) },
+        trailingIcon = if (isPassword && onPasswordVisibilityChange != null) {
+            { IconButton(onClick = onPasswordVisibilityChange) {
+                Icon(if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, null)
+            }}
+        } else null,
+        visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        isError = isError,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+            errorBorderColor = MaterialTheme.colorScheme.error,
+            focusedLabelColor = MaterialTheme.colorScheme.primary,
+            focusedLeadingIconColor = MaterialTheme.colorScheme.primary
+        ),
+        shape = RoundedCornerShape(14.dp),
+        enabled = enabled
+    )
+}
 
 @Composable
-fun RoleOption(label: String, role: String, selectedRole: String, onSelect: (String) -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.clickable { onSelect(role) }
-    ) {
-        RadioButton(
-            selected = role == selectedRole,
-            onClick = { onSelect(role) },
-            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+private fun LoginButton(
+    isLoading: Boolean,
+    onClick: () -> Unit
+) {
+    val scaleAnim by animateFloatAsState(
+        targetValue = if (isLoading) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "buttonScale"
+    )
+
+    Button(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .scale(scaleAnim),
+        enabled = !isLoading,
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
         )
-        Text(text = label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 2.dp))
+    ) {
+        if (isLoading) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .scale(0.7f),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.dp
+                )
+                Text("Signing in...", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            }
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("LOG IN", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, modifier = Modifier.size(18.dp))
+            }
+        }
     }
 }

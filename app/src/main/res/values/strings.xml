@@ -1,6 +1,10 @@
 <resources>
     <string name="upload_photo">Upload photo</string>
     <string name="send_me_a_copy">Send me a copy</string>
+    <string name="incoming_call_answer">Answer</string>
+    <string name="incoming_call_decline">Decline</string>
+    <string name="incoming_call_ringing_title">Incoming call</string>
+    <string name="incoming_call_ringing_body">Ringing…</string>
     <string name="app_name">Volunteers</string>
     <string name="Login">Username/Number</string>
     <string name="Password">Password</string>
@@ -2183,7 +2187,7 @@
     <string name="chats_tab_title">Chats\n</string>
     <string name="invitations_tab_title">Invitations</string>
     <string name="no_active_chats">No Active Chats</string>
-    <string name="browse_users_to_start_a_new_conversation">Browse users to start a new conversation.</string>
+    <string name="browse_users_to_start_a_new_conversation">Open the User Directory to find people and start a chat.</string>
     <string name="new_chat">New Chat</string>
     <string name="view_your_ongoing_conversations_and_invitations">View your ongoing conversations and invitations.</string>
     <string name="my_chats">My Chats</string>
@@ -2199,25 +2203,25 @@
     <string name="image_for_the_community_alert" />
     <string name="date_eva">Date Eva</string>
     <string name="find_and_connect_with_your_perfect_match">Find and connect with your perfect match.</string>
-    <string name="share_and_discover_jokes_with_the_community_ai">Share and discover jokes with the community AI.</string>
-    <string name="jokes_corner">Jokes Corner</string>
+    <string name="share_and_discover_jokes_with_the_community_ai">Share and discover content with the community AI.</string>
+    <string name="jokes_corner">MindLoom</string>
         <!-- Add these strings to your existing strings.xml -->
         <string name="community_hub_title">Community Hub</string>
 
         <string name="feature_my_chats_title">My Chats</string>
         <string name="feature_my_chats_description">View your conversations</string>
 
-        <string name="feature_browse_users_title">Browse Users</string>
-        <string name="feature_browse_users_description">Start a new chat</string>
+        <string name="feature_browse_users_title">User Directory</string>
+        <string name="feature_browse_users_description">Browse app users and connect</string>
 
-        <string name="feature_jokes_title">Fun Time</string>
-        <string name="feature_jokes_description">Share a laugh</string>
+        <string name="feature_jokes_title">MindLoom</string>
+        <string name="feature_jokes_description">Share and discover content</string>
 
-        <string name="feature_date_eva_title">Date Eva</string>
-        <string name="feature_date_eva_description">Find a connection</string>
+        <string name="feature_date_eva_title">Dating Hub</string>
+        <string name="feature_date_eva_description">Dating Loop and Blind Date</string>
 
         <string name="feature_marketplace_title">Marketplace</string>
-        <string name="feature_marketplace_description">Buy and sell items</string>
+        <string name="feature_marketplace_description">Discover and list products</string>
 
         <string name="feature_advertisements_title">Sponsored</string>
         <string name="feature_advertisements_description">View promotions</string>
@@ -2227,8 +2231,8 @@
     <string name="no_events_to_display">No event to display</string>
 
     <!-- Get this from Stripe Dashboard -> Developers -> API Keys -->
-    <!--<string name="stripe_publishable_key">pk_test_51SlW3WFxChnehknK8hc83la3ithe42AkHCvan9RTJWc3JShzj1JxZPDb0HqV7MsXtTUyR0N8t3rCOxurHDOj3oKE00VI5zXdWf</string>
-   -->
+    <string name="stripe_publishable_key"></string>
+
      <!-- Get this from https://www.exchangerate-api.com/
     <string name="exchange_rate_api_key">7b54cea2790a54fd488db54a</string>
 -->

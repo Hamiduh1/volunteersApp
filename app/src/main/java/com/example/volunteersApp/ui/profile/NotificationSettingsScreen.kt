@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.ui.profile
 
 import androidx.compose.foundation.layout.*
@@ -8,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -15,7 +18,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationSettingsScreen(
     navController: NavController,
@@ -56,6 +58,20 @@ fun NotificationSettingsScreen(
                     description = "Be notified when someone starts following your journey.",
                     isSelected = settings.newFollowers,
                     onPermissionChanged = { viewModel.onSettingToggled(NotificationSettingsViewModel.FIELD_NEW_FOLLOWERS, it) }
+                )
+
+                NotificationPermissionGroup(
+                    title = "New MindLoom Posts",
+                    description = "Get alerts when creators you follow post new content.",
+                    isSelected = settings.jokesPosts,
+                    onPermissionChanged = { viewModel.onSettingToggled(NotificationSettingsViewModel.FIELD_JOKES_POSTS, it) }
+                )
+
+                NotificationPermissionGroup(
+                    title = "Live Streams",
+                    description = "Get notified when creators you follow go live.",
+                    isSelected = settings.liveStreams,
+                    onPermissionChanged = { viewModel.onSettingToggled(NotificationSettingsViewModel.FIELD_LIVE_STREAMS, it) }
                 )
 
                 NotificationPermissionGroup(

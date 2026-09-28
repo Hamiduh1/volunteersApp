@@ -1,16 +1,19 @@
 package com.example.volunteersApp.wallet
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -19,14 +22,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.content.Context
 import android.widget.Toast
@@ -35,11 +37,13 @@ import android.net.Uri
 import android.util.Log
 import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import com.stripe.android.Stripe
 import com.stripe.android.PaymentConfiguration
 import com.stripe.android.model.CardParams
 import com.stripe.android.model.BankAccountTokenParams
@@ -53,31 +57,46 @@ import com.stripe.android.payments.bankaccount.navigation.CollectBankAccountResu
 import com.stripe.android.payments.bankaccount.navigation.toUSBankAccountResult
 import com.stripe.android.view.CardInputWidget
 import com.stripe.android.ApiResultCallback
-import com.example.volunteersApp.R
+import com.example.volunteersApp.ui.shared.SearchableGlobalCountryDropdown
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.functions.FirebaseFunctionsException
-import java.util.Currency
 import java.util.Locale
 
 private const val US_INSTANT_LINK_WATCHDOG_MS = 20_000L
 private const val ENABLE_US_INSTANT_BANK_LINK = false
 
+enum class StripeConnectOnboardingCallback {
+    COMPLETED,
+    REFRESH_REQUIRED,
+}
+
+private enum class PaymentMethodsAccordionSection {
+    FUNDING,
+    APP_USER_RECEIVE,
+    STRIPE_PAYOUTS,
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PaymentMethodsScreen(
     viewModel: PaymentsViewModel = viewModel(),
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    stripeConnectCallback: StripeConnectOnboardingCallback? = null,
+    onStripeConnectCallbackHandled: () -> Unit = {},
 ) {
     val methods by viewModel.cards.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
-    val stripeKey = stringResource(R.string.stripe_publishable_key)
+    val stripeKey = remember { resolveStripePublishableKey() }
 
     var isOnboardingLoading by remember { mutableStateOf(false) }
     var isStatusLoading by remember { mutableStateOf(false) }
     var payoutSetupStatus by remember { mutableStateOf<PayoutSetupStatus?>(null) }
+    var stripeConnectAvailability by remember { mutableStateOf<StripePayoutAvailability?>(null) }
+    var selectedCommerceService by remember { mutableStateOf(StripeConnectCommerceService.MARKETPLACE) }
     val onDeleteMethod: (String) -> Unit = { methodId ->
         scope.launch {
             val result = viewModel.deletePaymentMethod(methodId)
@@ -99,36 +118,147 @@ fun PaymentMethodsScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        PaymentConfiguration.init(context, stripeKey)
-    }
-
-    LaunchedEffect(Unit) {
+    suspend fun refreshStripeConnectStatus(showError: Boolean = true) {
         isStatusLoading = true
         try {
-            payoutSetupStatus = viewModel.getPayoutSetupStatus()
-        } catch (e: Exception) {
-            val message = if (e is FirebaseFunctionsException && e.code == FirebaseFunctionsException.Code.NOT_FOUND) {
-                "Payout setup is unavailable. Please try again later or contact support."
+            val availability = viewModel.getStripePayoutAvailability()
+            stripeConnectAvailability = availability
+            payoutSetupStatus = if (availability.supported) {
+                viewModel.getPayoutSetupStatus()
             } else {
-                e.message ?: "Failed to load payout status."
+                null
             }
-            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            if (showError) {
+                val message = if (e is FirebaseFunctionsException && e.code == FirebaseFunctionsException.Code.NOT_FOUND) {
+                    "Stripe Connect business payout setup is unavailable. Please try again later or contact support."
+                } else {
+                    e.message ?: "Failed to load Stripe Connect status."
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
         } finally {
             isStatusLoading = false
         }
+    }
+
+    LaunchedEffect(stripeKey) {
+        if (stripeKey.isBlank()) {
+            Log.w("PaymentMethodsScreen", "Stripe publishable key is missing from BuildConfig.")
+            return@LaunchedEffect
+        }
+        runCatching { ensureStripePaymentConfiguration(context) }
+            .onFailure { Log.e("PaymentMethodsScreen", "Failed to initialize Stripe.", it) }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshStripeConnectStatus()
     }
 
     var showAddOptions by remember { mutableStateOf(false) }
     var showAddCardDialog by remember { mutableStateOf(false) }
     var showAddBankDialog by remember { mutableStateOf(false) }
     var showAddMobileMoneyDialog by remember { mutableStateOf(false) }
+    var showAddReceiveBankDialog by remember { mutableStateOf(false) }
+    var showAddReceiveSwiftDialog by remember { mutableStateOf(false) }
     var verifyingMethodId by remember { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
+    val hasRelinkRequirement = methods.any { it is PaymentMethod.CreditCard && it.requiresRelinkForCharges }
+    val supportsStripeConnectBusinessPayouts = stripeConnectAvailability?.supported == true
+    val cardMethods = remember(methods) { methods.filterIsInstance<PaymentMethod.CreditCard>() }
+    val bankMethods = remember(methods) { methods.filterIsInstance<PaymentMethod.BankAccount>() }
+    val mobileMethods = remember(methods) { methods.filterIsInstance<PaymentMethod.MobileMoney>() }
+    val fundingBankMethods = remember(bankMethods) {
+        bankMethods.filter { bank ->
+            val isSwift = bank.deliveryRoute.equals("SWIFT", ignoreCase = true) ||
+                bank.type.contains("SWIFT", ignoreCase = true) ||
+                (!bank.swiftBic.isNullOrBlank() && bank.chargeSourceId.isNullOrBlank())
+            if (isSwift) return@filter false
+            val sourceStatus = bank.chargeSourceStatus?.trim()?.lowercase(Locale.US).orEmpty()
+            val country = bank.country.trim().uppercase(Locale.US)
+            !bank.chargeSourceId.isNullOrBlank() &&
+                sourceStatus == "verified" &&
+                country in setOf("US", "UNITED STATES", "UNITED STATES OF AMERICA")
+        }
+    }
+    val fundingBankIds = remember(fundingBankMethods) { fundingBankMethods.map { it.id }.toSet() }
+    val receiveBankMethods = remember(bankMethods, fundingBankIds) {
+        bankMethods.filter { bank ->
+            if (bank.id in fundingBankIds) return@filter false
+            bank.appUserReceiveRouteVerified ||
+                bank.deliveryRoute.equals("SWIFT", ignoreCase = true) ||
+                bank.type.contains("SWIFT", ignoreCase = true)
+        }
+    }
+    val fundingMobileMethods = remember(mobileMethods) {
+        mobileMethods.filter {
+            it.phoneOwnershipVerified &&
+                it.verificationStatus.trim().uppercase(Locale.US) == "VERIFIED" &&
+                afriexMobileMoneyDepositAvailability(it.country) == AfriexRailAvailability.LIVE
+        }
+    }
+    val fundingMobileIds = remember(fundingMobileMethods) { fundingMobileMethods.map { it.id }.toSet() }
+    val receiveMobileMethods = remember(mobileMethods, fundingMobileIds) {
+        // Dual-role numbers stay under funding only so each id appears once.
+        mobileMethods.filter { mobile ->
+            mobile.appUserReceiveRouteVerified && mobile.id !in fundingMobileIds
+        }
+    }
+    var expandedSection by remember { mutableStateOf<PaymentMethodsAccordionSection?>(PaymentMethodsAccordionSection.FUNDING) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                scope.launch { refreshStripeConnectStatus(showError = false) }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(stripeConnectCallback) {
+        val callback = stripeConnectCallback ?: return@LaunchedEffect
+        try {
+            when (callback) {
+                StripeConnectOnboardingCallback.COMPLETED -> {
+                    viewModel.refresh()
+                    refreshStripeConnectStatus(showError = true)
+                    // Stripe may finish updating account capabilities shortly after redirecting.
+                    delay(1_500)
+                    refreshStripeConnectStatus(showError = false)
+                    Toast.makeText(
+                        context,
+                        "Returned from Stripe Connect. Payment Methods has been refreshed.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                StripeConnectOnboardingCallback.REFRESH_REQUIRED -> {
+                    isOnboardingLoading = true
+                    try {
+                        val url = viewModel.getStripeConnectBusinessPayoutSetupLink(selectedCommerceService)
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    } catch (e: Exception) {
+                        Toast.makeText(
+                            context,
+                            e.message ?: "Unable to refresh the Stripe Connect setup link.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } finally {
+                        isOnboardingLoading = false
+                    }
+                }
+            }
+        } finally {
+            onStripeConnectCallbackHandled()
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Payment Methods", fontWeight = FontWeight.Bold) },
+                title = { Text("Payment methods", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -138,10 +268,13 @@ fun PaymentMethodsScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showAddOptions = true },
+                onClick = {
+                    expandedSection = PaymentMethodsAccordionSection.FUNDING
+                    showAddOptions = true
+                },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Method", tint = Color.White)
+                Icon(Icons.Default.Add, contentDescription = "Add remittance funding", tint = Color.White)
             }
         }
     ) { padding ->
@@ -154,66 +287,329 @@ fun PaymentMethodsScreen(
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    item {
-                        ElevatedCard {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text("Payout Setup", fontWeight = FontWeight.Bold)
-                                Text(
-                                    "Complete setup to receive wallet-to-card or wallet-to-bank payouts.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.Gray
-                                )
-                                if (!isStatusLoading && payoutSetupStatus != null && !payoutSetupStatus!!.payoutsEnabled) {
-                                    Text(
-                                        "Finish setup to enable payouts.",
-                                        color = MaterialTheme.colorScheme.error,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
+                    item(key = "payment_activity_introduction") {
+                        PaymentMethodsSectionHeader(
+                            title = "Choose an activity",
+                            subtitle = "Open one section at a time. Each setup is kept separate so funding, member delivery, and business payouts never get mixed."
+                        )
+                    }
+
+                    item(key = "payment_dash") {
+                        val cardCount = cardMethods.size
+                        val bankCount = fundingBankMethods.size
+                        val mobileCount = fundingMobileMethods.size
+                        PaymentMethodsAccordion(
+                            title = "Remittance transfer funding",
+                            subtitle = "Cards preferred for mobile-money payouts. Verified US ACH and live deposit mobile money can also fund. SWIFT never funds. Nothing is stored in an app balance.",
+                            expanded = expandedSection == PaymentMethodsAccordionSection.FUNDING,
+                            onToggle = {
+                                expandedSection = if (expandedSection == PaymentMethodsAccordionSection.FUNDING) {
+                                    null
+                                } else {
+                                    PaymentMethodsAccordionSection.FUNDING
                                 }
-                                Button(
-                                    onClick = {
-                                        if (isOnboardingLoading) return@Button
-                                        isOnboardingLoading = true
-                                        scope.launch {
-                                            try {
-                                                val url = viewModel.getPayoutSetupLink()
-                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                                context.startActivity(intent)
-                                            } catch (e: Exception) {
-                                                val message = if (e is FirebaseFunctionsException && e.code == FirebaseFunctionsException.Code.NOT_FOUND) {
-                                                    "Payout setup is unavailable. Please try again later or contact support."
-                                                } else {
-                                                    e.message ?: "Failed to start setup."
-                                                }
-                                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                                            } finally {
-                                                isOnboardingLoading = false
-                                            }
-                                        }
-                                    },
-                                    enabled = !isOnboardingLoading
+                            },
+                        ) {
+                            ElevatedCard {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    if (isOnboardingLoading) {
-                                        CircularProgressIndicator(color = Color.White)
-                                    } else {
-                                        Text(if (payoutSetupStatus?.hasAccount == true) "Continue Setup" else "Complete Payout Setup")
+                                    Text("Transfer funding", fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "Use a charge-ready card, verified US ACH bank, or eligible mobile money account to pay for Send Money. SWIFT banks are payout-only and cannot fund.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.Gray
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        PaymentMethodMetricPill(cardCount.toString(), "Funding Cards", Modifier.weight(1f))
+                                        PaymentMethodMetricPill(bankCount.toString(), "Funding Banks", Modifier.weight(1f))
+                                        PaymentMethodMetricPill(mobileCount.toString(), "Funding Mobile", Modifier.weight(1f))
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                expandedSection = PaymentMethodsAccordionSection.FUNDING
+                                                showAddCardDialog = true
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        ) { Text("Add card", maxLines = 1) }
+                                        OutlinedButton(
+                                            onClick = {
+                                                expandedSection = PaymentMethodsAccordionSection.FUNDING
+                                                showAddBankDialog = true
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        ) { Text("Link funding bank", maxLines = 1) }
                                     }
                                 }
                             }
                         }
                     }
 
-                    if (methods.any { it is PaymentMethod.CreditCard && it.requiresRelinkForCharges }) {
-                        item {
+                    item(key = "member_receive_routes") {
+                        PaymentMethodsAccordion(
+                            title = "App User receive routes",
+                            subtitle = "Your provider-verified local bank, SWIFT, or mobile-money destination for transfers from other app members.",
+                            expanded = expandedSection == PaymentMethodsAccordionSection.APP_USER_RECEIVE,
+                            onToggle = {
+                                expandedSection = if (expandedSection == PaymentMethodsAccordionSection.APP_USER_RECEIVE) {
+                                    null
+                                } else {
+                                    PaymentMethodsAccordionSection.APP_USER_RECEIVE
+                                }
+                            },
+                        ) {
+                            OutlinedCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.outlinedCardColors(containerColor = WalletSurface),
+                                border = BorderStroke(1.dp, WalletCardBorder)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text("Provider-verified receive route", fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "This route is for App User delivery only. It is not a funding bank, a local or SWIFT beneficiary for Send Money, or a Stripe Connect payout account.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.Gray
+                                    )
+                                    Button(
+                                        onClick = {
+                                            expandedSection = PaymentMethodsAccordionSection.APP_USER_RECEIVE
+                                            showAddReceiveBankDialog = true
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Add local bank receive route")
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            expandedSection = PaymentMethodsAccordionSection.APP_USER_RECEIVE
+                                            showAddReceiveSwiftDialog = true
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Add SWIFT receive route")
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            expandedSection = PaymentMethodsAccordionSection.APP_USER_RECEIVE
+                                            showAddMobileMoneyDialog = true
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Add mobile money receive route")
+                                    }
+                                    Text(
+                                        "Send Money, local-bank and SWIFT delivery, mobile-money delivery, App User payouts, and cash-out use the remittance provider. Stripe Connect is never required.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    item(key = "stripe_connect_business_payouts") {
+                        PaymentMethodsSectionHeader(
+                            title = "Business earnings",
+                            subtitle = "Stripe Connect is only for receiving eligible commerce earnings, never for remittance transfers."
+                        )
+                    }
+
+                    item(key = "stripe_connect_business_payout_activity") {
+                        PaymentMethodsAccordion(
+                            title = "Stripe business-payout enrollment",
+                            subtitle = "Enroll only to receive eligible earnings from marketplace and other commerce services.",
+                            expanded = expandedSection == PaymentMethodsAccordionSection.STRIPE_PAYOUTS,
+                            onToggle = {
+                                expandedSection = if (expandedSection == PaymentMethodsAccordionSection.STRIPE_PAYOUTS) {
+                                    null
+                                } else {
+                                    PaymentMethodsAccordionSection.STRIPE_PAYOUTS
+                                }
+                            },
+                        ) {
+                            if (supportsStripeConnectBusinessPayouts) {
+                                ElevatedCard {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("Business services payouts: Stripe Connect", fontWeight = FontWeight.Bold)
+                                Text(
+                                    "Set up Stripe Connect only to receive eligible earnings from Marketplace and Garage Sales, Dating services with earnings, paid events, organizer earnings, and other in-app commerce services.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                                Text(
+                                    "Never used for Send Money, Afriex payouts, local or SWIFT banks, mobile money, App User payouts, top-ups, or cash-out. Stripe Connect is business account setup, not a payment card or remittance route.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    "Paying for a purchase, sponsored ad, Dating feature, or organizer fee uses Stripe Checkout and does not require the payer to open a Connect account.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                                Text(
+                                    "Choose the in-app service that will receive your business earnings:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    StripeConnectCommerceService.values().forEach { service ->
+                                        FilterChip(
+                                            selected = selectedCommerceService == service,
+                                            onClick = { selectedCommerceService = service },
+                                            label = { Text(service.label) }
+                                        )
+                                    }
+                                }
+                                if (isStatusLoading) {
+                                    Text(
+                                        "Loading Stripe Connect status...",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.Gray
+                                    )
+                                } else if (payoutSetupStatus != null) {
+                                    val s = payoutSetupStatus!!
+                                    Text(
+                                        "Account on file: ${if (s.hasAccount) "Yes" else "No"}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Text(
+                                        "Details submitted: ${if (s.detailsSubmitted) "Yes" else "No"}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Text(
+                                        "Business payouts enabled: ${if (s.payoutsEnabled) "Yes" else "No"}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                } else {
+                                    Text(
+                                        "Stripe Connect status unavailable.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.Gray
+                                    )
+                                }
+                                if (!isStatusLoading && payoutSetupStatus?.payoutsEnabled == true) {
+                                    Text(
+                                        "Your Stripe Connect business payout route is active.",
+                                        color = Color(0xFF1B5E20),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                if (!isStatusLoading && payoutSetupStatus != null && !payoutSetupStatus!!.payoutsEnabled) {
+                                    Text(
+                                        "Finish Stripe Connect setup before receiving eligible business payouts.",
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            if (isOnboardingLoading) return@Button
+                                            isOnboardingLoading = true
+                                            scope.launch {
+                                                try {
+                                                    val url = viewModel.getStripeConnectBusinessPayoutSetupLink(selectedCommerceService)
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                                    context.startActivity(intent)
+                                                } catch (e: Exception) {
+                                                    val message = if (e is FirebaseFunctionsException && e.code == FirebaseFunctionsException.Code.NOT_FOUND) {
+                                                        "Stripe Connect business payout setup is unavailable. Please try again later or contact support."
+                                                    } else {
+                                                        e.message ?: "Failed to start setup."
+                                                    }
+                                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                                } finally {
+                                                    isOnboardingLoading = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !isOnboardingLoading,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        if (isOnboardingLoading) {
+                                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
+                                        } else {
+                                            val buttonLabel = when {
+                                                isStatusLoading -> "Checking..."
+                                                payoutSetupStatus?.payoutsEnabled == true -> "Manage Business Payouts"
+                                                payoutSetupStatus?.hasAccount == true -> "Continue Stripe Setup"
+                                                else -> "Set Up Business Payouts"
+                                            }
+                                            Text(buttonLabel, maxLines = 1)
+                                        }
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            if (isOnboardingLoading) return@OutlinedButton
+                                            isOnboardingLoading = true
+                                            scope.launch {
+                                                try {
+                                                    val url = viewModel.getStripeConnectBusinessPayoutSetupLink(selectedCommerceService)
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                                    context.startActivity(intent)
+                                                } catch (e: Exception) {
+                                                    val message = e.message ?: "Failed to refresh link."
+                                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                                } finally {
+                                                    isOnboardingLoading = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !isOnboardingLoading,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Refresh Stripe Link", maxLines = 1)
+                                    }
+                                }
+                            }
+                                }
+                            } else {
+                                Text(
+                                    "Business payout enrollment is not available for this account right now. " +
+                                        "Send Money and remittance delivery do not use Stripe Connect.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray,
+                                )
+                            }
+                        }
+                    }
+
+                    if (hasRelinkRequirement) {
+                        item(key = "payment_relink") {
                             ElevatedCard(
                                 colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
                             ) {
@@ -241,19 +637,47 @@ fun PaymentMethodsScreen(
                             EmptyMethodsView(modifier = Modifier.fillMaxWidth())
                         }
                     } else {
-                        items(methods, key = { it.id }) { method ->
-                            when (method) {
-                                is PaymentMethod.CreditCard -> CreditCardItem(
+                        if (cardMethods.isNotEmpty()) {
+                            item(key = "cards_header") {
+                                PaymentMethodsSectionHeader(
+                                    title = "Cards",
+                                    subtitle = "Fund Send Money and Stripe withdrawals. Cards never receive Afriex Send Money."
+                                )
+                            }
+                            items(cardMethods, key = { it.id }) { method ->
+                                CreditCardItem(
                                     card = method,
                                     onDelete = { onDeleteMethod(method.id) },
                                     onSetDefault = { onSetDefaultMethod(method.id) }
                                 )
-                                is PaymentMethod.BankAccount -> BankAccountItem(
+                            }
+                        }
+
+                        if (fundingBankMethods.isNotEmpty()) {
+                            item(key = "funding_banks_header") {
+                                PaymentMethodsSectionHeader(
+                                    title = "US ACH funding banks",
+                                    subtitle = "Verified US ACH only. SWIFT and Afriex local-bank receive routes cannot fund."
+                                )
+                            }
+                            items(fundingBankMethods, key = { "fund-${it.id}" }) { method ->
+                                BankAccountItem(
                                     bank = method,
                                     onDelete = { onDeleteMethod(method.id) },
                                     onSetDefault = { onSetDefaultMethod(method.id) }
                                 )
-                                is PaymentMethod.MobileMoney -> MobileMoneyItem(
+                            }
+                        }
+
+                        if (fundingMobileMethods.isNotEmpty()) {
+                            item(key = "funding_mobile_header") {
+                                PaymentMethodsSectionHeader(
+                                    title = "Mobile money funding",
+                                    subtitle = "Verified numbers in live deposit countries can fund Send Money. Dual-role numbers that also receive App User transfers appear here once."
+                                )
+                            }
+                            items(fundingMobileMethods, key = { "fund-mm-${it.id}" }) { method ->
+                                MobileMoneyItem(
                                     mobile = method,
                                     onDelete = { onDeleteMethod(method.id) },
                                     onSetDefault = { onSetDefaultMethod(method.id) },
@@ -275,8 +699,49 @@ fun PaymentMethodsScreen(
                                         }
                                     }
                                 )
-                                else -> {}
                             }
+                        }
+
+                        if (receiveBankMethods.isNotEmpty() || receiveMobileMethods.isNotEmpty()) {
+                            item(key = "receive_header") {
+                                PaymentMethodsSectionHeader(
+                                    title = "Member receive routes",
+                                    subtitle = "Local bank, SWIFT (payout-only — cannot fund), and mobile money for App User delivery."
+                                )
+                            }
+                        }
+
+                        items(receiveBankMethods, key = { "recv-${it.id}" }) { method ->
+                            BankAccountItem(
+                                bank = method,
+                                onDelete = { onDeleteMethod(method.id) },
+                                onSetDefault = { onSetDefaultMethod(method.id) }
+                            )
+                        }
+
+                        items(receiveMobileMethods, key = { "recv-mm-${it.id}" }) { method ->
+                            MobileMoneyItem(
+                                mobile = method,
+                                onDelete = { onDeleteMethod(method.id) },
+                                onSetDefault = { onSetDefaultMethod(method.id) },
+                                isVerifying = verifyingMethodId == method.id,
+                                onVerifyNow = {
+                                    scope.launch {
+                                        if (verifyingMethodId != null) return@launch
+                                        verifyingMethodId = method.id
+                                        try {
+                                            val result = viewModel.requestMobileMoneyVerification(method.id)
+                                            Toast.makeText(
+                                                context,
+                                                result.message,
+                                                if (result.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                                            ).show()
+                                        } finally {
+                                            verifyingMethodId = null
+                                        }
+                                    }
+                                }
+                            )
                         }
                     }
                 }
@@ -288,68 +753,211 @@ fun PaymentMethodsScreen(
     if (showAddOptions) {
         AddMethodSelectionDialog(
             onDismiss = { showAddOptions = false },
-            onCardSelected = { showAddOptions = false; showAddCardDialog = true },
-            onBankSelected = { showAddOptions = false; showAddBankDialog = true },
-            onMobileMoneySelected = { showAddOptions = false; showAddMobileMoneyDialog = true }
+            onCardSelected = {
+                expandedSection = PaymentMethodsAccordionSection.FUNDING
+                showAddOptions = false
+                showAddCardDialog = true
+            },
+            onBankSelected = {
+                expandedSection = PaymentMethodsAccordionSection.FUNDING
+                showAddOptions = false
+                showAddBankDialog = true
+            },
+            onMobileMoneySelected = {
+                expandedSection = PaymentMethodsAccordionSection.FUNDING
+                showAddOptions = false
+                showAddMobileMoneyDialog = true
+            }
         )
     }
     if (showAddCardDialog) {
         AddCardDialog(
             viewModel = viewModel,
             onDismiss = { showAddCardDialog = false },
-            onSaved = { showAddCardDialog = false }
+            onSaved = {
+                showAddCardDialog = false
+                viewModel.refresh()
+            }
         )
     }
     if (showAddBankDialog) {
         AddBankDialog(
             viewModel = viewModel,
             onDismiss = { showAddBankDialog = false },
-            onSaved = { showAddBankDialog = false }
+            onSaved = {
+                showAddBankDialog = false
+                viewModel.refresh()
+            }
         )
     }
     if (showAddMobileMoneyDialog) {
         AddMobileMoneyDialog(
             viewModel = viewModel,
             onDismiss = { showAddMobileMoneyDialog = false },
-            onSaved = { showAddMobileMoneyDialog = false }
+            onSaved = {
+                showAddMobileMoneyDialog = false
+                viewModel.refresh()
+            }
+        )
+    }
+    if (showAddReceiveBankDialog) {
+        AddBankReceiveRouteDialog(
+            viewModel = viewModel,
+            onDismiss = { showAddReceiveBankDialog = false },
+            onSaved = {
+                showAddReceiveBankDialog = false
+                viewModel.refresh()
+            }
+        )
+    }
+    if (showAddReceiveSwiftDialog) {
+        AddSwiftReceiveRouteDialog(
+            viewModel = viewModel,
+            onDismiss = { showAddReceiveSwiftDialog = false },
+            onSaved = {
+                showAddReceiveSwiftDialog = false
+                viewModel.refresh()
+            }
         )
     }
 }
 
 @Composable
+private fun PaymentMethodsAccordion(
+    title: String,
+    subtitle: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.outlinedCardColors(containerColor = WalletSurface),
+        border = BorderStroke(1.dp, WalletCardBorder),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 16.dp, vertical = 15.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, fontWeight = FontWeight.Bold, color = WalletTextPrimary)
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+                    tint = WalletAccent,
+                )
+            }
+            if (expanded) {
+                HorizontalDivider(color = WalletCardBorder)
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaymentMethodsSectionHeader(
+    title: String,
+    subtitle: String
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(title, fontWeight = FontWeight.Bold)
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray
+        )
+    }
+}
+
+@Composable
+private fun PaymentMethodMetricPill(value: String, label: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(value, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun CreditCardItem(card: PaymentMethod.CreditCard, onDelete: () -> Unit, onSetDefault: () -> Unit) {
-    val gradient = Brush.linearGradient(colors = listOf(Color(0xFF1A237E), Color(0xFF3F51B5)))
-    Card(modifier = Modifier
-        .fillMaxWidth()
-        .height(190.dp), shape = RoundedCornerShape(20.dp), elevation = CardDefaults.cardElevation(8.dp)) {
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .background(gradient)
-            .padding(24.dp)) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(if(card.isDefault) "Default" else "", color = Color.White.copy(alpha = 0.7f))
-                    Row {
-                        if (!card.isDefault) {
-                            IconButton(onClick = onSetDefault) {
-                                Icon(Icons.Default.Star, contentDescription = "Set as Default", tint = Color.White.copy(alpha = 0.6f))
-                            }
-                        }
-                        IconButton(onClick = onDelete) {
-                            Icon(Icons.Default.Delete, null, tint = Color.White.copy(alpha = 0.6f))
-                        }
+    val last4 = card.last4.takeIf { it.isNotBlank() }
+        ?: card.cardNumber.filter { it.isDigit() }.takeLast(4)
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.outlinedCardColors(containerColor = WalletSurface),
+        border = BorderStroke(1.dp, WalletCardBorder)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(WalletAccentContainer, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.CreditCard, contentDescription = null, tint = WalletAccent)
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = card.brand.ifBlank { "Card" },
+                    fontWeight = FontWeight.Bold,
+                    color = WalletTextPrimary
+                )
+                Text(
+                    text = if (last4.isBlank()) "Linked card" else "Card ending in $last4",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WalletTextSecondary
+                )
+                if (card.isDefault) {
+                    Text("Default funding method", style = MaterialTheme.typography.labelSmall, color = WalletAccent)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!card.isDefault) {
+                    IconButton(onClick = onSetDefault) {
+                        Icon(Icons.Default.Star, contentDescription = "Set as default", tint = WalletAccent)
                     }
                 }
-                Spacer(Modifier.weight(1f))
-                Text(
-                    text = card.cardNumber,
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(card.cardHolderName.uppercase(), color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete card", tint = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }
@@ -357,10 +965,27 @@ fun CreditCardItem(card: PaymentMethod.CreditCard, onDelete: () -> Unit, onSetDe
 
 @Composable
 fun BankAccountItem(bank: PaymentMethod.BankAccount, onDelete: () -> Unit, onSetDefault: () -> Unit) {
+    val accountLast4 = bank.last4.ifBlank { bank.accountNumber.filter { it.isDigit() }.takeLast(4) }
+    val isSwiftReceive = bank.appUserReceiveRouteVerified && (
+        bank.deliveryRoute.equals("SWIFT", ignoreCase = true) ||
+            bank.type.contains("SWIFT", ignoreCase = true) ||
+            !bank.swiftBic.isNullOrBlank()
+        )
     ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
         ListItem(
             headlineContent = { Text(bank.bankName, fontWeight = FontWeight.Bold) },
-            supportingContent = { Text("Account: ${bank.accountNumber}") },
+            supportingContent = {
+                Text(
+                    when {
+                        isSwiftReceive ->
+                            "SWIFT payout/withdraw only — cannot fund. Ending ${accountLast4.ifBlank { "----" }}"
+                        bank.appUserReceiveRouteVerified ->
+                            "Verified bank receive route - ending ${accountLast4.ifBlank { "----" }}"
+                        else ->
+                            "US ACH funding bank - ending ${accountLast4.ifBlank { "----" }}"
+                    }
+                )
+            },
             leadingContent = { Icon(Icons.Default.AccountBalance, null) },
             trailingContent = {
                 Row {
@@ -417,6 +1042,13 @@ fun MobileMoneyItem(
                     Column {
                         Text(mobile.label, fontWeight = FontWeight.Bold)
                         Text(mobile.registeredName, style = MaterialTheme.typography.bodySmall)
+                        if (mobile.appUserReceiveRouteVerified) {
+                            Text(
+                                "Verified receive route",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         Text(
                             verificationLabel,
                             style = MaterialTheme.typography.bodySmall,
@@ -436,7 +1068,7 @@ fun MobileMoneyItem(
 
             MobileMoneyVerificationTimeline(status = normalizedStatus)
 
-            if (!mobile.phoneOwnershipVerified) {
+            if (normalizedStatus != "VERIFIED") {
                 Button(
                     onClick = onVerifyNow,
                     enabled = !isVerifying && canRequestVerification,
@@ -453,7 +1085,7 @@ fun MobileMoneyItem(
                     }
                 }
                 Text(
-                    text = "Verification sends a small collection request to this number. Your wallet stays in USD and is credited after provider confirmation.",
+                    text = "Mobile-money funding requires OTP ownership verification. A provider collection is requested only for a specific transfer.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -537,10 +1169,10 @@ private fun normalizeVerificationStatus(rawStatus: String?, isVerified: Boolean)
 private fun AddMethodSelectionDialog(onDismiss: () -> Unit, onCardSelected: () -> Unit, onBankSelected: () -> Unit, onMobileMoneySelected: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Funding Source") },
+        title = { Text("Add remittance funding") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Choose the type of payment method you want to link.")
+                Text("Choose a funding method for Send Money. Stripe business payouts and App User receive routes are configured in their own sections.")
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = onCardSelected, modifier = Modifier.fillMaxWidth()) { Text("LINK CARD") }
                 Button(onClick = onBankSelected, modifier = Modifier.fillMaxWidth()) { Text("LINK BANK") }
@@ -640,15 +1272,24 @@ fun AddCardDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                 )
 
                 isSaving = true
-                val stripe = Stripe(context, PaymentConfiguration.getInstance(context).publishableKey)
+                val stripe = try {
+                    createStripeClient(context)
+                } catch (e: IllegalArgumentException) {
+                    Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
+                    return@Button
+                }
                 stripe.createCardToken(
                     cardParams = params,
                     stripeAccountId = null,
                     callback = object : ApiResultCallback<Token> {
                     override fun onSuccess(result: Token) {
+                        val fundingTokenId = result.id
                         scope.launch {
                             try {
-                                val saveResult = viewModel.addPaymentMethodWithExternalAccount(methodData, result.id)
+                                val saveResult = viewModel.addPaymentMethodWithExternalAccount(
+                                    methodData = methodData,
+                                    externalAccountToken = fundingTokenId
+                                )
                                 Toast.makeText(
                                     context,
                                     saveResult.message,
@@ -689,15 +1330,407 @@ fun AddCardDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun AddBankReceiveRouteDialog(
+    viewModel: PaymentsViewModel,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val countries = remember { afriexLocalBankPayoutLiveCountries() }
+    var selectedCountry by remember { mutableStateOf(countries.firstOrNull().orEmpty()) }
+    var accountHolderName by remember { mutableStateOf("") }
+    var accountNumber by remember { mutableStateOf("") }
+    var institutions by remember { mutableStateOf<List<BankInstitutionOption>>(emptyList()) }
+    var selectedInstitution by remember { mutableStateOf<BankInstitutionOption?>(null) }
+    var countryExpanded by remember { mutableStateOf(false) }
+    var institutionExpanded by remember { mutableStateOf(false) }
+    var isLoadingInstitutions by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(selectedCountry) {
+        val countryCode = normalizeGlobalCountryIso(selectedCountry)
+        institutions = emptyList()
+        selectedInstitution = null
+        loadError = null
+        if (countryCode.isBlank()) return@LaunchedEffect
+        isLoadingInstitutions = true
+        try {
+            institutions = viewModel.getAfriexBankInstitutions(countryCode)
+            if (institutions.isEmpty()) loadError = "No bank receive route is currently available for this country."
+        } catch (e: Exception) {
+            loadError = e.message ?: "Could not load banks for this country."
+        } finally {
+            isLoadingInstitutions = false
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        title = { Text("Add bank receive route") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    "This route is verified before another member can send to you. It is separate from a US ACH funding bank and does not require Stripe Connect.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ExposedDropdownMenuBox(
+                    expanded = countryExpanded,
+                    onExpandedChange = { countryExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedCountry,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Country") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = countryExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = countryExpanded,
+                        onDismissRequest = { countryExpanded = false }
+                    ) {
+                        countries.forEach { country ->
+                            DropdownMenuItem(
+                                text = { Text(country) },
+                                onClick = { selectedCountry = country; countryExpanded = false }
+                            )
+                        }
+                    }
+                }
+                ExposedDropdownMenuBox(
+                    expanded = institutionExpanded,
+                    onExpandedChange = {
+                        if (!isLoadingInstitutions && institutions.isNotEmpty()) institutionExpanded = it
+                    }
+                ) {
+                    OutlinedTextField(
+                        value = selectedInstitution?.name.orEmpty(),
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = !isLoadingInstitutions && institutions.isNotEmpty(),
+                        label = { Text(if (isLoadingInstitutions) "Loading banks" else "Bank") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = institutionExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = institutionExpanded,
+                        onDismissRequest = { institutionExpanded = false }
+                    ) {
+                        institutions.forEach { institution ->
+                            DropdownMenuItem(
+                                text = { Text(institution.name) },
+                                onClick = {
+                                    selectedInstitution = institution
+                                    institutionExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                loadError?.let { message ->
+                    Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                OutlinedTextField(
+                    value = accountHolderName,
+                    onValueChange = { accountHolderName = it },
+                    label = { Text("Account holder name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = accountNumber,
+                    onValueChange = { accountNumber = it },
+                    label = { Text("Account number") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = !isSaving && selectedInstitution != null &&
+                    accountHolderName.isNotBlank() && accountNumber.isNotBlank(),
+                onClick = {
+                    val institution = selectedInstitution ?: return@Button
+                    isSaving = true
+                    scope.launch {
+                        val result = viewModel.saveAppUserBankReceiveRoute(
+                            country = selectedCountry,
+                            accountHolderName = accountHolderName,
+                            accountNumber = accountNumber,
+                            institutionCode = institution.code
+                        )
+                        isSaving = false
+                        Toast.makeText(
+                            context,
+                            result.message,
+                            if (result.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                        ).show()
+                        if (result.success) onSaved()
+                    }
+                }
+            ) { Text(if (isSaving) "Verifying" else "Verify route") }
+        },
+        dismissButton = { TextButton(enabled = !isSaving, onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddSwiftReceiveRouteDialog(
+    viewModel: PaymentsViewModel,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val countries = remember { afriexBankRegistrationCountries(swiftRail = true) }
+    var selectedCountry by remember { mutableStateOf(countries.firstOrNull().orEmpty()) }
+    var accountHolderName by remember { mutableStateOf("") }
+    var accountNumber by remember { mutableStateOf("") }
+    var swiftCode by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var routingCode by remember { mutableStateOf("") }
+    var recipientEmail by remember { mutableStateOf("") }
+    var recipientAddress by remember { mutableStateOf("") }
+    var bankAddress by remember { mutableStateOf("") }
+    var resolvedInstitution by remember { mutableStateOf<BankInstitutionOption?>(null) }
+    var countryExpanded by remember { mutableStateOf(false) }
+    var isResolving by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+    var resolveError by remember { mutableStateOf<String?>(null) }
+    val isUsSwift = remember(selectedCountry) {
+        normalizeGlobalCountryIso(selectedCountry) == "US"
+    }
+    val hasValidSwiftBic = remember(swiftCode) {
+        val code = swiftCode.trim().uppercase(Locale.US)
+        code.length == 8 || code.length == 11
+    }
+
+    LaunchedEffect(selectedCountry) {
+        resolvedInstitution = null
+        resolveError = null
+        swiftCode = ""
+        routingCode = ""
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        title = { Text("Add SWIFT receive route") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    "USD SWIFT delivery across Afriex's 100-country rail. Resolve the bank BIC before saving. SWIFT is payout/withdraw only — it cannot fund Send Money.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ExposedDropdownMenuBox(
+                    expanded = countryExpanded,
+                    onExpandedChange = { countryExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedCountry,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Country") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = countryExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = countryExpanded,
+                        onDismissRequest = { countryExpanded = false }
+                    ) {
+                        countries.forEach { country ->
+                            DropdownMenuItem(
+                                text = { Text(country) },
+                                onClick = { selectedCountry = country; countryExpanded = false }
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = accountHolderName,
+                    onValueChange = { accountHolderName = it },
+                    label = { Text("Account holder name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = accountNumber,
+                    onValueChange = { accountNumber = it },
+                    label = { Text(if (isUsSwift) "Account number" else "Account number / IBAN") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = swiftCode,
+                    onValueChange = {
+                        swiftCode = it.uppercase(Locale.US).filter { ch -> ch.isLetterOrDigit() }.take(11)
+                        resolvedInstitution = null
+                        resolveError = null
+                    },
+                    label = { Text("SWIFT / BIC") },
+                    singleLine = true,
+                    isError = swiftCode.isNotBlank() && !hasValidSwiftBic,
+                    supportingText = {
+                        Text(
+                            if (isUsSwift) {
+                                "Enter the bank SWIFT/BIC, then resolve it. US routes also need ABA routing."
+                            } else {
+                                "Enter the 8- or 11-character SWIFT/BIC, then resolve it."
+                            }
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedButton(
+                    enabled = !isResolving && !isSaving && hasValidSwiftBic && selectedCountry.isNotBlank(),
+                    onClick = {
+                        isResolving = true
+                        resolveError = null
+                        scope.launch {
+                            try {
+                                resolvedInstitution = viewModel.resolveAfriexSwiftInstitution(
+                                    country = selectedCountry,
+                                    institutionCode = swiftCode
+                                )
+                                swiftCode = resolvedInstitution?.code ?: swiftCode
+                            } catch (e: Exception) {
+                                resolvedInstitution = null
+                                resolveError = e.message ?: "Could not verify this SWIFT BIC."
+                            } finally {
+                                isResolving = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isResolving) "Resolving…" else "Resolve SWIFT bank")
+                }
+                resolveError?.let { message ->
+                    Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                resolvedInstitution?.let { institution ->
+                    Text(
+                        "Verified: ${institution.name} (${institution.code})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it.filter { ch -> ch.isDigit() || ch == '+' }.take(20) },
+                    label = { Text("Phone") },
+                    singleLine = true,
+                    prefix = { Text("${countryDialCode(selectedCountry)} ") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (isUsSwift) {
+                    OutlinedTextField(
+                        value = routingCode,
+                        onValueChange = { routingCode = it.filter { ch -> ch.isDigit() }.take(9) },
+                        label = { Text("ABA routing number") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = recipientEmail,
+                        onValueChange = { recipientEmail = it },
+                        label = { Text("Recipient email") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = recipientAddress,
+                        onValueChange = { recipientAddress = it },
+                        label = { Text("Recipient address") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = bankAddress,
+                        onValueChange = { bankAddress = it },
+                        label = { Text("Bank address") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = !isSaving &&
+                    resolvedInstitution != null &&
+                    accountHolderName.isNotBlank() &&
+                    accountNumber.isNotBlank() &&
+                    phone.isNotBlank() &&
+                    (if (isUsSwift) {
+                        routingCode.length in 8..9
+                    } else {
+                        recipientEmail.isNotBlank() &&
+                            recipientAddress.isNotBlank() &&
+                            bankAddress.isNotBlank()
+                    }),
+                onClick = {
+                    val institution = resolvedInstitution ?: return@Button
+                    isSaving = true
+                    scope.launch {
+                        val result = viewModel.saveAppUserSwiftReceiveRoute(
+                            country = selectedCountry,
+                            accountHolderName = accountHolderName,
+                            accountNumber = accountNumber,
+                            swiftCode = institution.code,
+                            phone = phone,
+                            routingCode = routingCode.takeIf { isUsSwift && it.isNotBlank() },
+                            recipientEmail = recipientEmail.takeUnless { isUsSwift || it.isBlank() },
+                            recipientAddress = recipientAddress.takeUnless { isUsSwift || it.isBlank() },
+                            bankAddress = bankAddress.takeUnless { isUsSwift || it.isBlank() },
+                        )
+                        isSaving = false
+                        Toast.makeText(
+                            context,
+                            result.message,
+                            if (result.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                        ).show()
+                        if (result.success) onSaved()
+                    }
+                }
+            ) { Text(if (isSaving) "Verifying" else "Verify SWIFT route") }
+        },
+        dismissButton = { TextButton(enabled = !isSaving, onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: () -> Unit) {
     var bankName by remember { mutableStateOf("") }
     var accountHolder by remember { mutableStateOf("") }
     var accountNumber by remember { mutableStateOf("") }
     var accountError by remember { mutableStateOf<String?>(null) }
-    var isCountryExpanded by remember { mutableStateOf(false) }
-    val bankCountries = remember { buildBankCountries() }
+    // Payment Methods supports US ACH collection only. Recipient banks for all
+    // delivery corridors are verified separately in the Recipients flow.
+    val bankCountries = remember { listOf("United States") }
     var selectedCountry by remember {
-        mutableStateOf(bankCountries.firstOrNull { it.code == "US" } ?: bankCountries.first())
+        mutableStateOf(defaultSupportedBankCountry(countries = bankCountries))
+    }
+    val selectedCountryCode = remember(selectedCountry) {
+        globalCountryIso(selectedCountry).ifBlank { "US" }
+    }
+    val isSupportedBankCountry = remember(selectedCountryCode) {
+        isSupportedBankCountryIso(selectedCountryCode)
+    }
+    val selectedCurrency = remember(selectedCountry) {
+        globalCountryCurrency(selectedCountry)
     }
     var routingNumber by remember { mutableStateOf("") }
     var useInstantUsLink by remember { mutableStateOf(ENABLE_US_INSTANT_BANK_LINK) }
@@ -821,7 +1854,7 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Link Bank Account") },
+        title = { Text("Link US Bank for Funding") },
         text = {
             Column(
                 modifier = Modifier
@@ -831,6 +1864,11 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     .imePadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Text(
+                    "This bank is used only to fund a transfer through verified US ACH. To receive a local-bank or SWIFT transfer, add and verify the recipient in Recipients.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 OutlinedTextField(
                     value = bankName,
                     onValueChange = { bankName = it },
@@ -845,53 +1883,63 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                ExposedDropdownMenuBox(
-                    expanded = isCountryExpanded,
-                    onExpandedChange = { isCountryExpanded = !isCountryExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = "${selectedCountry.name} (${selectedCountry.code})",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Country") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCountryExpanded) },
-                        modifier = Modifier
-                            .menuAnchor()
-                            .fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = isCountryExpanded,
-                        onDismissRequest = { isCountryExpanded = false }
-                    ) {
-                        bankCountries.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text("${option.name} (${option.code})") },
-                                onClick = {
-                                    selectedCountry = option
-                                    accountNumber = normalizeAccountNumberInput(accountNumber, option.code)
-                                    accountError = validateAccountNumberLive(accountNumber, option.code)
-                                    if (option.code != "US") {
-                                        routingNumber = ""
-                                        useInstantUsLink = false
-                                    } else if (ENABLE_US_INSTANT_BANK_LINK && !useInstantUsLink) {
-                                        useInstantUsLink = true
-                                    }
-                                    isCountryExpanded = false
-                                }
-                            )
+                SearchableGlobalCountryDropdown(
+                    selectedCountry = selectedCountry,
+                    countries = bankCountries,
+                    onCountrySelected = { countryName ->
+                        val countryCode = globalCountryIso(countryName).ifBlank { "US" }
+                        selectedCountry = countryName
+                        accountNumber = normalizeAccountNumberInput(accountNumber, countryCode)
+                        accountError = validateAccountNumberLive(accountNumber, countryCode)
+                        if (countryCode != "US") {
+                            routingNumber = ""
+                            useInstantUsLink = false
+                        } else if (ENABLE_US_INSTANT_BANK_LINK && !useInstantUsLink) {
+                            useInstantUsLink = true
                         }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    countryDisplayLabel = { countryName ->
+                        val iso = globalCountryIso(countryName)
+                        val currency = globalCountryCurrency(countryName)
+                        val flag = flagFromCountryName(countryName)
+                        buildString {
+                            if (flag.isNotBlank()) {
+                                append(flag)
+                                append(' ')
+                            }
+                            append(countryName)
+                            if (iso.isNotBlank()) {
+                                append(" (")
+                                append(iso)
+                                append(")")
+                            }
+                            if (currency.isNotBlank()) {
+                                append(" - ")
+                                append(currency)
+                            }
+                        }
+                    },
+                    countrySearchTerms = { countryName ->
+                        "${globalCountryIso(countryName)} ${globalCountryCurrency(countryName)}"
                     }
-                }
+                )
                 OutlinedTextField(
-                    value = selectedCountry.currency,
+                    value = selectedCurrency,
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("Currency") },
-                    supportingText = { Text("Availability depends on payout provider support.") },
+                        supportingText = {
+                        if (isSupportedBankCountry) {
+                            Text("US ACH funding method. This is not a Stripe Connect payout bank.")
+                        } else {
+                            Text("Bank linking is not available for this country yet.")
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (selectedCountry.code == "US" && ENABLE_US_INSTANT_BANK_LINK) {
+                if (selectedCountryCode == "US" && ENABLE_US_INSTANT_BANK_LINK) {
                     Text("US Bank Linking Mode", style = MaterialTheme.typography.labelMedium)
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -922,12 +1970,12 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     }
                     if (useInstantUsLink) {
                         Text(
-                            text = "Instant mode uses Stripe Financial Connections to securely verify your US bank account.",
+                            text = "Instant mode uses a secure bank-link provider to verify your US bank account.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                } else if (selectedCountry.code == "US") {
+                } else if (selectedCountryCode == "US") {
                     Text(
                         text = "Instant linking is temporarily unavailable. Use manual account entry.",
                         style = MaterialTheme.typography.bodySmall,
@@ -935,8 +1983,8 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     )
                 }
 
-                if (selectedCountry.code != "US" || !useInstantUsLink || !ENABLE_US_INSTANT_BANK_LINK) {
-                    if (selectedCountry.code == "US") {
+                if (selectedCountryCode != "US" || !useInstantUsLink || !ENABLE_US_INSTANT_BANK_LINK) {
+                    if (selectedCountryCode == "US") {
                         OutlinedTextField(
                             value = routingNumber,
                             onValueChange = { routingNumber = it.filter { ch -> ch.isDigit() }.take(9) },
@@ -949,14 +1997,14 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     OutlinedTextField(
                         value = accountNumber,
                         onValueChange = {
-                            accountNumber = normalizeAccountNumberInput(it, selectedCountry.code)
-                            accountError = validateAccountNumberLive(accountNumber, selectedCountry.code)
+                            accountNumber = normalizeAccountNumberInput(it, selectedCountryCode)
+                            accountError = validateAccountNumberLive(accountNumber, selectedCountryCode)
                         },
-                        label = { Text(if (selectedCountry.code == "US") "Account Number" else "Account Number / IBAN") },
+                        label = { Text(if (selectedCountryCode == "US") "Account Number" else "Account Number / IBAN") },
                         isError = accountError != null,
-                        supportingText = { Text(accountError ?: accountNumberHint(selectedCountry.code)) },
+                        supportingText = { Text(accountError ?: accountNumberHint(selectedCountryCode)) },
                         keyboardOptions = KeyboardOptions(
-                            keyboardType = if (selectedCountry.code == "US") KeyboardType.Number else KeyboardType.Ascii
+                            keyboardType = if (selectedCountryCode == "US") KeyboardType.Number else KeyboardType.Ascii
                         ),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -966,7 +2014,7 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
         },
         confirmButton = {
             Button(
-                enabled = !isSaving,
+                enabled = !isSaving && isSupportedBankCountry,
                 onClick = {
                 if (isSaving) return@Button
                 if (bankName.isBlank()) {
@@ -978,7 +2026,7 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     return@Button
                 }
 
-                if (ENABLE_US_INSTANT_BANK_LINK && selectedCountry.code == "US" && useInstantUsLink) {
+                if (ENABLE_US_INSTANT_BANK_LINK && selectedCountryCode == "US" && useInstantUsLink) {
                     val launcher = collectBankAccountLauncher
                     if (launcher == null) {
                         Toast.makeText(
@@ -1008,9 +2056,10 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                             if (clientSecret.isBlank()) {
                                 throw IllegalStateException("Stripe returned an empty setup client secret.")
                             }
+                            val publishableKey = ensureStripePaymentConfiguration(context)
                             Log.d("PaymentMethods", "US instant bank linking setup intent ready.")
                             launcher.presentWithSetupIntent(
-                                publishableKey = PaymentConfiguration.getInstance(context).publishableKey,
+                                publishableKey = publishableKey,
                                 clientSecret = clientSecret,
                                 configuration = CollectBankAccountConfiguration.USBankAccount(
                                     name = accountHolder,
@@ -1057,23 +2106,31 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     return@Button
                 }
 
-                val normalizedAccountNumber = normalizeAccountNumberInput(accountNumber, selectedCountry.code)
-                val numberError = validateAccountNumberLive(normalizedAccountNumber, selectedCountry.code)
+                val normalizedAccountNumber = normalizeAccountNumberInput(accountNumber, selectedCountryCode)
+                val numberError = validateAccountNumberLive(normalizedAccountNumber, selectedCountryCode)
                 if (numberError != null) {
                     accountError = numberError
                     Toast.makeText(context, numberError, Toast.LENGTH_LONG).show()
                     return@Button
                 }
-                if (selectedCountry.code == "US" && routingNumber.length < 9) {
+                if (selectedCountryCode == "US" && routingNumber.length < 9) {
                     Toast.makeText(context, "Routing number is required for US accounts.", Toast.LENGTH_LONG).show()
+                    return@Button
+                }
+                if (!isSupportedBankCountry) {
+                    Toast.makeText(
+                        context,
+                        "Bank linking is not available for $selectedCountryCode yet. Use mobile money or choose a supported bank country.",
+                        Toast.LENGTH_LONG
+                    ).show()
                     return@Button
                 }
 
                 val params = BankAccountTokenParams(
-                    country = selectedCountry.code,
-                    currency = selectedCountry.currency,
+                    country = selectedCountryCode,
+                    currency = selectedCurrency,
                     accountNumber = normalizedAccountNumber,
-                    routingNumber = if (selectedCountry.code == "US") routingNumber.ifBlank { null } else null,
+                    routingNumber = if (selectedCountryCode == "US") routingNumber.ifBlank { null } else null,
                     accountHolderName = accountHolder,
                     accountHolderType = BankAccountTokenParams.Type.Individual
                 )
@@ -1086,84 +2143,48 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     "accountHolderName" to accountHolder,
                     "accountNumber" to "********$last4",
                     "last4" to last4,
-                    "country" to selectedCountry.code,
-                    "currency" to selectedCountry.currency,
+                    "country" to selectedCountryCode,
+                    "currency" to selectedCurrency,
                     "isDefault" to false
                 )
-                if (selectedCountry.code == "US") {
+                if (selectedCountryCode == "US") {
                     methodData["routingNumber"] = routingNumber
                 }
 
                 isSaving = true
-                val stripe = Stripe(context, PaymentConfiguration.getInstance(context).publishableKey)
-                val requiresAchFundingToken = selectedCountry.code == "US"
-
+                val stripe = try {
+                    createStripeClient(context)
+                } catch (e: IllegalArgumentException) {
+                    isSaving = false
+                    Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
+                    return@Button
+                }
                 stripe.createBankAccountToken(
                     bankAccountTokenParams = params,
                     callback = object : ApiResultCallback<Token> {
                         override fun onSuccess(result: Token) {
-                            val payoutTokenId = result.id
-                            if (!requiresAchFundingToken) {
-                                scope.launch {
-                                    try {
-                                        val saveResult = viewModel.addPaymentMethodWithExternalAccount(methodData, payoutTokenId)
-                                        Toast.makeText(
-                                            context,
-                                            saveResult.message,
-                                            if (saveResult.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
-                                        ).show()
-                                        if (saveResult.success) {
-                                            resetDialogFields()
-                                            onSaved()
-                                        }
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, e.message ?: "Failed to link bank account.", Toast.LENGTH_LONG).show()
-                                    } finally {
-                                        isSaving = false
+                            val fundingTokenId = result.id
+                            scope.launch {
+                                try {
+                                    val saveResult = viewModel.addPaymentMethodWithExternalAccount(
+                                        methodData = methodData,
+                                        externalAccountToken = fundingTokenId
+                                    )
+                                    Toast.makeText(
+                                        context,
+                                        saveResult.message,
+                                        if (saveResult.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                                    ).show()
+                                    if (saveResult.success) {
+                                        resetDialogFields()
+                                        onSaved()
                                     }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, e.message ?: "Failed to link bank account.", Toast.LENGTH_LONG).show()
+                                } finally {
+                                    isSaving = false
                                 }
-                                return
                             }
-
-                            // For US bank accounts, generate a second token to enable ACH debit funding.
-                            stripe.createBankAccountToken(
-                                bankAccountTokenParams = params,
-                                callback = object : ApiResultCallback<Token> {
-                                    override fun onSuccess(chargeToken: Token) {
-                                        scope.launch {
-                                            try {
-                                                val saveResult = viewModel.addPaymentMethodWithExternalAccount(
-                                                    methodData = methodData,
-                                                    externalAccountToken = payoutTokenId,
-                                                    chargeExternalAccountToken = chargeToken.id
-                                                )
-                                                Toast.makeText(
-                                                    context,
-                                                    saveResult.message,
-                                                    if (saveResult.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
-                                                ).show()
-                                                if (saveResult.success) {
-                                                    resetDialogFields()
-                                                    onSaved()
-                                                }
-                                            } catch (e: Exception) {
-                                                Toast.makeText(context, e.message ?: "Failed to link bank account.", Toast.LENGTH_LONG).show()
-                                            } finally {
-                                                isSaving = false
-                                            }
-                                        }
-                                    }
-
-                                    override fun onError(e: Exception) {
-                                        Toast.makeText(
-                                            context,
-                                            e.message ?: "Failed to enable ACH bank funding. Please try again.",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                        isSaving = false
-                                    }
-                                }
-                            )
                         }
 
                         override fun onError(e: Exception) {
@@ -1180,15 +2201,13 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                         color = Color.White
                     )
                 } else {
-                    Text("Link Account")
+                    Text(if (isSupportedBankCountry) "Link US ACH Bank" else "Country Not Supported")
                 }
             }
         },
         dismissButton = { TextButton(onClick = { if (!isSaving) onDismiss() }) { Text("Cancel") } }
     )
 }
-
-private data class BankCountryOption(val name: String, val code: String, val currency: String)
 
 private fun Context.findActivity(): ComponentActivity? {
     var current = this
@@ -1197,19 +2216,6 @@ private fun Context.findActivity(): ComponentActivity? {
         current = current.baseContext
     }
     return null
-}
-
-private fun buildBankCountries(): List<BankCountryOption> {
-    return Locale.getISOCountries().mapNotNull { code ->
-        val locale = Locale("", code)
-        val name = locale.displayCountry
-        val currency = try {
-            Currency.getInstance(locale).currencyCode
-        } catch (e: Exception) {
-            null
-        }
-        if (name.isBlank() || currency.isNullOrBlank()) null else BankCountryOption(name, code, currency)
-    }.sortedBy { it.name }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1225,8 +2231,12 @@ fun AddMobileMoneyDialog(
     var otpCode by remember { mutableStateOf("") }
     var phoneError by remember { mutableStateOf<String?>(null) }
     var isCountryExpanded by remember { mutableStateOf(false) }
-    var country by remember { mutableStateOf("Ghana") }
-    var network by remember { mutableStateOf("MTN") }
+    var country by remember {
+        mutableStateOf(preferredMobileMoneyRegistrationCountry(afriexMobileMoneyPayoutLiveCountries()))
+    }
+    var network by remember {
+        mutableStateOf(countryNetworks(country).firstOrNull { it.equals("MTN", ignoreCase = true) } ?: "MTN")
+    }
     var isSendingOtp by remember { mutableStateOf(false) }
     var isVerifyingOtp by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
@@ -1235,13 +2245,22 @@ fun AddMobileMoneyDialog(
     val scrollState = rememberScrollState()
     val networkScrollState = rememberScrollState()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val mobileMoneyDepositCountries = remember { afriexMobileMoneyDepositLiveCountries() }
+    val mobileMoneyReceiveOnlyCountries = remember {
+        afriexMobileMoneyPayoutLiveCountries().filter { countryName ->
+            afriexMobileMoneyDepositAvailability(countryName) != AfriexRailAvailability.LIVE
+        }
+    }
 
     val networks = remember(country) { countryNetworks(country) }
     val dialCode = countryDialCode(country)
     val currency = countryCurrency(country)
-    val fullPhone = "$dialCode$phone"
-    val otpSent = otpSentForPhone == fullPhone
-    val otpVerified = otpVerifiedForPhone == fullPhone
+    val localPhoneDigits = phone.filter { it.isDigit() }
+    val canonicalOtpKey = "${dialCode.filter { it.isDigit() }}$localPhoneDigits"
+    val fullPhone = if (dialCode.isBlank()) localPhoneDigits else "$dialCode$localPhoneDigits"
+    val otpSent = otpSentForPhone == canonicalOtpKey
+    val otpVerified = otpVerifiedForPhone == canonicalOtpKey
     val isBusy = isSendingOtp || isVerifyingOtp || isSaving
 
     AlertDialog(
@@ -1283,7 +2302,8 @@ fun AddMobileMoneyDialog(
                         expanded = isCountryExpanded,
                         onDismissRequest = { isCountryExpanded = false }
                     ) {
-                        mobileMoneyCountries().forEach { countryName ->
+                        Text("Funding and receive: live", style = MaterialTheme.typography.labelSmall)
+                        mobileMoneyDepositCountries.forEach { countryName ->
                             DropdownMenuItem(
                                 text = { Text("${countryFlag(countryName)} $countryName") },
                                 onClick = {
@@ -1291,6 +2311,27 @@ fun AddMobileMoneyDialog(
                                     network = countryNetworks(countryName).firstOrNull() ?: "Other"
                                     isCountryExpanded = false
                                 }
+                            )
+                        }
+                        Text("Receive only", style = MaterialTheme.typography.labelSmall)
+                        mobileMoneyReceiveOnlyCountries.forEach { countryName ->
+                            DropdownMenuItem(
+                                text = { Text("${countryFlag(countryName)} $countryName") },
+                                onClick = {
+                                    country = countryName
+                                    network = countryNetworks(countryName).firstOrNull() ?: "Other"
+                                    isCountryExpanded = false
+                                }
+                            )
+                        }
+                        Text("Coming soon", style = MaterialTheme.typography.labelSmall)
+                        afriexMobileMoneyPayoutComingSoonCountries().forEach { countryName ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text("${countryFlag(countryName)} $countryName · Coming soon")
+                                },
+                                enabled = false,
+                                onClick = {}
                             )
                         }
                     }
@@ -1301,7 +2342,22 @@ fun AddMobileMoneyDialog(
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("Currency") },
-                    supportingText = { Text("Deposits and withdrawals use the local currency.") },
+                    supportingText = {
+                        Text(
+                            when (afriexMobileMoneyPayoutAvailability(country)) {
+                                AfriexRailAvailability.LIVE ->
+                                    if (afriexMobileMoneyDepositAvailability(country) == AfriexRailAvailability.LIVE) {
+                                        "This route can receive transfers and can also be used for mobile money funding."
+                                    } else {
+                                        "This route can receive transfers. Mobile money funding is available only in selected collection countries."
+                                    }
+                                AfriexRailAvailability.COMING_SOON ->
+                                    "Mobile money receiving for this country is Coming soon."
+                                AfriexRailAvailability.UNSUPPORTED ->
+                                    "Mobile money service for this country is Coming soon."
+                            }
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -1353,7 +2409,7 @@ fun AddMobileMoneyDialog(
                                 isSendingOtp = true
                                 try {
                                     val result = viewModel.requestMobileMoneyPhoneOtp(
-                                        phone = fullPhone,
+                                        phone = localPhoneDigits,
                                         dialCode = dialCode
                                     )
                                     Toast.makeText(
@@ -1362,8 +2418,17 @@ fun AddMobileMoneyDialog(
                                         if (result.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
                                     ).show()
                                     if (result.success) {
-                                        otpSentForPhone = fullPhone
-                                        otpVerifiedForPhone = null
+                                        otpSentForPhone = canonicalOtpKey
+                                        otpVerifiedForPhone = if (result.alreadyVerified) {
+                                            canonicalOtpKey
+                                        } else {
+                                            null
+                                        }
+                                        if (result.alreadyVerified) {
+                                            otpCode = ""
+                                            phoneError = null
+                                            focusManager.clearFocus(force = true)
+                                        }
                                     }
                                 } finally {
                                     isSendingOtp = false
@@ -1400,7 +2465,7 @@ fun AddMobileMoneyDialog(
                                 isVerifyingOtp = true
                                 try {
                                     val result = viewModel.verifyMobileMoneyPhoneOtp(
-                                        phone = fullPhone,
+                                        phone = localPhoneDigits,
                                         dialCode = dialCode,
                                         code = otpCode.trim()
                                     )
@@ -1410,8 +2475,11 @@ fun AddMobileMoneyDialog(
                                         if (result.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
                                     ).show()
                                     if (result.success) {
-                                        otpSentForPhone = fullPhone
-                                        otpVerifiedForPhone = fullPhone
+                                        otpSentForPhone = canonicalOtpKey
+                                        otpVerifiedForPhone = canonicalOtpKey
+                                        otpCode = ""
+                                        phoneError = null
+                                        focusManager.clearFocus(force = true)
                                     }
                                 } finally {
                                     isVerifyingOtp = false
@@ -1451,7 +2519,7 @@ fun AddMobileMoneyDialog(
                 )
 
                 Text(
-                    "Security step 2: number remains provider-unverified for transfers until a successful mobile money deposit confirms the line.",
+                    "Security step 2: OTP confirms phone ownership. Saving then verifies the selected route with the provider; no money is collected.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1466,6 +2534,14 @@ fun AddMobileMoneyDialog(
                 if (error != null) {
                     phoneError = error
                     Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                    return@Button
+                }
+                if (afriexMobileMoneyPayoutAvailability(country) != AfriexRailAvailability.LIVE) {
+                    Toast.makeText(
+                        context,
+                        "Mobile money receiving for $country is Coming soon. Pick a live receive country.",
+                        Toast.LENGTH_LONG
+                    ).show()
                     return@Button
                 }
                 if (!otpVerified) {
@@ -1552,5 +2628,3 @@ private fun validatePhoneNumberLive(input: String): String? {
     if (input.length > 15) return "Phone number is too long."
     return null
 }
-
-

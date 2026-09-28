@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -34,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.volunteersApp.R
 
@@ -45,11 +47,14 @@ fun AuthLaunchScreen(
     onVerifyEmail: () -> Unit,
     onForgotPassword: () -> Unit
 ) {
+    val launchScrollState = rememberScrollState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f))
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(launchScrollState)
+            .navigationBarsPadding()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -84,25 +89,21 @@ private fun AuthHeroCard() {
                 )
                 .padding(20.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.app_logo),
-                        contentDescription = "Volunteers App logo",
+                        contentDescription = "Company heart logo",
                         modifier = Modifier
-                            .size(50.dp)
-                            .clip(RoundedCornerShape(10.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                    Image(
-                        painter = painterResource(id = R.drawable.default_org_logo),
-                        contentDescription = "Company logo",
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(RoundedCornerShape(8.dp)),
+                            .size(60.dp)
+                            .clip(RoundedCornerShape(12.dp)),
                         contentScale = ContentScale.Crop
                     )
                 }
@@ -111,17 +112,27 @@ private fun AuthHeroCard() {
                     text = "Volunteers App",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = Color.White,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "Local Volunteers Coordination Application (LVCA)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.92f),
+                    textAlign = TextAlign.Center
                 )
                 Text(
                     text = "SoftSolutions Technologies LLC",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.86f)
+                    color = Color.White.copy(alpha = 0.86f),
+                    textAlign = TextAlign.Center
                 )
                 Text(
                     text = "Connect volunteers, organizers, and employers in one loop.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.9f)
+                    color = Color.White.copy(alpha = 0.9f),
+                    textAlign = TextAlign.Center
                 )
             }
         }
@@ -146,7 +157,7 @@ private fun AuthDashboardCard() {
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "Authenticate to open the right dashboard for your account type.",
+                text = "Sign in once and we will open the right dashboard from the account role you chose during sign up.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -238,4 +249,3 @@ private fun AuthActionCard(
         }
     }
 }
-

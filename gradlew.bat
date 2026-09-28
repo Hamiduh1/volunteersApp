@@ -32,6 +32,10 @@ set APP_HOME=%DIRNAME%
 @rem Resolve any "." and ".." in APP_HOME to make it shorter.
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
+@rem Keep Gradle's user home inside the project by default so builds do not depend
+@rem on a broken or partially cleaned global cache under C:\Users\16147\.gradle.
+if not defined GRADLE_USER_HOME set GRADLE_USER_HOME=%APP_HOME%\.gradle-codex-run8
+
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 

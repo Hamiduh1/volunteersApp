@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 class HostFinalViewModel : ViewModel() {
     private val db = Firebase.firestore
@@ -17,7 +18,7 @@ class HostFinalViewModel : ViewModel() {
     fun fetchEventName(eventId: String) {
         viewModelScope.launch {
             try {
-                val doc = db.collection("events").document(eventId).get().await()
+                val doc = db.collection(FirestoreCollection.EVENTS).document(eventId).get().await()
                 if (doc.exists()) {
                     _eventName.value = doc.getString("title") ?: doc.getString("eventName")
                 }

@@ -3,6 +3,8 @@ package com.example.volunteersApp.organizer
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.firebase.CallableFunction
+import com.example.volunteersApp.firebase.FunctionsClient
 import com.example.volunteersApp.models.EventModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -15,11 +17,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FirestoreSubcollection
 
 data class HostedEventsUiState(
     val events: List<EventModel> = emptyList(),
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val message: String? = null
 )
 
 class HostedEventsViewModel : ViewModel() {
@@ -38,10 +43,10 @@ class HostedEventsViewModel : ViewModel() {
 
     fun fetchHostedEvents() {
         val userId = auth.currentUser?.uid ?: return
-        _uiState.update { it.copy(isLoading = true, error = null) }
+        _uiState.update { it.copy(isLoading = true, error = null, message = null) }
 
         listenerRegistration?.remove()
-        listenerRegistration = db.collection("events")
+        listenerRegistration = db.collection(FirestoreCollection.EVENTS)
             .whereEqualTo("organizerId", userId)
             .orderBy("eventDateTime", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshots, error ->
@@ -57,7 +62,7 @@ class HostedEventsViewModel : ViewModel() {
 
     fun publishEvent(eventId: String) = viewModelScope.launch {
         try {
-            db.collection("events").document(eventId)
+            db.collection(FirestoreCollection.EVENTS).document(eventId)
                 .update(mapOf(
                     "isActive" to true,
                     "status" to "PUBLISHED"
@@ -70,7 +75,7 @@ class HostedEventsViewModel : ViewModel() {
 
     fun unpublishEvent(eventId: String) = viewModelScope.launch {
         try {
-            db.collection("events").document(eventId)
+            db.collection(FirestoreCollection.EVENTS).document(eventId)
                 .update(mapOf(
                     "isActive" to false,
                     "status" to "DRAFT"
@@ -82,27 +87,30 @@ class HostedEventsViewModel : ViewModel() {
     }
 
     suspend fun deleteEvent(event: EventModel): Boolean {
-        val userId = auth.currentUser?.uid ?: return false
-        _uiState.update { it.copy(isLoading = true, error = null) } // Show loading state
+        auth.currentUser?.uid ?: return false
+        _uiState.update { it.copy(isLoading = true, error = null, message = null) } // Show loading state
 
         return try {
-            db.runBatch { batch ->
-                val mainEventRef = db.collection("events").document(event.eventId)
-                val userSummaryRef = db.collection("users").document(userId)
-                    .collection("hostedEvents").document(event.eventId)
+            val result = FunctionsClient.callMap(
+                CallableFunction.DELETE_ORGANIZER_EVENT,
+                mapOf("eventId" to event.eventId)
+            ) ?: error("The event service returned no result.")
+            if (result["success"] != true) {
+                error((result["message"] as? String) ?: "Could not remove this event.")
+            }
 
-                batch.delete(mainEventRef)
-                batch.delete(userSummaryRef)
-            }.await()
-
-            event.imageUrl?.let {
+            val outcome = result["outcome"] as? String
+            val imageUrl = (result["imageUrl"] as? String)?.takeIf { it.isNotBlank() }
+                ?: event.imageUrl.takeIf { outcome == "DELETED" }
+            imageUrl?.let {
                 try {
                     storage.getReferenceFromUrl(it).delete().await()
                 } catch (e: Exception) {
                     Log.w("HostedEventsViewModel", "Failed to delete event image: $it", e)
                 }
             }
-            _uiState.update { it.copy(isLoading = false) } // Hide loading state
+            val message = result["message"] as? String
+            _uiState.update { it.copy(isLoading = false, message = message) }
             true
         } catch (e: Exception) {
             Log.e("HostedEventsViewModel", "Delete failed for event ${event.eventId}", e)

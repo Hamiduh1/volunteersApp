@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 // --- State Definitions ---
 
@@ -51,7 +52,7 @@ class RatingViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             try {
-                val snapshot = db.collection(REVIEWS_COLLECTION)
+                val snapshot = db.collection(FirestoreCollection.REVIEWS)
                     .orderBy("rating", Query.Direction.DESCENDING) // Show best reviews first
                     .get()
                     .await()
@@ -96,7 +97,7 @@ class RatingViewModel : ViewModel() {
                 )
 
                 // Use the user's UID as the document ID to ensure one review per user
-                db.collection(REVIEWS_COLLECTION).document(currentUser.uid).set(newReview).await()
+                db.collection(FirestoreCollection.REVIEWS).document(currentUser.uid).set(newReview).await()
 
                 _uiState.update {
                     it.copy(

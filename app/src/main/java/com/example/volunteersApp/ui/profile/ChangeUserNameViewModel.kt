@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 // Represents the state of the update operation
 sealed interface UpdateState {
@@ -46,7 +47,7 @@ class ChangeUserNameViewModel : ViewModel() {
         viewModelScope.launch {
             _updateState.value = UpdateState.Loading
             try {
-                val userDocRef = db.collection("users").document(currentUser.uid)
+                val userDocRef = db.collection(FirestoreCollection.USERS).document(currentUser.uid)
                 userDocRef.update("name", newName).await()
                 _updateState.value = UpdateState.Success
             } catch (e: Exception) {

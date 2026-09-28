@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 class UserReportViewModel : ViewModel() {
     private val db = Firebase.firestore
@@ -39,7 +40,8 @@ class UserReportViewModel : ViewModel() {
                     reportingUserDisplayName = currentUser.displayName ?: "Anonymous"
                 )
 
-                db.collection("userReports").add(report).await()
+                // Canonical collection matches iOS / FirebaseContract.user_reports; owner console merges legacy camelCase too.
+                db.collection(FirestoreCollection.USER_REPORTS).add(report).await()
                 onComplete(true)
             } catch (e: Exception) {
                 onComplete(false)

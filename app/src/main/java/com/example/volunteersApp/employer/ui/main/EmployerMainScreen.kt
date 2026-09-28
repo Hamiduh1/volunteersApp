@@ -60,6 +60,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +82,7 @@ import com.example.volunteersApp.advertisement.AdvertisementViewModel
 import com.example.volunteersApp.alerts.CommunityAlertsScreen
 import com.example.volunteersApp.alerts.CommunityAlertsViewModel
 import com.example.volunteersApp.chat.ChatInboxScreen
+import com.example.volunteersApp.chat.CallSessionViewModel
 import com.example.volunteersApp.chat.ChatScreen
 import com.example.volunteersApp.chat.UserDirectoryScreen
 import com.example.volunteersApp.date.DateEvaScreen
@@ -108,8 +110,14 @@ import com.example.volunteersApp.streams.LiveStreamsScreen
 import com.example.volunteersApp.streams.LiveStreamsViewModel
 import com.example.volunteersApp.ui.main.CommunityHubScreen
 import com.example.volunteersApp.ui.main.DateEvaViewModelFactory
+import com.example.volunteersApp.ui.main.ForegroundIncomingCallFallbackEffect
+import com.example.volunteersApp.ui.main.MainViewModel
 import com.example.volunteersApp.ui.main.MirroredNavigationCatalog
+import com.example.volunteersApp.ui.main.SocialInboxNav
+import com.example.volunteersApp.ui.main.SocialInboxPendingNavigationEffect
 import com.example.volunteersApp.ui.main.UserUiState
+import com.example.volunteersApp.ui.main.addMirroredLoopDestinations
+import com.example.volunteersApp.ui.main.RequireWalletUnlocked
 import com.example.volunteersApp.ui.profile.AccountSettingsActivity
 import com.example.volunteersApp.ui.profile.AiAssistantScreen
 import com.example.volunteersApp.ui.profile.AmlCftGuideScreen
@@ -127,10 +135,8 @@ import com.example.volunteersApp.ui.shared.AiTopBarSearchAction
 import com.example.volunteersApp.wallet.PaymentMethodsScreen
 import com.example.volunteersApp.wallet.PaymentsViewModel
 import com.example.volunteersApp.wallet.TransactScreen
-import com.example.volunteersApp.wallet.TransactViewModel
 import com.example.volunteersApp.wallet.TransactionHistoryScreen
 import com.example.volunteersApp.wallet.WalletScreen
-import com.example.volunteersApp.wallet.WalletViewModel
 import kotlinx.coroutines.launch
 
 private data class BottomNavItem(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
@@ -141,17 +147,26 @@ private data class DrawerItem(val route: String, val label: String, val icon: an
 fun EmployerMainScreen(
     uiState: UserUiState,
     onSignOut: () -> Unit,
+    activityMainViewModel: MainViewModel? = null,
     mainViewModel: EmployerMainViewModel = viewModel(),
     vertexViewModel: VertexViewModel = viewModel()
 ) {
     val navController = rememberNavController()
+    activityMainViewModel?.let { vm ->
+        SocialInboxPendingNavigationEffect(navController, vm)
+    }
     val drawerState = androidx.compose.material3.rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val callSessionViewModel: CallSessionViewModel = viewModel()
     val title by mainViewModel.currentTitle.collectAsState()
+    ForegroundIncomingCallFallbackEffect(
+        currentRoute = currentRoute,
+        callSessionViewModel = callSessionViewModel
+    )
 
     LaunchedEffect(currentRoute) {
         mainViewModel.updateTitle(currentRoute)
@@ -166,7 +181,8 @@ fun EmployerMainScreen(
         "payments",
         "live",
         "community_hub",
-        "my_chats",
+        SocialInboxNav.GRAPH_ROUTE,
+        SocialInboxNav.INBOX_ROUTE,
         "browse_users",
         "marketplace",
         "jokes",
@@ -284,37 +300,44 @@ fun EmployerMainScreen(
                 }
 
                 composable("wallet") {
-                    WalletScreen(
-                        viewModel = viewModel<WalletViewModel>(),
-                        transactViewModel = viewModel<TransactViewModel>(),
-                        paymentsViewModel = viewModel<PaymentsViewModel>(),
-                        onBack = { navController.popBackStack() },
-                        onNavigateToTransact = { navController.navigate("transact") },
-                        onNavigateToHistory = { navController.navigate("transaction_history") },
-                        onNavigateToPayments = { navController.navigate("payments") }
-                    )
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        WalletScreen(
+                            onBack = { navController.popBackStack() },
+                            onNavigateToTransact = { navController.navigate("transact") },
+                            onNavigateToHistory = { navController.navigate("transaction_history") },
+                            onNavigateToPayments = { navController.navigate("payments") }
+                        )
+                    }
                 }
 
                 composable("transact") {
-                    TransactScreen(
-                        onBack = { navController.popBackStack() },
-                        onNavigateToPayments = { navController.navigate("payments") }
-                    )
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        TransactScreen(
+                            onBack = { navController.popBackStack() },
+                            onNavigateToPayments = { navController.navigate("payments") },
+                            onNavigateToUserDirectory = { navController.navigate("browse_users") },
+                            onNavigateToMarketplace = { navController.navigate("marketplace") },
+                            onNavigateToTransactionHistory = { navController.navigate("transaction_history") }
+                        )
+                    }
                 }
 
                 composable("transaction_history") {
-                    TransactionHistoryScreen(
-                        viewModel = viewModel(),
-                        onBack = { navController.popBackStack() },
-                        vertexViewModel = vertexViewModel
-                    )
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        TransactionHistoryScreen(
+                            viewModel = viewModel(),
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
                 }
 
                 composable("payments") {
-                    PaymentMethodsScreen(
-                        viewModel = viewModel(),
-                        onBack = { navController.popBackStack() }
-                    )
+                    RequireWalletUnlocked(onBack = { navController.popBackStack() }) {
+                        PaymentMethodsScreen(
+                            viewModel = viewModel(),
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
                 }
 
                 composable("live") {
@@ -322,7 +345,7 @@ fun EmployerMainScreen(
                         viewModel = viewModel<LiveStreamsViewModel>(),
                         onBack = { navController.popBackStack() },
                         onStreamClick = { session ->
-                            navController.navigate("live_stream/${session.agoraChannelName}")
+                            navController.navigate("live_stream/${session.sessionId}")
                         }
                     )
                 }
@@ -342,123 +365,18 @@ fun EmployerMainScreen(
                     }
                 }
 
-                composable("community_hub") {
-                    CommunityHubScreen { route -> navController.navigate(route) }
-                }
-
-                composable("my_chats") {
-                    ChatInboxScreen(navController = navController)
-                }
-
-                composable("browse_users") {
-                    UserDirectoryScreen(viewModel())
-                }
-
-                composable(
-                    "chat/{chatId}/{otherUserId}",
-                    arguments = listOf(
-                        navArgument("chatId") { type = NavType.StringType },
-                        navArgument("otherUserId") { type = NavType.StringType }
-                    )
-                ) { backStackEntry ->
-                    val chatId = backStackEntry.arguments?.getString("chatId") ?: return@composable
-                    val otherUserId = backStackEntry.arguments?.getString("otherUserId") ?: return@composable
-                    ChatScreen(
-                        chatId = chatId,
-                        otherUserId = otherUserId,
-                        onNavigateUp = { navController.popBackStack() }
-                    )
-                }
-
-                composable("marketplace") {
-                    MarketplaceScreen(
-                        viewModel = viewModel(),
-                        navController = navController,
-                        vertexViewModel = vertexViewModel
-                    )
-                }
-
-                composable("jokes") {
-                    JokesFeatureScreen()
-                }
-
-                composable("ads") {
-                    AdvertisementFeatureScreen(viewModel<AdvertisementViewModel>())
-                }
-
-                composable("date_eva") {
-                    val walletViewModel: WalletViewModel = viewModel()
-                    DateEvaScreen(
-                        viewModel = viewModel<DateEvaViewModel>(
-                            factory = DateEvaViewModelFactory(walletViewModel)
-                        ),
-                        vertexViewModel = vertexViewModel
-                    )
-                }
-
-                composable("notification_settings") {
-                    NotificationSettingsScreen(navController, viewModel<NotificationSettingsViewModel>())
-                }
-
-                composable("community_alerts") {
-                    CommunityAlertsScreen(
-                        viewModel = viewModel<CommunityAlertsViewModel>(),
-                        onAddAlertClick = {
-                            scope.launch { snackbarHostState.showSnackbar("Alert posting will be available soon.") }
+                addMirroredLoopDestinations(
+                    navController = navController,
+                    context = context,
+                    vertexViewModel = vertexViewModel,
+                    onCommunityAlertAction = {
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Alert posting will be available soon.")
                         }
-                    )
-                }
-
-                composable("support") {
-                    SupportScreen(
-                        onNavigateUp = { navController.popBackStack() },
-                        viewModel = viewModel<SupportViewModel>(),
-                        onOpenAmlCft = { navController.navigate("aml_cft") },
-                        onOpenLiveChat = { navController.navigate("my_chats") }
-                    )
-                }
-
-                composable("aml_cft") {
-                    AmlCftGuideScreen()
-                }
-
-                composable("privacy_settings") {
-                    PrivacySecurityScreen(
-                        onBack = { navController.popBackStack() },
-                        onOpenPrivacyPolicy = { navController.navigate("privacy_policy") },
-                        onOpenSecurityCenter = {
-                            context.startActivity(Intent(context, AccountSettingsActivity::class.java))
-                        }
-                    )
-                }
-
-                composable("privacy_policy") {
-                    PrivacyPolicyScreen(
-                        onNavigateUp = { navController.popBackStack() },
-                        viewModel = viewModel<PrivacyPolicyViewModel>()
-                    )
-                }
-
-                composable("terms_conditions") {
-                    TermsConditionsScreen(
-                        onNavigateUp = { navController.popBackStack() },
-                        viewModel = viewModel<TermsViewModel>()
-                    )
-                }
-
-                composable("how_to_use") {
-                    HowToUseScreen(
-                        onNavigateUp = { navController.popBackStack() },
-                        viewModel = viewModel<HowToUseViewModel>()
-                    )
-                }
-
-                composable("ai_assistant") {
-                    AiAssistantScreen(
-                        onBack = { navController.popBackStack() },
-                        vertexViewModel = vertexViewModel
-                    )
-                }
+                    },
+                    sharedCallSessionViewModel = callSessionViewModel,
+                    mainViewModel = activityMainViewModel,
+                )
 
                 composable("post_job") {
                     val postJobViewModel: EmployerPostJobViewModel = viewModel()
@@ -555,7 +473,8 @@ private fun EmployerBottomBar(navController: NavController, currentRoute: String
                     setOf(
                         "profile",
                         "community_hub",
-                        "my_chats",
+                        SocialInboxNav.GRAPH_ROUTE,
+                        SocialInboxNav.INBOX_ROUTE,
                         "browse_users",
                         "marketplace",
                         "jokes",
@@ -704,7 +623,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.drawerSection(
             NavigationDrawerItem(
                 label = { Text(drawerItem.label) },
                 icon = { Icon(drawerItem.icon, contentDescription = null) },
-                selected = currentRoute == drawerItem.route,
+                selected = SocialInboxNav.matchesNavSelection(drawerItem.route, currentRoute),
                 onClick = { onNavigate(drawerItem.route) },
                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
             )

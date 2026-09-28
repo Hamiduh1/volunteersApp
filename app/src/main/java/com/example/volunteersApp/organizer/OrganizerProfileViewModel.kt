@@ -17,14 +17,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.StorageFolder
 
 data class OrganizerProfileUiState(
     val profile: UserProfile? = null,
     val bio: String = "",
     val organizationName: String = "",
     val isLoading: Boolean = false,
-    val error: String? = null,
-    val roleUpdateEvent: String? = null // Technical name of the new role
+    val error: String? = null
 )
 
 class OrganizerProfileViewModel : ViewModel() {
@@ -46,7 +47,7 @@ class OrganizerProfileViewModel : ViewModel() {
         val userId = auth.currentUser?.uid ?: return
         _uiState.update { it.copy(isLoading = true) }
 
-        db.collection("users").document(userId).addSnapshotListener { snapshot, _ ->
+        db.collection(FirestoreCollection.USERS).document(userId).addSnapshotListener { snapshot, _ ->
             if (snapshot != null && snapshot.exists()) {
                 val profile = UserProfile(
                     uid = userId,
@@ -54,13 +55,16 @@ class OrganizerProfileViewModel : ViewModel() {
                     email = auth.currentUser?.email ?: "N/A",
                     phone = snapshot.getString("phone") ?: "N/A",
                     profilePictureUrl = snapshot.getString("profileImageUrl"),
-                    role = snapshot.getString("userRole") ?: "organizer"
+                    role = snapshot.getString("role")
+                        ?: snapshot.getString("userRole")
+                        ?: snapshot.getString("userType")
+                        ?: "organizer"
                 )
                 _uiState.update { it.copy(profile = profile) }
             }
         }
 
-        db.collection("organizers").document(userId).get().addOnSuccessListener { snapshot ->
+        db.collection(FirestoreCollection.ORGANIZERS).document(userId).get().addOnSuccessListener { snapshot ->
             if (snapshot != null && snapshot.exists()) {
                 _uiState.update {
                     it.copy(
@@ -94,8 +98,8 @@ class OrganizerProfileViewModel : ViewModel() {
                 )
 
                 db.runBatch { batch ->
-                    val userRef = db.collection("users").document(userId)
-                    val organizerRef = db.collection("organizers").document(userId)
+                    val userRef = db.collection(FirestoreCollection.USERS).document(userId)
+                    val organizerRef = db.collection(FirestoreCollection.ORGANIZERS).document(userId)
 
                     batch.set(userRef, userProfileUpdates, SetOptions.merge())
                     batch.set(organizerRef, organizerProfileData, SetOptions.merge())
@@ -124,20 +128,23 @@ class OrganizerProfileViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             try {
-                val ref = storage.reference.child("profile_images/$userId")
+                // Correct storage path: profile_images/{userId}/{fileName}
+                // This matches the Firebase Storage security rules
+                val fileName = "${System.currentTimeMillis()}.jpg"
+                val ref = storage.reference.child(StorageFolder.profileImage(userId, fileName))
                 ref.putFile(uri).await()
                 val url = ref.downloadUrl.await().toString()
 
                 db.runBatch { batch ->
-                    batch.update(db.collection("users").document(userId), "profileImageUrl", url)
-                    batch.update(db.collection("organizers").document(userId), "profileImageUrl", url)
+                    val userRef = db.collection(FirestoreCollection.USERS).document(userId)
+                    val organizerRef = db.collection(FirestoreCollection.ORGANIZERS).document(userId)
+                    batch.set(userRef, mapOf("profileImageUrl" to url), SetOptions.merge())
+                    batch.set(organizerRef, mapOf("profileImageUrl" to url), SetOptions.merge())
                 }.await()
 
                 _uiState.update { it.copy(profile = it.profile?.copy(profilePictureUrl = url)) }
-                // FIX: Emit a success event for the UI to observe.
                 _saveResult.emit(Resource.Success(Unit))
             } catch (e: Exception) {
-                // FIX: Emit an error event for the UI to observe.
                 _saveResult.emit(Resource.Error("Failed to upload image: ${e.localizedMessage}"))
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
@@ -145,18 +152,4 @@ class OrganizerProfileViewModel : ViewModel() {
         }
     }
 
-    fun switchRole(newRole: String) {
-        val userId = auth.currentUser?.uid ?: return
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            try {
-                db.collection("users").document(userId).update("userRole", newRole).await()
-                _uiState.update { it.copy(roleUpdateEvent = newRole, isLoading = false) }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = "Role switch failed") }
-            }
-        }
-    }
-
-    fun onRoleEventConsumed() { _uiState.update { it.copy(roleUpdateEvent = null) } }
 }

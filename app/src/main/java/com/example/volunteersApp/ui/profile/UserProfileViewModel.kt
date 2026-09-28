@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 data class UserProfileUiState(
     val user: User? = null,
@@ -34,7 +35,7 @@ class UserProfileViewModel : ViewModel() {
         val userId = auth.currentUser?.uid ?: return
         _uiState.update { it.copy(isLoading = true, error = null) }
 
-        db.collection("users").document(userId)
+        db.collection(FirestoreCollection.USERS).document(userId)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
                     _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }

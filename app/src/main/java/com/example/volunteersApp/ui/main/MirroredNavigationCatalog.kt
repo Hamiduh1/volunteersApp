@@ -28,12 +28,12 @@ object MirroredNavigationCatalog {
     // Shared across Volunteer / Employer / Organizer.
     val communityItems: List<MirroredNavItem> = listOf(
         MirroredNavItem("community_hub", "Community Hub"),
-        MirroredNavItem("my_chats", "Social Inbox"),
+        MirroredNavItem(SocialInboxNav.GRAPH_ROUTE, "Social Inbox"),
         MirroredNavItem("browse_users", "User Directory"),
         MirroredNavItem("marketplace", "Marketplace"),
         MirroredNavItem("jokes", "MindLoom"),
         MirroredNavItem("ads", "Sponsored"),
-        MirroredNavItem("date_eva", "Date Hub")
+        MirroredNavItem("date_eva", "Dating Hub")
     )
 
     val personalItems: List<MirroredNavItem> = listOf(
@@ -47,19 +47,20 @@ object MirroredNavigationCatalog {
         MirroredNavItem("support", "Support Center"),
         MirroredNavItem("privacy_policy", "Privacy Policy"),
         MirroredNavItem("terms_conditions", "Terms"),
-        MirroredNavItem("aml_cft", "AML/CFT"),
+        MirroredNavItem("aml_cft", "AML/CFT Guide"),
         MirroredNavItem("how_to_use", "How to Use"),
         MirroredNavItem("ai_assistant", "AI Assistant")
     )
 
     private val sharedTitles: Map<String, String> = mapOf(
         "community_hub" to "Community Hub",
+        SocialInboxNav.GRAPH_ROUTE to "Social Inbox",
         "my_chats" to "Social Inbox",
         "browse_users" to "User Directory",
         "marketplace" to "Marketplace",
         "jokes" to "MindLoom",
         "ads" to "Sponsored",
-        "date_eva" to "Date Hub",
+        "date_eva" to "Dating Hub",
         "account_settings" to "Account Settings",
         "privacy_settings" to "Security & Privacy",
         "notification_settings" to "Notifications",
@@ -72,11 +73,15 @@ object MirroredNavigationCatalog {
         "ai_assistant" to "AI Assistant"
     )
 
-    fun titleForRoute(route: String?): String? = route?.let { sharedTitles[it] }
+    fun titleForRoute(route: String?): String? = when {
+        route == null -> null
+        route.startsWith("chat/") -> "Conversation"
+        else -> sharedTitles[route]
+    }
 
     fun iconForRoute(route: String): ImageVector = when (route) {
         "community_hub" -> Icons.Default.Groups
-        "my_chats" -> Icons.Default.Chat
+        SocialInboxNav.GRAPH_ROUTE, "my_chats" -> Icons.Default.Chat
         "browse_users" -> Icons.Default.AccountCircle
         "marketplace" -> Icons.Default.Storefront
         "jokes" -> Icons.Default.SentimentVerySatisfied

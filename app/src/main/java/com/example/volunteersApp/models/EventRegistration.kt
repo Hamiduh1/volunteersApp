@@ -39,6 +39,8 @@ data class EventRegistration(
 
     //payment
     val transactionAmount: Double = 0.0,
+    val ticketPrice: Double = 0.0,
+    val paymentStatus: String = "NOT_REQUIRED",
 
     // Metadata
     @ServerTimestamp
@@ -77,7 +79,17 @@ data class EventRegistration(
      * Returns true if the registration is in a state that allows withdrawal.
      */
     fun canWithdraw(): Boolean {
-        return statusEnum == ApplicationStatus.PENDING ||
-                statusEnum == ApplicationStatus.WAITLISTED
+        return (statusEnum == ApplicationStatus.PENDING ||
+                statusEnum == ApplicationStatus.VIEWED ||
+                statusEnum == ApplicationStatus.WAITLISTED) &&
+            !requiresSupportForCancellation()
+    }
+
+    /** Paid tickets must use the audited support/refund process, never a client status edit. */
+    fun requiresSupportForCancellation(): Boolean {
+        return transactionAmount > 0.0 || ticketPrice > 0.0 ||
+            paymentStatus.trim().uppercase(Locale.US) in setOf(
+                "PENDING", "PAID", "SUCCEEDED", "SETTLED", "COMPLETED"
+            )
     }
 }

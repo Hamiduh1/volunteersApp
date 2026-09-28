@@ -1,0 +1,64 @@
+{
+  "migrationId": "20260902-afriex-production-terms",
+  "source": "Afriex production account confirmation received 2026-09-02",
+  "execution": "Documented Firestore patch; do not apply automatically. Review the MSA and set the environment allowlists before enabling production mobile-money rails.",
+  "firestoreFieldPatches": {
+    "app_config/fee_settings": {
+      "transferCorridorFees.NG_BANK": {"providerFeeUsd": 0.2, "ownerFeeUsd": 0},
+      "transferCorridorFees.GH_BANK": {"providerFeeUsd": 1.4, "ownerFeeUsd": 0},
+      "transferCorridorFees.KE_BANK": {"providerFeeUsd": 0.25, "ownerFeeUsd": 0},
+      "transferCorridorFees.ZA_BANK": {"providerFeeUsd": 1.2, "ownerFeeUsd": 0},
+      "transferCorridorFees.EG_BANK": {"providerFeeUsd": 1.6, "ownerFeeUsd": 0},
+      "transferCorridorFees.GH_MOBILE_MONEY": {"providerFeeUsd": 0.7, "ownerFeeUsd": 0},
+      "transferCorridorFees.KE_MOBILE_MONEY": {"providerFeeUsd": 0.75, "ownerFeeUsd": 0},
+      "transferCorridorFees.RW_MOBILE_MONEY": {"providerFeeUsd": 0.15, "ownerFeeUsd": 0},
+      "transferCorridorFees.CM_MOBILE_MONEY": {"providerFeeUsd": 1.63, "ownerFeeUsd": 0},
+      "transferCorridorFees.CI_MOBILE_MONEY": {"providerFeeUsd": 1.2, "ownerFeeUsd": 0},
+      "transferCorridorFees.SN_MOBILE_MONEY": {"providerFeeUsd": 1.2, "ownerFeeUsd": 0},
+      "transferCorridorFees.GM_MOBILE_MONEY": {"providerFeeUsd": 1.2, "ownerFeeUsd": 0},
+      "transferCorridorFees.GN_MOBILE_MONEY": {"providerFeeUsd": 1.8, "ownerFeeUsd": 0},
+      "transferCorridorFees.MG_MOBILE_MONEY": {"providerFeeUsd": 1.95, "ownerFeeUsd": 0},
+      "transferCorridorFees.MW_MOBILE_MONEY": {"providerFeeUsd": 1.35, "ownerFeeUsd": 0},
+      "transferCorridorFees.MZ_MOBILE_MONEY": {"providerFeeUsd": 1.65, "ownerFeeUsd": 0},
+      "transferCorridorFees.SL_MOBILE_MONEY": {"providerFeeUsd": 1.2, "ownerFeeUsd": 0},
+      "transferCorridorFees.TZ_MOBILE_MONEY": {"providerFeeUsd": 1.8, "ownerFeeUsd": 0},
+      "transferCorridorFees.UG_MOBILE_MONEY": {"providerFeeUsd": 0.75, "ownerFeeUsd": 0},
+      "transferCorridorFees.ZM_MOBILE_MONEY": {"providerFeeUsd": 1.65, "ownerFeeUsd": 0},
+      "transferCorridorFees.BW_MOBILE_MONEY": {"providerFeeUsd": 1.5, "ownerFeeUsd": 0},
+      "transferCorridorFees.BJ_MOBILE_MONEY": {"providerFeeUsd": 1.8, "ownerFeeUsd": 0},
+      "transferCorridorFees.CG_MOBILE_MONEY": {"providerFeeUsd": 1.8, "ownerFeeUsd": 0},
+      "afriexProductionTermsRevision": "2026-09-03-schedule1-mobile-money-19-corridors"
+    },
+    "system/afriex_compliance": {
+      "productionTermsRevision": "2026-09-03-schedule1-mobile-money-19-corridors",
+      "localBankPayoutCountries": ["NG", "GH", "KE", "ZA", "EG"],
+      "mobileMoneyPayoutCountries": ["GH", "KE", "RW", "CM", "CI", "SN", "GM", "GN", "MG", "MW", "MZ", "SL", "TZ", "UG", "ZM", "BW", "BJ", "CG", "ET"], "mobileMoneyUnpricedPayoutCountries": ["ET"],
+      "mobileMoneyPayoutAccountEnablement": "Each provider-supported country still requires the corresponding production account allowlist before payments can be submitted.",
+      "mobileMoneyCollections": "Availability is separately agreed and enabled from mobile-money payouts; no collection commercial is seeded by this migration.",
+      "payoutLimitUsdEquivalent": {"perTransaction": 2000, "perUtcDay": 5000},
+      "swiftUsdProviderFeeRate": 0.0025,
+      "swiftFxQuote": "real-time",
+      "swiftSettlementWorkingDays": "3-5",
+      "swiftCorrespondentBanksMayAffectFinalAmount": true,
+      "endCustomerOnboarding": "Standard customer-onboarding information is required; KYC is not generally mandatory unless a corridor or provider process requires it.",
+      "quoteInputRule": "A request with source currency, source amount, and destination currency receives the corresponding destination amount.",
+      "businessBalanceFundingCurrencies": ["USD", "GBP", "EUR"],
+      "businessBalanceFunding": "Funds are sent to the designated currency account; agreed FX credits the corresponding local-currency amount. Card-processor settlement requires third-party-payment support.",
+      "swiftSandboxFixtures": "Pending Afriex confirmation of required beneficiary country, bank/account, BIC/SWIFT, name, address, and other test fields."
+    }
+  },
+  "requiredEnvironmentConfiguration": {
+    "AFRIEX_LOCAL_BANK_PAYOUTS_PRODUCTION_ENABLED": "true only after local-bank UAT approval",
+    "AFRIEX_LOCAL_BANK_PRODUCTION_COUNTRIES": "Comma-separated, individually approved ISO2 local-bank corridors. The provider-supported catalog is NG,GH,KE,ZA,EG; do not use this descriptive value as a runtime setting.",
+    "AFRIEX_MOBILE_MONEY_PAYOUTS_PRODUCTION_ENABLED": "true only for MSA-approved corridors",
+    "AFRIEX_MOBILE_MONEY_PAYOUT_PRODUCTION_COUNTRIES": "Comma-separated, individually approved ISO2 mobile-money payout corridors. The provider catalog is GH,KE,RW,CM,CI,SN,GM,GN,MG,MW,MZ,SL,TZ,UG,ZM,BW,BJ,CG,ET; do not use this descriptive value as a runtime setting, and omit ET until its provider-fee override is configured.",
+    "AFRIEX_MOBILE_MONEY_COLLECTIONS_PRODUCTION_ENABLED": "true only for separately approved collection corridors",
+    "AFRIEX_MOBILE_MONEY_COLLECTION_PRODUCTION_COUNTRIES": "Comma-separated collection ISO2 corridors"
+  },
+  "mobileMoneyFeePolicy": "Afriex documents 19 mobile-money payout corridors. Schedule 1 seeds fixed provider fees for GH, KE, RW, CM, CI, SN, GM, GN, MG, MW, MZ, SL, TZ, UG, ZM, BW, BJ, and CG. Ethiopia (ET) is listed with Telebirr and M-Pesa but no dollar commercial was supplied, so ET_MOBILE_MONEY requires an agreed provider-fee override before it can be quoted in production. An owner fee may be added separately.",
+  "notIncluded": [
+    "Mobile-money collection country enablement and collection fees, because they are separately agreed services and no collection commercial was supplied.",
+    "Ethiopia mobile-money payout commercial, because the supplied schedule lists Telebirr and M-Pesa but does not include a dollar fee.",
+    "SWIFT sandbox beneficiaries, because Afriex requested confirmation of the required fixture fields before providing them."
+  ]
+}

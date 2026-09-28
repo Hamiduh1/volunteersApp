@@ -12,6 +12,7 @@ import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 /**
  * UI State for the Application Detail screen.
@@ -72,7 +73,7 @@ class ApplicationDetailViewModel(
 
     private suspend fun fetchVolunteerProfile(volunteerId: String, application: EventApplication) {
         try {
-            val userSnap = db.collection("users").document(volunteerId).get().await()
+            val userSnap = db.collection(FirestoreCollection.USERS).document(volunteerId).get().await()
             val profile = userSnap.toObject(UserProfile::class.java)
             
             _uiState.update { it.copy(

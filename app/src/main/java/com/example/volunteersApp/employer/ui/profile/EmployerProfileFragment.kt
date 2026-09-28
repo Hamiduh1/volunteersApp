@@ -30,7 +30,8 @@ class EmployerProfileFragment : Fragment() {
                 VolunteersAppTheme {
                     EmployerProfileScreen(
                         viewModel = viewModel,
-                        onBack = { findNavController().popBackStack() }
+                        onBack = { findNavController().popBackStack() },
+                        onProfileSaved = { findNavController().popBackStack() }
                     )
                 }
             }

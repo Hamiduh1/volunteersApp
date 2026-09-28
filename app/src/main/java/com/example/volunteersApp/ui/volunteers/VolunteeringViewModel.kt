@@ -3,15 +3,17 @@ package com.example.volunteersApp.ui.volunteers
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.firebase.CallableFunction
 import com.example.volunteersApp.models.EventModel
+import com.example.volunteersApp.firebase.FunctionsClient
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FirestoreCollectionGroup
 
 data class VolunteeringUiState(
     val events: List<EventModel> = emptyList(), // Renamed for clarity
@@ -45,12 +47,14 @@ class VolunteeringViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                val snapshot = db.collection("events")
-                    .whereEqualTo("isActive", true)
+                val snapshot = db.collection(FirestoreCollection.EVENTS)
                     .get()
                     .await()
 
-                fullEventsList = snapshot.toObjects(EventModel::class.java).sortedBy { it.eventDateTime }
+                // Keep filtering local so older documents without a consistent isActive field still show up.
+                fullEventsList = snapshot.toObjects(EventModel::class.java)
+                    .filter { it.isActive }
+                    .sortedBy { it.eventDateTime }
                 applyFilters()
             } catch (e: Exception) {
                 Log.e("VolunteeringViewModel", "Error fetching events", e)
@@ -63,8 +67,8 @@ class VolunteeringViewModel : ViewModel() {
 
     private fun fetchUserAppliedEvents() {
         val uid = auth.currentUser?.uid ?: return
-        db.collectionGroup("applications")
-            .whereEqualTo("userId", uid)
+        db.collectionGroup(FirestoreCollectionGroup.APPLICATIONS)
+            .whereEqualTo("volunteerUid", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e("VolunteeringViewModel", "Error listening to applications", error)
@@ -105,33 +109,25 @@ class VolunteeringViewModel : ViewModel() {
     }
 
     fun applyForEvent(event: EventModel) {
-        val currentUser = auth.currentUser ?: return
-        val uid = currentUser.uid
+        if (auth.currentUser == null) {
+            _uiState.update { it.copy(errorMessage = "Please sign in before applying.") }
+            return
+        }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isActionLoading = true) }
             try {
-                val newApplicationRef = db.collection("events").document(event.eventId)
-                    .collection("applications").document()
-
-                val applicationData = hashMapOf(
-                    "applicationId" to newApplicationRef.id,
-                    "eventId" to event.eventId,
-                    "eventTitle" to event.title,
-                    "userId" to uid,
-                    "organizerId" to event.organizerId,
-                    "volunteerName" to (currentUser.displayName ?: "Volunteer"),
-                    "volunteerEmail" to currentUser.email,
-                    "status" to "pending",
-                    "appliedDate" to FieldValue.serverTimestamp()
+                val result = FunctionsClient.callMap(
+                    CallableFunction.APPLY_FOR_EVENT,
+                    mapOf("eventId" to event.eventId)
                 )
-
-                newApplicationRef.set(applicationData).await()
-
-                _uiState.update { it.copy(successMessage = "Application Submitted!") }
+                if (result?.get("success") != true) {
+                    throw IllegalStateException("Event signup could not be completed.")
+                }
+                _uiState.update { it.copy(successMessage = "Application submitted.") }
             } catch (e: Exception) {
                 Log.e("VolunteeringViewModel", "Apply failed", e)
-                _uiState.update { it.copy(errorMessage = "Failed to submit application.") }
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to submit application.") }
             } finally {
                 _uiState.update { it.copy(isActionLoading = false) }
             }

@@ -65,14 +65,14 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="New Chat"
+                    android:text="@string/new_chat"
                     android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Browse users to start a new conversation."
+                    android:text="@string/browse_users_to_start_a_new_conversation"
                     android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

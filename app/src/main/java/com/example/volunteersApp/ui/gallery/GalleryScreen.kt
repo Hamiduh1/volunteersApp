@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.ui.gallery
 
 import android.net.Uri
@@ -29,11 +31,10 @@ import coil.compose.AsyncImage
 import com.example.volunteersApp.R
 
 /**
- * Modern Event Gallery screen.
+ * Modern Event Gallery screen with Material 3 design.
  * Allows organizers and volunteers to view shared photos and upload new ones.
- * Replaces the XML-based Gallery activity.
+ * Features: Image upload with progress tracking, responsive grid layout, modern UI components.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen(
     viewModel: GalleryViewModel,
@@ -61,15 +62,20 @@ fun GalleryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Event Gallery") },
+                title = { 
+                    Column {
+                        Text("Event Gallery", fontWeight = FontWeight.Bold)
+                        Text("Share and view event photos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         }
@@ -83,10 +89,11 @@ fun GalleryScreen(
             // --- 1. Upload Section ---
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(20.dp)) {
                     Text(
                         text = "Upload a New Photo",
                         style = MaterialTheme.typography.titleMedium,
@@ -166,6 +173,7 @@ fun GalleryScreen(
 
 /**
  * Individual card displaying a gallery photo and its associated event name.
+ * Features: Elevated design, responsive layout, optimized image loading.
  */
 @Composable
 fun GalleryItemCard(image: com.example.volunteersApp.models.ImgUpload) {

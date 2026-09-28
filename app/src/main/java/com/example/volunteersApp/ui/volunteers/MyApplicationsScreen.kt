@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.ui.volunteers
 
 import androidx.compose.foundation.layout.*
@@ -8,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,7 +27,6 @@ import java.util.Locale
  * Screen for volunteers to track their submitted applications.
  * Organized into tabs: Applied (Pending), Upcoming (Approved), and Attend (Completed).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MyApplicationsScreen(
     viewModel: MyApplicationsViewModel,

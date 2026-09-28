@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Security
@@ -30,7 +31,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 @Composable
 fun PrivacySecurityScreen(
     viewModel: PrivacySecurityViewModel = viewModel(),
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenPrivacyPolicy: () -> Unit = {},
+    onOpenSecurityCenter: () -> Unit = {},
+    onOpenBlockedUsers: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -99,8 +103,9 @@ fun PrivacySecurityScreen(
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
                 
-                PrivacyLinkItem("View Privacy Policy", Icons.Default.PrivacyTip) { /* Open URL */ }
-                PrivacyLinkItem("Account Security Center", Icons.Default.Security) { /* Navigate */ }
+                PrivacyLinkItem("View Privacy Policy", Icons.Default.PrivacyTip, onClick = onOpenPrivacyPolicy)
+                PrivacyLinkItem("Blocked Users", Icons.Default.Block, onClick = onOpenBlockedUsers)
+                PrivacyLinkItem("Account Security Center", Icons.Default.Security, onClick = onOpenSecurityCenter)
             }
         }
     }

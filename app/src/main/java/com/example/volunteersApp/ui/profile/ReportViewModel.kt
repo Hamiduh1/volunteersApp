@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 // State definition for the form - THIS REMAINS THE SAME
 data class ReportFormState(
@@ -79,7 +80,7 @@ class ReportViewModel : ViewModel() {
 
             try {
                 // Save to Firestore
-                db.collection("user_reports").add(userReport).await()
+                db.collection(FirestoreCollection.USER_REPORTS).add(userReport).await()
 
                 // Prepare email intent on success
                 val emailIntent = createEmailIntent(userReport)

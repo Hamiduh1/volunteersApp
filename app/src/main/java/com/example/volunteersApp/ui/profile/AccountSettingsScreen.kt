@@ -1,6 +1,11 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.ui.profile
 
 import android.widget.Toast
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,12 +33,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -64,6 +71,10 @@ private fun rememberAccountOptions(
 }
 
 @Composable
+/**
+ * Modern Account Settings Screen with Material 3 design.
+ * Features: Account management options, profile settings, security controls, optimized ripple effects.
+ */
 fun AccountSettingsScreen(
     onNavigateUp: () -> Unit,
     viewModel: AccountSettingsViewModel,
@@ -101,19 +112,29 @@ fun AccountSettingsScreen(
 
 @Composable
 private fun AccountOptionItem(option: AccountOption, onNavigate: (String) -> Unit) {
+    var isPressed = remember { mutableStateOf(false) }
+    
+    val scaleAnim by animateFloatAsState(
+        targetValue = if (isPressed.value) 0.98f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "optionScale"
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .scale(scaleAnim)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = ripple(),
+                indication = androidx.compose.material3.ripple(),
                 onClick = {
                     if (option.route != null) {
                         onNavigate(option.route)
                     } else {
                         option.action?.invoke()
                     }
-                }
+                },
+                onClickLabel = option.title
             )
             .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -138,7 +159,7 @@ private fun AccountOptionItem(option: AccountOption, onNavigate: (String) -> Uni
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3Api::class)
 @Composable
 fun AccountSettingsTopAppBar(
     title: String,

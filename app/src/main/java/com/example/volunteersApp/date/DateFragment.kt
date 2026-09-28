@@ -9,14 +9,28 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import com.example.volunteersApp.VertexViewModel
 import com.example.volunteersApp.ui.theme.VolunteersAppTheme
+import com.example.volunteersApp.wallet.WalletViewModel
 
 class DateFragment : Fragment() {
 
-    private val viewModel: DateEvaViewModel by viewModels()
-    // FIX 1: Initialize the shared VertexViewModel using the activityViewModels delegate.
+    private val walletViewModel: WalletViewModel by activityViewModels()
+    private val viewModel: DateEvaViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                if (modelClass.isAssignableFrom(DateEvaViewModel::class.java)) {
+                    @Suppress("UNCHECKED_CAST")
+                    return DateEvaViewModel(walletViewModel) as T
+                }
+                throw IllegalArgumentException("Unknown ViewModel class")
+            }
+        }
+    }
     private val vertexViewModel: VertexViewModel by activityViewModels()
+    private val blindDateViewModel: BlindDateViewModel by viewModels()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -27,10 +41,12 @@ class DateFragment : Fragment() {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
                 VolunteersAppTheme {
-                    // FIX 2: Pass the initialized vertexViewModel to the composable screen.
                     DateEvaScreen(
                         viewModel = viewModel,
-                        vertexViewModel = vertexViewModel
+                        blindDateViewModel = blindDateViewModel,
+                        vertexViewModel = vertexViewModel,
+                        mainViewModel = null,
+                        onOpenInbox = null
                     )
                 }
             }

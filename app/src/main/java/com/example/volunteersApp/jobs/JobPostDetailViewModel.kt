@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.example.volunteersApp.firebase.FirestoreSubcollection
+import com.example.volunteersApp.firebase.CallableFunction
+import com.example.volunteersApp.firebase.FunctionsClient
 
 data class JobPostDetailUiState(
     val jobPost: JobPosting? = null, // UPDATED: Use JobPosting model
@@ -29,15 +33,29 @@ class JobPostDetailViewModel : ViewModel() {
     val uiState: StateFlow<JobPostDetailUiState> = _uiState.asStateFlow()
 
     fun fetchJobDetails(jobId: String) {
+        if (jobId.isBlank()) {
+            _uiState.update { it.copy(isLoading = false, error = "This opportunity is unavailable.") }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                val doc = db.collection("jobs").document(jobId).get().await()
-                val jobPost = doc.toObject(JobPosting::class.java)
+                val doc = db.collection(FirestoreCollection.JOBS).document(jobId).get().await()
+                if (!doc.exists()) {
+                    _uiState.update { it.copy(jobPost = null, isLoading = false, error = "This opportunity is no longer available.") }
+                    return@launch
+                }
+                val jobPost = doc.toObject(JobPosting::class.java)?.let { job ->
+                    if (job.postingId.isBlank()) job.copy(postingId = doc.id) else job
+                }
+                if (jobPost == null) {
+                    _uiState.update { it.copy(jobPost = null, isLoading = false, error = "This opportunity could not be loaded.") }
+                    return@launch
+                }
                 _uiState.update { it.copy(jobPost = jobPost, isLoading = false) }
                 checkIfAlreadyApplied(jobId)
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
+                _uiState.update { it.copy(isLoading = false, error = "We could not load this opportunity. Please try again.") }
             }
         }
     }
@@ -45,42 +63,45 @@ class JobPostDetailViewModel : ViewModel() {
     private suspend fun checkIfAlreadyApplied(jobId: String) {
         val userId = auth.currentUser?.uid ?: return
         try {
-            // FIX: Check for an application inside the job's "applications" sub-collection
-            val applicationDoc = db.collection("jobs").document(jobId)
-                .collection("applications").document(userId)
+            // The root document is canonical; the nested copy is only a compatibility mirror.
+            val applicationDoc = db.collection(FirestoreSubcollection.APPLICATIONS)
+                .document("${jobId}_${userId}")
                 .get()
                 .await()
             _uiState.update { it.copy(isApplied = applicationDoc.exists()) }
         } catch (e: Exception) {
-            _uiState.update { it.copy(error = "Failed to check application status.") }
+            _uiState.update { it.copy(error = "We could not verify your application status.") }
         }
     }
 
-    fun submitApplication(jobId: String, jobPost: JobPosting) {
-        val user = auth.currentUser ?: return
+    fun submitApplication(jobId: String) {
+        if (auth.currentUser == null) {
+            _uiState.update { it.copy(error = "Please sign in before applying.") }
+            return
+        }
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                // FIX: Save the application to the job's "applications" sub-collection using the user's ID as the document ID
-                val applicationRef = db.collection("jobs").document(jobId)
-                    .collection("applications").document(user.uid)
-
-                val applicationData = hashMapOf(
-                    "applicationId" to applicationRef.id,
-                    "jobId" to jobId,
-                    "jobTitle" to jobPost.title,
-                    "organizationName" to jobPost.organizationName,
-                    "volunteerUid" to user.uid, // FIX: Use "volunteerUid" to be consistent
-                    "volunteerName" to (user.displayName ?: "Volunteer User"),
-                    "volunteerEmail" to user.email,
-                    "employerUid" to jobPost.employerUid,
-                    "appliedAt" to FieldValue.serverTimestamp(),
-                    "status" to "pending"
+                val normalizedJobId = jobId.trim()
+                if (normalizedJobId.isBlank()) {
+                    throw IllegalStateException("This opportunity is unavailable.")
+                }
+                val result = FunctionsClient.callMap(
+                    CallableFunction.APPLY_FOR_JOB,
+                    mapOf("jobId" to normalizedJobId)
                 )
-                applicationRef.set(applicationData).await()
+                if (result?.get("success") != true) {
+                    throw IllegalStateException("We could not submit your application. Please try again.")
+                }
+
                 _uiState.update { it.copy(isApplied = true, isLoading = false) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = "Failed to submit: ${e.localizedMessage}") }
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = e.message ?: "We could not submit your application. Please try again."
+                    )
+                }
             }
         }
     }

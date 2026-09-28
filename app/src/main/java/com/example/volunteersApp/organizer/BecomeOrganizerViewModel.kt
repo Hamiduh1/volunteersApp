@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.Locale
+import com.example.volunteersApp.firebase.FirestoreCollection
 
 class BecomeOrganizerViewModel : ViewModel() {
     private val db = Firebase.firestore
@@ -44,14 +46,19 @@ class BecomeOrganizerViewModel : ViewModel() {
                     "bio" to description
                 )
 
-                // This updates the user's private role.
-                val userRoleUpdate = mapOf("userType" to UserType.ORGANIZER)
+                // Keep backend role fields aligned (role, userRole, userType).
+                val normalizedRole = UserType.ORGANIZER.name.lowercase(Locale.ROOT)
+                val userRoleUpdate = mapOf(
+                    "role" to normalizedRole,
+                    "userRole" to normalizedRole,
+                    "userType" to normalizedRole
+                )
 
                 // Use a batch write to ensure both documents are updated atomically.
                 // This is the key to making the user a "real" organizer.
                 db.runBatch { batch ->
-                    val organizerRef = db.collection("organizers").document(user.uid)
-                    val userRef = db.collection("users").document(user.uid)
+                    val organizerRef = db.collection(FirestoreCollection.ORGANIZERS).document(user.uid)
+                    val userRef = db.collection(FirestoreCollection.USERS).document(user.uid)
 
                     // Create the public organizer document.
                     batch.set(organizerRef, organizerProfileData, SetOptions.merge())
@@ -62,7 +69,9 @@ class BecomeOrganizerViewModel : ViewModel() {
 
                 _registrationResult.emit(Resource.Success(Unit))
             } catch (e: Exception) {
-                _registrationResult.emit(Resource.Error(e.localizedMessage ?: "Registration failed"))
+                _registrationResult.emit(
+                    Resource.Error("We could not create your organizer profile. Please review your details and try again.")
+                )
             } finally {
                 _isLoading.value = false
             }

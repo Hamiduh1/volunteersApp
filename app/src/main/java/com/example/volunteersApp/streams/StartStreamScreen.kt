@@ -1,62 +1,152 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.volunteersApp.streams
 
+import android.Manifest
+import android.app.Activity
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
-import androidx.compose.foundation.layout.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.LiveTv
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-/**
- * Modernized Start Stream Screen using Jetpack Compose.
- * Provides a clean form for hosts to set up their live sessions.
- */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StartStreamScreen(
     viewModel: StartStreamViewModel,
     onBack: () -> Unit,
-    onStreamStarted: (sessionId: String) -> Unit
+    onStreamStarted: (sessionId: String) -> Unit,
+    offerShareChooserOnStart: Boolean = false,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var showPrecheck by remember { mutableStateOf(false) }
+    var precheckResult by remember { mutableStateOf(LiveBroadcastPrecheck.evaluate(context)) }
+    var permissionRequestAttempted by remember { mutableStateOf(false) }
+    var previewEnabled by remember {
+        mutableStateOf(precheckResult.cameraGranted && precheckResult.microphoneGranted)
+    }
+    val previewController = remember { LiveCameraPreviewController() }
+    val latestLoading by rememberUpdatedState(uiState.isLoading)
 
-    // Listen for events from the ViewModel
-    LaunchedEffect(Unit) {
+    val startLiveIfReady = {
+        precheckResult = LiveBroadcastPrecheck.evaluate(context)
+        if (precheckResult.isReady) {
+            // Release the local-only preview before the room creates its publishing engine.
+            previewController.stop()
+            previewEnabled = false
+            showPrecheck = false
+            viewModel.startStream()
+        } else {
+            showPrecheck = true
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        permissionRequestAttempted = true
+        precheckResult = LiveBroadcastPrecheck.evaluate(context)
+        previewEnabled = precheckResult.cameraGranted && precheckResult.microphoneGranted
+        if (precheckResult.isReady) {
+            showPrecheck = false
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && !latestLoading) {
+                precheckResult = LiveBroadcastPrecheck.evaluate(context)
+                previewEnabled = precheckResult.cameraGranted && precheckResult.microphoneGranted
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            previewController.stop()
+        }
+    }
+
+    LaunchedEffect(showPrecheck) {
+        if (showPrecheck) {
+            precheckResult = LiveBroadcastPrecheck.evaluate(context)
+        }
+    }
+
+    LaunchedEffect(offerShareChooserOnStart) {
+        if (!offerShareChooserOnStart) return@LaunchedEffect
         viewModel.events.collectLatest { event ->
             when (event) {
                 is StartStreamEvent.Success -> {
-                    // Navigate to the stream screen
                     onStreamStarted(event.sessionId)
-
-                    // Also offer to share the link via an intent
-                    val shareIntent: Intent = Intent().apply {
+                    event.mindLoomMessage?.let { message ->
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
                         action = Intent.ACTION_SEND
                         putExtra(Intent.EXTRA_TEXT, "Join my live stream!\n${event.shareLink}")
                         type = "text/plain"
                     }
-                    val chooser = Intent.createChooser(shareIntent, "Share Stream Link")
-
-                    // Check if there's an app to handle the intent
                     if (shareIntent.resolveActivity(context.packageManager) != null) {
-                        context.startActivity(chooser)
+                        context.startActivity(Intent.createChooser(shareIntent, "Share Live Link"))
                     } else {
                         Toast.makeText(context, "Could not find an app to share the link.", Toast.LENGTH_SHORT).show()
                     }
@@ -65,135 +155,278 @@ fun StartStreamScreen(
         }
     }
 
-    // Display errors in a Snackbar and reset the error state
     LaunchedEffect(uiState.error) {
         if (uiState.error != null) {
             scope.launch {
-                snackbarHostState.showSnackbar(
-                    message = uiState.error!!,
-                    duration = SnackbarDuration.Short
-                )
-                // Reset the error in the ViewModel so the snackbar doesn't re-appear
+                snackbarHostState.showSnackbar(uiState.error!!, duration = SnackbarDuration.Short)
                 viewModel.resetError()
             }
         }
     }
 
+    LiveStudioTheme {
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { Text("Setup Live Stream", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            )
-        }
+        containerColor = LiveStudioBackground,
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(scrollState)
-                .padding(24.dp),
+                .padding(horizontal = 20.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header Visual
-            Surface(
-                modifier = Modifier.size(80.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.LiveTv,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            Text(
-                text = "Broadcast to your Community",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+            LiveStudioHeader(
+                liveCount = 0,
+                onBack = onBack,
+                onSearch = {},
+                onRefresh = {},
+                title = "Go Live",
+                subtitle = "Configure your broadcast",
+                showSearch = false,
+                showRefresh = false,
+                modifier = Modifier.padding(horizontal = 0.dp),
             )
 
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                text = "Enter the details below to start your live session and engage with volunteers in real-time.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Title Field
-            OutlinedTextField(
-                value = uiState.title,
-                onValueChange = viewModel::onTitleChange, // Use function reference
-                label = { Text("Stream Title") },
-                placeholder = { Text("e.g. Weekly Volunteer Briefing") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true,
-                // The error state is now handled by the snackbar,
-                // but we can still highlight the field if it's empty on button press.
-                isError = uiState.error?.contains("Title", ignoreCase = true) == true,
-                enabled = !uiState.isLoading
-            )
+            LiveGoLiveHeroCard(modifier = Modifier.fillMaxWidth())
 
             Spacer(Modifier.height(16.dp))
 
-            // Description Field
-            OutlinedTextField(
-                value = uiState.description,
-                onValueChange = viewModel::onDescriptionChange, // Use function reference
-                label = { Text("Stream Description (Optional)") },
-                placeholder = { Text("Briefly describe what the stream is about...") },
+            if (previewEnabled) {
+                LiveCameraPreview(
+                    controller = previewController,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(16.dp))
+            }
+
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                minLines = 3,
-                enabled = !uiState.isLoading
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            Button(
-                onClick = viewModel::startStream, // Use function reference
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
                 shape = RoundedCornerShape(16.dp),
-                enabled = !uiState.isLoading && uiState.title.isNotBlank()
+                color = LiveStudioSurface,
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Broadcast details",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = LiveStudioInk,
+                    )
+                    Text(
+                        text = "Give people a clear reason to join your room.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LiveStudioMuted,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    OutlinedTextField(
+                        value = uiState.title,
+                        onValueChange = viewModel::onTitleChange,
+                        label = { Text("Stream Title") },
+                        supportingText = { Text("${uiState.title.length}/120") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        enabled = !uiState.isLoading
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = uiState.description,
+                        onValueChange = viewModel::onDescriptionChange,
+                        label = { Text("Description (optional)") },
+                        supportingText = { Text("${uiState.description.length}/2000") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        enabled = !uiState.isLoading
+                    )
+
+                    Spacer(Modifier.height(20.dp))
+                    Text(
+                        text = "Audience and stage",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = LiveStudioInk,
+                    )
+                    Text(
+                        text = "Choose who can watch, participate, and replay later.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LiveStudioMuted,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    LiveEnumDropdown(
+                        label = "Who can watch",
+                        value = uiState.viewAccessMode.label,
+                        options = LiveViewAccessMode.entries.map { it.label },
+                        onSelect = { index -> viewModel.onViewAccessModeChange(LiveViewAccessMode.entries[index]) },
+                        enabled = !uiState.isLoading
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    LiveEnumDropdown(
+                        label = "Who can join stage",
+                        value = uiState.stageAccessMode.label,
+                        options = LiveStageAccessMode.entries.map { it.label },
+                        onSelect = { index -> viewModel.onStageAccessModeChange(LiveStageAccessMode.entries[index]) },
+                        enabled = !uiState.isLoading
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    LiveEnumDropdown(
+                        label = "Replay visibility",
+                        value = uiState.replayVisibility.label,
+                        options = LiveReplayVisibility.entries.map { it.label },
+                        onSelect = { index -> viewModel.onReplayVisibilityChange(LiveReplayVisibility.entries[index]) },
+                        enabled = !uiState.isLoading
+                    )
+
+                    Spacer(Modifier.height(20.dp))
+                    Text(
+                        text = "Distribution",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = LiveStudioInk,
+                    )
+                    Text(
+                        text = "Control notifications, MindLoom discovery, and conversation.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LiveStudioMuted,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = LiveStudioAccentSoft.copy(alpha = 0.55f),
+                    ) {
+                        Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                            LiveToggleRow("Notify followers", uiState.notifyFollowersOnStart, viewModel::onNotifyFollowersChange, uiState.isLoading)
+                            LiveToggleRow("Post to MindLoom", uiState.postToMindLoomOnStart, viewModel::onPostToMindLoomChange, uiState.isLoading)
+                            LiveToggleRow("Enable chat", uiState.chatEnabled, viewModel::onChatEnabledChange, uiState.isLoading)
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Button(
+                onClick = startLiveIfReady,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                enabled = !uiState.isLoading
             ) {
                 if (uiState.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp
-                    )
+                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 } else {
-                    Text(
-                        "GO LIVE NOW",
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.25.sp
-                    )
+                    Text("Go live", fontWeight = FontWeight.Bold)
                 }
+            }
+        }
+    }
+
+    if (showPrecheck) {
+        val hostActivity = context as? Activity
+        val hasMissingMediaPermission = !precheckResult.cameraGranted || !precheckResult.microphoneGranted
+        val permissionsPermanentlyDenied = permissionRequestAttempted && hostActivity != null &&
+            hasMissingMediaPermission &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(hostActivity, Manifest.permission.CAMERA) &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(hostActivity, Manifest.permission.RECORD_AUDIO)
+        ModalBottomSheet(
+            onDismissRequest = { showPrecheck = false },
+            containerColor = LiveStudioSurface,
+        ) {
+            LiveBroadcastPrecheckSheetContent(
+                result = precheckResult,
+                permissionsPermanentlyDenied = permissionsPermanentlyDenied,
+                onRequestPermissions = {
+                    permissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.CAMERA,
+                            Manifest.permission.RECORD_AUDIO,
+                        )
+                    )
+                },
+                onOpenSettings = {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null)
+                        )
+                    )
+                },
+                onGoLive = startLiveIfReady,
+            )
+        }
+    }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LiveEnumDropdown(
+    label: String,
+    value: String,
+    options: List<String>,
+    onSelect: (Int) -> Unit,
+    enabled: Boolean
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { if (enabled) expanded = it }) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth(),
+            enabled = enabled
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEachIndexed { index, option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onSelect(index)
+                        expanded = false
+                    }
+                )
             }
         }
     }
 }
 
+@Composable
+private fun LiveToggleRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+    }
+}
+
+private val LiveViewAccessMode.label: String
+    get() = when (this) {
+        LiveViewAccessMode.PUBLIC -> "Public"
+        LiveViewAccessMode.FOLLOWERS_ONLY -> "Followers only"
+        LiveViewAccessMode.INVITE_ONLY -> "Invite only"
+        LiveViewAccessMode.ACCEPTED_EVENT_VOLUNTEERS -> "Accepted event volunteers"
+    }
+
+private val LiveStageAccessMode.label: String
+    get() = when (this) {
+        LiveStageAccessMode.HOST_ONLY -> "Host only"
+        LiveStageAccessMode.REQUEST_TO_JOIN -> "Request to join"
+        LiveStageAccessMode.APPROVED_VOLUNTEERS -> "Approved volunteers"
+        LiveStageAccessMode.OPEN_TO_ACCEPTED_VOLUNTEERS -> "Open to accepted volunteers"
+    }
+
+private val LiveReplayVisibility.label: String
+    get() = when (this) {
+        LiveReplayVisibility.OWNER_ONLY -> "Owner only"
+        LiveReplayVisibility.SHARED_LINK -> "Anyone with link"
+        LiveReplayVisibility.FOLLOWERS_ONLY -> "Followers only"
+        LiveReplayVisibility.PUBLIC -> "Public"
+    }

@@ -1,0 +1,114 @@
+{
+  "screens": {
+    "owner_dashboard": {
+      "roleTitle": "Platform Owner / Admin",
+      "mission": "Keep operations safe, compliant, and financially accurate.",
+      "responsibilities": [
+        "Monitor revenue and country/source trends daily.",
+        "Approve sensitive reversals and investigate anomalies quickly.",
+        "Manage admin and associate access with least-privilege controls.",
+        "Review fee/config changes before releasing to production."
+      ],
+      "escalationRule": "Escalate fraud, legal disputes, or payout incidents immediately."
+    },
+    "admin_controls_hub": {
+      "roleTitle": "Admin Controls Coordinator",
+      "mission": "Route the right workstream to the right operations role.",
+      "responsibilities": [
+        "Direct payout, reports, KYC, and config work to trained associates.",
+        "Confirm each task has clear ownership and due time.",
+        "Escalate blocked issues and cross-team dependencies quickly.",
+        "Ensure actions align with policy and audit requirements."
+      ],
+      "escalationRule": "Escalate unresolved critical incidents to owner immediately."
+    },
+    "support_console_admin": {
+      "roleTitle": "Admin Support Lead",
+      "mission": "Oversee support quality and protect customer accounts.",
+      "responsibilities": [
+        "Grant and audit associate access.",
+        "Resolve complex account issues using strict verification standards.",
+        "Review complaint patterns and coordinate escalations with owner.",
+        "Document decisions on sensitive support cases."
+      ],
+      "escalationRule": "Escalate suspected fraud or account takeover risk immediately."
+    },
+    "support_console_associate": {
+      "roleTitle": "Support Associate",
+      "mission": "Help users safely while following verification and policy rules.",
+      "responsibilities": [
+        "Verify customer email and phone before opening account details.",
+        "Record accurate notes for each support action.",
+        "Escalate payout, security, or legal concerns to admin quickly.",
+        "Do not change fee/config/reversal controls."
+      ],
+      "escalationRule": "Escalate any identity mismatch or payment dispute before action."
+    },
+    "payout_queue": {
+      "roleTitle": "Payout Operations Associate",
+      "mission": "Process payout requests safely and keep settlement records audit-ready.",
+      "responsibilities": [
+        "Review payout status, destination details, and provider errors before action.",
+        "Use reversals only for failed/invalid settlement cases.",
+        "Capture a clear reason for every reversal decision.",
+        "Escalate repeated failures and suspicious payout patterns."
+      ],
+      "escalationRule": "Escalate large-value or repeated failed payouts immediately."
+    },
+    "disputes": {
+      "roleTitle": "Disputes and Recovery Associate",
+      "mission": "Handle disputes with evidence, policy, and audit clarity.",
+      "responsibilities": [
+        "Review dispute timeline and provider status before action.",
+        "Preserve notes and reasons for each reversal/recovery step.",
+        "Coordinate with support and owner on high-risk dispute outcomes.",
+        "Track recurring dispute sources for prevention improvements."
+      ],
+      "escalationRule": "Escalate fraud, legal threats, or regulatory complaints immediately."
+    },
+    "user_reports": {
+      "roleTitle": "Reports Review Associate",
+      "mission": "Review complaints and convert reports into safe moderation actions.",
+      "responsibilities": [
+        "Validate report reason and context before action.",
+        "Identify repeat offenders and escalate severe abuse quickly.",
+        "Keep reviewer notes objective and policy-aligned.",
+        "Coordinate with support for user-facing follow-up."
+      ],
+      "escalationRule": "Escalate violence, exploitation, or legal-risk reports immediately."
+    },
+    "kyc_review": {
+      "roleTitle": "KYC Review Associate",
+      "mission": "Protect the platform by verifying identity and risk indicators.",
+      "responsibilities": [
+        "Review account verification state and profile risk signals.",
+        "Prioritize high-risk or high-volume accounts for deeper checks.",
+        "Document pass/fail rationale clearly for audits.",
+        "Escalate suspicious identity patterns to admin owner."
+      ],
+      "escalationRule": "Escalate potential fraud or sanctions concerns immediately."
+    },
+    "fee_settings": {
+      "roleTitle": "Pricing Configuration Admin",
+      "mission": "Set fee controls that balance growth, trust, and margin.",
+      "responsibilities": [
+        "Update fees only after policy and financial impact review.",
+        "Keep values non-negative and within approved ranges.",
+        "Coordinate fee updates with support and release notes.",
+        "Monitor post-change effects on disputes and conversion."
+      ],
+      "escalationRule": "Escalate emergency pricing rollback requests to owner."
+    },
+    "system_config": {
+      "roleTitle": "System Configuration Admin",
+      "mission": "Maintain safe platform defaults and operational toggles.",
+      "responsibilities": [
+        "Change maintenance and signup flags with stakeholder notice.",
+        "Keep feature toggles aligned with policy and release readiness.",
+        "Set upload limits based on security and performance constraints.",
+        "Validate config behavior after every save."
+      ],
+      "escalationRule": "Escalate production-impacting misconfiguration immediately."
+    }
+  }
+}

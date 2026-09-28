@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -21,7 +19,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
+
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -44,9 +42,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.example.volunteersApp.VertexViewModel
 import com.example.volunteersApp.ui.shared.AiResponseDialog
-import com.example.volunteersApp.wallet.Transaction
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrganizerWalletScreen(
     navController: NavController,
@@ -104,25 +100,59 @@ fun OrganizerWalletScreen(
                     .padding(paddingValues)
                     .padding(16.dp)
             ) {
-                BalanceCard(balance = uiState.balance)
+                BalanceCard(
+                    balance = uiState.mirroredSettlementBalance,
+                    note = uiState.incomeSourceNote,
+                    payoutNote = uiState.payoutStatusNote
+                )
                 Spacer(Modifier.height(16.dp))
 
-                // --- Action Buttons ---
+                Text(
+                    "Settlement mirror",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Paid event income is provider-settled. This screen mirrors earnings and payout readiness — it is not an app-controlled cash ledger. Internal organizer-wallet transfers are disabled.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(14.dp))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Button(
-                        onClick = { navController.navigate("withdraw_screen") },
+                        onClick = { navController.navigate("global_wallet") },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Make a Withdrawal")
+                        Text("Transfers")
                     }
                     OutlinedButton(
-                        onClick = { navController.navigate("transaction_history") },
+                        onClick = { navController.navigate("payments") },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("View Full History")
+                        Text("Business Payouts")
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { navController.navigate("global_wallet_history") },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Settlement Activity")
+                    }
+                    Button(
+                        onClick = { navController.navigate("global_wallet") },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Send Money")
                     }
                 }
                 Spacer(Modifier.height(16.dp))
@@ -130,18 +160,12 @@ fun OrganizerWalletScreen(
                 // --- AI Financial Summary Button ---
                 Button(
                     onClick = {
-                        // Create a detailed prompt with the wallet data
-                        val transactionDetails = uiState.transactions.take(5).joinToString("\n") {
-                            "- ${it.title}: ${it.type} of $%.2f".format(it.amount)
-                        }
                         val prompt = """
-                            Analyze the following financial data for a volunteer event organizer and provide a short summary.
-                            - Current Balance: $%.2f
-                            - Recent Transactions:
-                            $transactionDetails
+                            Give a short, practical settlement readiness summary for an event organizer.
+                            The provider-mirrored, read-only balance is: $%.2f.
 
-                            Give one observation about their spending or earnings and one simple financial tip. Keep the entire response under 60 words.
-                        """.trimIndent().format(uiState.balance)
+                            Explain that payouts depend on provider confirmation and suggest one clear next step. Keep the response under 60 words.
+                        """.trimIndent().format(uiState.mirroredSettlementBalance)
 
                         vertexViewModel.generate(prompt)
                     },
@@ -150,55 +174,42 @@ fun OrganizerWalletScreen(
                 ) {
                     Icon(Icons.Default.AutoAwesome, contentDescription = "AI Summary", modifier = Modifier.size(ButtonDefaults.IconSize))
                     Spacer(Modifier.width(8.dp))
-                    Text("AI Financial Summary")
+                    Text("AI Settlement Summary")
                 }
-                Spacer(Modifier.height(16.dp))
-
-                TransactionHistory(uiState.transactions)
             }
         }
     }
 }
 
+// Settlement activity is intentionally shown only in Global Wallet.
 @Composable
-fun BalanceCard(balance: Double) {
+fun BalanceCard(
+    balance: Double,
+    note: String?,
+    payoutNote: String? = null
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Current Balance", style = MaterialTheme.typography.titleMedium)
+            Text("Mirrored settlement", style = MaterialTheme.typography.titleMedium)
             Text("$%.2f".format(balance), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-fun TransactionHistory(transactions: List<Transaction>) {
-    Column {
-        Text("Recent Transactions", style = MaterialTheme.typography.titleLarge)
-        if (transactions.isEmpty()) {
-            Text("No transactions yet.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp))
-        } else {
-            LazyColumn {
-                items(transactions.take(5)) { tx -> // Show only first 5
-                    Card(modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(tx.title, fontWeight = FontWeight.Bold)
-                                Text(tx.note ?: "", style = MaterialTheme.typography.bodySmall)
-                                Text(tx.formattedDate, style = MaterialTheme.typography.bodySmall)
-                            }
-                            Text(
-                                text = (if (tx.type == "DEBIT") "- " else "+ ") + "$%.2f".format(tx.amount),
-                                color = if (tx.type == "DEBIT") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
+            if (!note.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (!payoutNote.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    payoutNote,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }

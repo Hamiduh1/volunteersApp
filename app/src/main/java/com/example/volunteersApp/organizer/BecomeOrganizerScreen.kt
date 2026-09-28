@@ -28,6 +28,7 @@ fun BecomeOrganizerScreen(
     onSuccess: () -> Unit
 ) {
     val isLoading by viewModel.isLoading.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
@@ -39,11 +40,18 @@ fun BecomeOrganizerScreen(
 
     LaunchedEffect(Unit) {
         viewModel.registrationResult.collect { result ->
-            if (result is Resource.Success) onSuccess()
+            when (result) {
+                is Resource.Success -> onSuccess()
+                is Resource.Error -> snackbarHostState.showSnackbar(
+                    result.message ?: "We could not create your organizer profile. Please try again."
+                )
+                else -> Unit
+            }
         }
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Become an Organizer") },
@@ -121,7 +129,7 @@ fun BecomeOrganizerScreen(
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Text("SUBMIT DETAILS", fontWeight = FontWeight.Bold)
+                    Text("Create organizer profile", fontWeight = FontWeight.Bold)
                 }
             }
         }

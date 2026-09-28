@@ -13,6 +13,31 @@
 -keep class kotlinx.serialization.** { *; }
 -keep class *$$serializer { *; }
 
+# Agora invokes event handlers and native bindings by name. Preserve them in
+# minified Play builds so call/video startup behaves the same as debug builds.
+-keep class io.agora.** { *; }
+
+# Firestore previously read live join requests through reflection. Keep this
+# model's Kotlin no-argument constructor for cached/older builds as a guard;
+# current listeners use explicit document mapping instead.
+-keep class com.example.volunteersApp.streams.JoinLiveStreamRequest { *; }
+-keep class io.agora.base.** { *; }
+-keep class io.agora.base.internal.voiceengine.BuildInfo { *; }
+-dontwarn io.agora.**
+
+# --- Firestore application models ---
+# Firestore's `toObject()` mapper discovers Kotlin constructors, fields, and
+# accessors by reflection. Release minification must not rename or remove that
+# surface, or a document read can crash a feature as it opens.
+-keep,allowoptimization @com.google.firebase.firestore.IgnoreExtraProperties class * { *; }
+-keep,allowoptimization class com.example.volunteersApp.models.** { *; }
+-keep,allowoptimization class com.example.volunteersApp.wallet.Transaction { *; }
+-keep,allowoptimization class com.example.volunteersApp.wallet.Beneficiary { *; }
+-keep,allowoptimization class com.example.volunteersApp.wallet.PaymentMethod { *; }
+-keep,allowoptimization class com.example.volunteersApp.wallet.PaymentMethod$* { *; }
+-keep,allowoptimization class com.example.volunteersApp.jokes.Joke { *; }
+-keep,allowoptimization class com.example.volunteersApp.jokes.Comment { *; }
+
 
 # Add project specific ProGuard rules here.
 # You can control the set of applied configuration files using the
