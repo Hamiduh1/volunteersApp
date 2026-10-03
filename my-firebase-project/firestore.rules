@@ -8,6 +8,68 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isActiveLiveSessionStatus(status) {
+      return status is string && status in ['LIVE', 'live', 'Live', 'ACTIVE', 'active', 'Active', 'STARTED', 'started', 'Started'];
+    }
+
+    function isEndedLiveSessionStatus(status) {
+      return status is string && status in [
+        'ENDED', 'ended', 'Ended',
+        'COMPLETED', 'completed', 'Completed',
+        'CLOSED', 'closed', 'Closed'
+      ];
+    }
+
+    // Live identity/stage helpers live at this scope because both live_sessions and the
+    // top-level join_requests collection use them; functions don't cross sibling match blocks.
+    function liveProfileName(uid) {
+      return uid is string
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.name is string
+        ? get(/databases/$(database)/documents/users/$(uid)).data.name
+        : '';
+    }
+
+    function liveProfileUsername(uid) {
+      return uid is string
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.username is string
+        ? get(/databases/$(database)/documents/users/$(uid)).data.username
+        : '';
+    }
+
+    function liveProfileEmail(uid) {
+      return uid is string
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.email is string
+        ? get(/databases/$(database)/documents/users/$(uid)).data.email
+        : '';
+    }
+
+    function liveAuthEmail() {
+      return request.auth.token.email is string
+        ? request.auth.token.email
+        : '';
+    }
+
+    function liveIdentityMatches(uid, submittedName) {
+      return submittedName == liveProfileName(uid)
+        || submittedName == liveProfileUsername(uid)
+        || submittedName == liveProfileEmail(uid)
+        || submittedName == liveAuthEmail();
+    }
+
+    function liveSessionStageAccessMode(streamId) {
+      let session = get(/databases/$(database)/documents/live_sessions/$(streamId)).data;
+      let mode = session.stageAccessMode;
+      return mode is string ? mode : 'request_to_join';
+    }
+
+    function allowsLiveStageJoinRequest(streamId) {
+      let mode = liveSessionStageAccessMode(streamId);
+      return mode in ['request_to_join', 'approved_volunteers', 'open_to_accepted_volunteers'];
+    }
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
@@ -20,20 +82,48 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/employers/$(request.auth.uid));
     }
 
+    function signedInUserHasAnyRole(roles) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in roles ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userRole in roles ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType in roles
+        );
+    }
+
     function isWalletAgent() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'agent';
+      return signedInUserHasAnyRole(['agent']);
     }
 
     function isPlatformOwner() {
-      return isSignedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner';
+      return signedInUserHasAnyRole(['owner']);
     }
 
     function isPlatformAdmin() {
       return isSignedIn() && (
         request.auth.token.owner == true ||
         request.auth.token.admin == true ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['owner', 'admin']
+        signedInUserHasAnyRole(['owner', 'admin'])
+      );
+    }
+
+    function canCreateLiveSessionHost() {
+      return isSignedIn() && (
+        isOrganizer() ||
+        isEmployer() ||
+        isPlatformAdmin() ||
+        signedInUserHasAnyRole([
+          'user',
+          'volunteer',
+          'organizer',
+          'employer',
+          'owner',
+          'admin',
+          'associate',
+          'support',
+          'support_associate'
+        ])
       );
     }
 
@@ -50,579 +140,1209 @@ service cloud.firestore {
         ('employerId' in data && data.employerId == request.auth.uid);
     }
 
-    // call_sessions: 1:1 uses callerId/receiverId; groups use participantIds (may omit receiverId).
-    // Use map keys explicitly so missing fields do not coerce awkwardly under .get defaults.
-    function isCallSessionParticipant(data) {
-      return isSignedIn() && (
-        ('callerId' in data && data.callerId is string && request.auth.uid == data.callerId) ||
-        ('receiverId' in data && data.receiverId is string && request.auth.uid == data.receiverId) ||
-        ('participantIds' in data && data.participantIds is list && request.auth.uid in data.participantIds)
+    function beneficiaryClientCreateFields() {
+      return [
+        'name',
+        'country',
+        'network',
+        'phone',
+        'phoneNumber',
+        'recipientPhone',
+        'accountNumber',
+        'accountNumberRaw',
+        'bankAccountNumber',
+        'bankName',
+        'institutionName',
+        'providerInstitutionName',
+        'institutionCode',
+        'providerInstitutionCode',
+        'afriexInstitutionCode',
+        'providerChannel',
+        'afriexProviderChannel',
+        'recipientEmail',
+        'recipientAddress',
+        'institutionAddress',
+        'transactionInvoice',
+        'swiftBic',
+        'route',
+        'afriexPayoutRoute',
+        'currency',
+        'accountLast4',
+        'type',
+        'verificationStatus',
+        'createdAt',
+        'updatedAt',
+        'lastTransferAtMs',
+        'isAppUser'
+      ];
+    }
+
+    function beneficiaryClientUpdateFields() {
+      return [
+        'name',
+        'country',
+        'network',
+        'phone',
+        'phoneNumber',
+        'recipientPhone',
+        'accountNumber',
+        'accountNumberRaw',
+        'bankAccountNumber',
+        'bankName',
+        'institutionName',
+        'providerInstitutionName',
+        'institutionCode',
+        'providerInstitutionCode',
+        'afriexInstitutionCode',
+        'providerChannel',
+        'afriexProviderChannel',
+        'recipientEmail',
+        'recipientAddress',
+        'institutionAddress',
+        'transactionInvoice',
+        'swiftBic',
+        'route',
+        'afriexPayoutRoute',
+        'currency',
+        'accountLast4',
+        'type',
+        'verificationStatus',
+        'updatedAt',
+        'lastTransferAtMs',
+        'isAppUser'
+      ];
+    }
+
+    function beneficiaryRouteFrom(data) {
+      return ('type' in data) ? data.type :
+        (('route' in data) ? data.route :
+          (('afriexPayoutRoute' in data) ? data.afriexPayoutRoute : 'MOBILE_MONEY'));
+    }
+
+    function isSupportedBeneficiaryRoute(route) {
+      return route in ['MOBILE_MONEY', 'BANK_ACCOUNT'];
+    }
+
+    function beneficiaryRouteFieldsMatch(data, route) {
+      return (!('type' in data) || data.type == route)
+        && (!('route' in data) || data.route == route)
+        && (!('afriexPayoutRoute' in data) || data.afriexPayoutRoute == route);
+    }
+
+    function beneficiaryOptionalStringFieldsAreSafe(data) {
+      return (!('network' in data) || data.network is string)
+        && (!('phone' in data) || data.phone is string)
+        && (!('phoneNumber' in data) || data.phoneNumber is string)
+        && (!('recipientPhone' in data) || data.recipientPhone is string)
+        && (!('accountNumber' in data) || data.accountNumber is string)
+        && (!('accountNumberRaw' in data) || data.accountNumberRaw is string)
+        && (!('bankAccountNumber' in data) || data.bankAccountNumber is string)
+        && (!('bankName' in data) || data.bankName is string)
+        && (!('institutionName' in data) || data.institutionName is string)
+        && (!('providerInstitutionName' in data) || data.providerInstitutionName is string)
+        && (!('institutionCode' in data) || data.institutionCode is string)
+        && (!('providerInstitutionCode' in data) || data.providerInstitutionCode is string)
+        && (!('afriexInstitutionCode' in data) || data.afriexInstitutionCode is string)
+        && (!('recipientEmail' in data) || data.recipientEmail is string)
+        && (!('recipientAddress' in data) || data.recipientAddress is string)
+        && (!('institutionAddress' in data) || data.institutionAddress is string)
+        && (!('transactionInvoice' in data) || data.transactionInvoice is string)
+        && (!('swiftBic' in data) || data.swiftBic is string)
+        && (!('currency' in data) || data.currency is string)
+        && (!('accountLast4' in data) || data.accountLast4 is string);
+    }
+
+    function beneficiaryProviderChannelFieldsAreSafe(data, route) {
+      return route != 'BANK_ACCOUNT' || (
+        (!('providerChannel' in data) ||
+          (data.providerChannel is string && data.providerChannel in ['BANK_ACCOUNT', 'SWIFT']))
+        && (!('afriexProviderChannel' in data) ||
+          (data.afriexProviderChannel is string && data.afriexProviderChannel in ['BANK_ACCOUNT', 'SWIFT']))
       );
     }
 
-    function isCallSessionChatMember(data) {
-      let chatId = data.get('chatId', '');
-      let participants = chatId is string && chatId != ''
-        ? get(/databases/$(database)/documents/chats/$(chatId)).data.get('participants', [])
-        : [];
-      return participants is list && request.auth.uid in participants;
-    }
-
-    // iOS parity: group if chatType=group OR more than two participants; else direct.
-    function isGroupChatData(data) {
-      return data.get('chatType', '') == 'group' ||
-        (data.get('participants', []) is list && data.get('participants', []).size() > 2);
-    }
-
-    // Message history: participants only; exited members lose group history (not inbox chat doc).
-    function canReadChatHistory(chatId) {
-      let chat = chatDocData(chatId);
-      let participants = chat.get('participants', []);
-      let exited = chat.get('exitedParticipantIds', []);
-      return isSignedIn() &&
-        participants is list &&
-        request.auth.uid in participants &&
-        (
-          !isGroupChatData(chat) ||
-          !(exited is list && request.auth.uid in exited)
-        );
-    }
-
-    function chatDocData(chatId) {
-      return get(/databases/$(database)/documents/chats/$(chatId)).data;
-    }
-
-    // Order-insensitive equality for chat participants (strict == fails when arrays are reordered).
-    function chatParticipantListUnchanged() {
-      let before = resource.data.get('participants', []);
-      let after = request.resource.data.get('participants', []);
-      return before is list && after is list &&
-        before.size() == after.size() &&
-        before.hasAll(after) &&
-        after.hasAll(before);
-    }
-
-    // Call flows may update any non-empty subset of lastCall* fields (see CallSessionViewModel.acceptSession).
-    function chatLastCallMetadataOnlyUpdate() {
-      let allowed = [
-        'lastCallType',
-        'lastCallStatus',
-        'lastCallTimestamp',
-        'lastCallInitiatorId',
-        'lastCallReceiverId'
-      ];
-      let delta = request.resource.data.diff(resource.data).affectedKeys();
-      return delta.size() > 0 && delta.hasOnly(allowed);
-    }
-
-    function chatParticipantContentOnlyUpdate() {
-      let allowed = [
-        'participants',
-        'exitedParticipantIds',
-        'groupName',
-        'groupPhotoUrl',
-        'lastMessage',
-        'lastMessageText',
-        'lastMessageTimestamp',
-        'lastMessageId',
-        'lastMessageSenderId',
-        'lastMessageType',
-        'lastMessageDelivered',
-        'lastMessageRead',
-        'updatedAt',
-        'lastCallType',
-        'lastCallStatus',
-        'lastCallTimestamp',
-        'lastCallInitiatorId',
-        'lastCallReceiverId'
-      ];
-      let delta = request.resource.data.diff(resource.data).affectedKeys();
-      return delta.size() > 0 &&
-        delta.hasOnly(allowed) &&
-        request.resource.data.get('chatId', null) == resource.data.get('chatId', null) &&
-        request.resource.data.get('chatType', null) == resource.data.get('chatType', null) &&
-        request.resource.data.get('groupCreatorId', null) == resource.data.get('groupCreatorId', null) &&
-        request.resource.data.get('createdAt', null) == resource.data.get('createdAt', null);
-    }
-
-    function callSessionParticipantUpdateAllowed() {
-      let allowed = [
-        'acceptedParticipantIds',
-        'declinedParticipantIds',
-        'endedParticipantIds',
-        'status',
-        'updatedAt'
-      ];
-      let delta = request.resource.data.diff(resource.data).affectedKeys();
-      return delta.size() > 0 &&
-        delta.hasOnly(allowed) &&
-        request.resource.data.get('acceptedParticipantIds', []) is list &&
-        request.resource.data.get('declinedParticipantIds', []) is list &&
-        request.resource.data.get('endedParticipantIds', []) is list &&
-        request.resource.data.get('status', resource.data.get('status', 'ringing')) in ['ringing', 'accepted', 'declined', 'ended'] &&
-        request.resource.data.get('chatId', null) == resource.data.get('chatId', null) &&
-        request.resource.data.get('callerId', null) == resource.data.get('callerId', null) &&
-        request.resource.data.get('receiverId', null) == resource.data.get('receiverId', null) &&
-        request.resource.data.get('participantIds', []) == resource.data.get('participantIds', []) &&
-        request.resource.data.get('callType', null) == resource.data.get('callType', null) &&
-        request.resource.data.get('isGroup', null) == resource.data.get('isGroup', null) &&
-        request.resource.data.get('groupName', null) == resource.data.get('groupName', null) &&
-        request.resource.data.get('callerName', null) == resource.data.get('callerName', null) &&
-        request.resource.data.get('callerPhotoUrl', null) == resource.data.get('callerPhotoUrl', null) &&
-        request.resource.data.get('createdAt', null) == resource.data.get('createdAt', null);
-    }
-
-    function callSessionCreateAllowed() {
-      let chatId = request.resource.data.get('chatId', '');
-      let callerId = request.resource.data.get('callerId', '');
-      let receiverId = request.resource.data.get('receiverId', '');
-      let participantIds = request.resource.data.get('participantIds', []);
-      let accepted = request.resource.data.get('acceptedParticipantIds', []);
-      let declined = request.resource.data.get('declinedParticipantIds', []);
-      let ended = request.resource.data.get('endedParticipantIds', []);
-      let callType = request.resource.data.get('callType', '');
-      let status = request.resource.data.get('status', '');
-      let chat = chatDocData(chatId);
-
-      return isSignedIn() &&
-        chatId is string &&
-        chatId != '' &&
-        callerId is string &&
-        callerId == request.auth.uid &&
-        chat.participants is list &&
-        request.auth.uid in chat.participants &&
-        participantIds is list &&
-        participantIds.size() >= 1 &&
-        chat.participants.hasAll(participantIds) &&
-        receiverId is string &&
-        (receiverId == '' || receiverId in chat.participants) &&
-        callType is string &&
-        (callType == 'audio' || callType == 'video') &&
-        status == 'ringing' &&
-        accepted is list &&
-        request.auth.uid in accepted &&
-        declined is list &&
-        ended is list &&
-        !(request.auth.uid in declined) &&
-        !(request.auth.uid in ended);
-    }
-
-    function callLogParticipantUpdateAllowed(chatId) {
-      let allowed = [
-        'status',
-        'endedAt',
-        'durationSeconds',
-        'participantIds',
-        'isGroupCall',
-        'groupName'
-      ];
-      let delta = request.resource.data.diff(resource.data).affectedKeys();
-      let participants = request.resource.data.get('participantIds', []);
-      let chat = chatDocData(chatId);
-      return delta.size() > 0 &&
-        delta.hasOnly(allowed) &&
-        request.resource.data.get('chatId', null) == resource.data.get('chatId', null) &&
-        request.resource.data.get('callerId', null) == resource.data.get('callerId', null) &&
-        request.resource.data.get('receiverId', null) == resource.data.get('receiverId', null) &&
-        request.resource.data.get('callType', null) == resource.data.get('callType', null) &&
-        request.resource.data.get('startedAt', null) == resource.data.get('startedAt', null) &&
-        participants is list &&
-        chat.participants is list &&
-        chat.participants.hasAll(participants);
-    }
-
-    function hiddenMindLoomStatuses() {
-      return ['DELETED', 'REMOVED', 'INACTIVE', 'REJECTED', 'HIDDEN', 'ARCHIVED', 'CLOSED', 'DISABLED'];
-    }
-
-    function isVisibleMindLoomData(data) {
-      return (!('isDeleted' in data) || data.isDeleted != true) &&
-        (!('status' in data) || !(data.status in hiddenMindLoomStatuses()));
-    }
-
-    function isValidMindLoomPostCreate(userId) {
-      return isOwner(userId)
-        && request.resource.data.keys().hasOnly([
-          'authorId',
-          'authorName',
-          'authorProfileUrl',
-          'text',
-          'mediaUrl',
-          'mediaType',
-          'liveSessionId',
-          'sourceLiveSessionId',
-          'sourceLiveHostId',
-          'sourceLiveShareUrl',
-          'sourceReplayVisibility',
-          'status',
-          'isDeleted',
-          'likes',
-          'commentsCount',
-          'timestamp'
-        ])
-        && request.resource.data.keys().hasAll([
-          'authorId',
-          'authorName',
-          'text',
-          'mediaType',
-          'likes',
-          'commentsCount',
-          'timestamp'
-        ])
-        && request.resource.data.authorId == request.auth.uid
-        && request.resource.data.authorId == userId
-        && request.resource.data.authorName is string
-        && request.resource.data.authorName.size() > 0
-        && request.resource.data.authorName.size() <= 120
-        && request.resource.data.text is string
-        && request.resource.data.text.size() <= 5000
-        && request.resource.data.mediaType in ['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LIVE_SESSION', 'LIVE_REPLAY']
-        && (
-          (request.resource.data.mediaType == 'TEXT' &&
-            (!('mediaUrl' in request.resource.data) || request.resource.data.mediaUrl == null)) ||
-          (request.resource.data.mediaType in ['IMAGE', 'VIDEO', 'DOCUMENT'] &&
-            request.resource.data.mediaUrl is string &&
-            request.resource.data.mediaUrl.size() > 0 &&
-            request.resource.data.mediaUrl.size() <= 2048) ||
-          (request.resource.data.mediaType in ['LIVE_SESSION', 'LIVE_REPLAY'] &&
-            request.resource.data.mediaUrl is string &&
-            request.resource.data.mediaUrl.size() > 0 &&
-            request.resource.data.mediaUrl.size() <= 2048 &&
-            ('liveSessionId' in request.resource.data) &&
-            request.resource.data.liveSessionId is string &&
-            request.resource.data.liveSessionId.size() > 0 &&
-            request.resource.data.liveSessionId.size() <= 128)
+    function beneficiarySwiftFieldsAreSafe(data, route) {
+      return !(
+          route == 'BANK_ACCOUNT' &&
+          (
+            (('providerChannel' in data) && data.providerChannel == 'SWIFT') ||
+            (('afriexProviderChannel' in data) && data.afriexProviderChannel == 'SWIFT')
+          )
         )
-        && (!('authorProfileUrl' in request.resource.data) ||
-          request.resource.data.authorProfileUrl == null ||
-          (request.resource.data.authorProfileUrl is string &&
-            request.resource.data.authorProfileUrl.size() <= 2048))
-        && (!('liveSessionId' in request.resource.data) ||
-          (request.resource.data.liveSessionId is string &&
-            request.resource.data.liveSessionId.size() > 0 &&
-            request.resource.data.liveSessionId.size() <= 128))
-        && (!('sourceLiveSessionId' in request.resource.data) ||
-          (request.resource.data.sourceLiveSessionId is string &&
-            request.resource.data.sourceLiveSessionId.size() <= 128))
-        && (!('sourceLiveHostId' in request.resource.data) ||
-          (request.resource.data.sourceLiveHostId is string &&
-            request.resource.data.sourceLiveHostId.size() <= 128))
-        && (!('sourceLiveShareUrl' in request.resource.data) ||
-          (request.resource.data.sourceLiveShareUrl is string &&
-            request.resource.data.sourceLiveShareUrl.size() <= 2048))
-        && (!('sourceReplayVisibility' in request.resource.data) ||
-          (request.resource.data.sourceReplayVisibility in [
-            'owner_only', 'shared_link', 'followers_only', 'public'
-          ]))
-        && (!('status' in request.resource.data) || request.resource.data.status == 'ACTIVE')
-        && (!('isDeleted' in request.resource.data) || request.resource.data.isDeleted == false)
-        && request.resource.data.likes is list
-        && request.resource.data.likes.size() == 0
-        && request.resource.data.commentsCount == 0
-        && request.resource.data.timestamp == request.time;
-    }
-
-    function isValidMindLoomOwnerTextUpdate(userId) {
-      return isOwner(userId)
-        && resource.data.authorId == userId
-        && request.resource.data.authorId == resource.data.authorId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text'])
-        && request.resource.data.text is string
-        && request.resource.data.text.size() > 0
-        && request.resource.data.text.size() <= 5000;
-    }
-
-    function isValidMindLoomLikeUpdate() {
-      return isSignedIn()
-        && isVisibleMindLoomData(resource.data)
-        && request.resource.data.authorId == resource.data.authorId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])
-        && resource.data.likes is list
-        && request.resource.data.likes is list
-        && (
-          (
-            !(request.auth.uid in resource.data.likes) &&
-            request.auth.uid in request.resource.data.likes &&
-            request.resource.data.likes.size() == resource.data.likes.size() + 1 &&
-            request.resource.data.likes.hasAll(resource.data.likes)
-          ) ||
-          (
-            request.auth.uid in resource.data.likes &&
-            !(request.auth.uid in request.resource.data.likes) &&
-            request.resource.data.likes.size() == resource.data.likes.size() - 1 &&
-            resource.data.likes.hasAll(request.resource.data.likes)
+        || (
+          ('recipientEmail' in data) && data.recipientEmail is string && data.recipientEmail.size() > 3
+          && ('recipientAddress' in data) && data.recipientAddress is string && data.recipientAddress.size() > 0
+          && ('institutionAddress' in data) && data.institutionAddress is string && data.institutionAddress.size() > 0
+          && (
+            (('swiftBic' in data) && data.swiftBic is string && data.swiftBic.size() > 0)
+            || (('institutionCode' in data) && data.institutionCode is string && data.institutionCode.size() > 0)
+            || (('providerInstitutionCode' in data) && data.providerInstitutionCode is string && data.providerInstitutionCode.size() > 0)
+            || (('afriexInstitutionCode' in data) && data.afriexInstitutionCode is string && data.afriexInstitutionCode.size() > 0)
           )
         );
     }
 
-    function isValidMindLoomCommentCreate(postOwnerId) {
-      return isSignedIn()
-        && request.resource.data.keys().hasOnly([
-          'authorId',
-          'authorUid',
-          'authorName',
-          'authorProfileUrl',
-          'text',
-          'isOwnerResponse',
-          'timestamp'
-        ])
-        && request.resource.data.keys().hasAll(['authorId', 'authorName', 'text', 'timestamp'])
-        && request.resource.data.authorId == request.auth.uid
-        && (!('authorUid' in request.resource.data) || request.resource.data.authorUid == request.auth.uid)
-        && request.resource.data.authorName is string
-        && request.resource.data.authorName.size() > 0
-        && request.resource.data.authorName.size() <= 120
-        && (!('authorProfileUrl' in request.resource.data) ||
-          request.resource.data.authorProfileUrl == null ||
-          (request.resource.data.authorProfileUrl is string &&
-            request.resource.data.authorProfileUrl.size() <= 2048))
-        && request.resource.data.text is string
-        && request.resource.data.text.size() > 0
-        && request.resource.data.text.size() <= 2000
-        && (!('isOwnerResponse' in request.resource.data) ||
-          request.resource.data.isOwnerResponse == false ||
-          request.auth.uid == postOwnerId)
-        && request.resource.data.timestamp == request.time;
+    function beneficiaryHasRequiredDestinationForRoute(data, route) {
+      return (
+          route == 'MOBILE_MONEY'
+          && ('phone' in data)
+          && data.phone is string
+          && data.phone.size() > 0
+        )
+        || (
+          route == 'BANK_ACCOUNT'
+          && ('accountNumber' in data)
+          && data.accountNumber is string
+          && data.accountNumber.size() > 0
+          && (
+            (('bankName' in data) && data.bankName is string && data.bankName.size() > 0)
+            || (('institutionName' in data) && data.institutionName is string && data.institutionName.size() > 0)
+            || (('institutionCode' in data) && data.institutionCode is string && data.institutionCode.size() > 0)
+            || (('providerInstitutionCode' in data) && data.providerInstitutionCode is string && data.providerInstitutionCode.size() > 0)
+            || (('afriexInstitutionCode' in data) && data.afriexInstitutionCode is string && data.afriexInstitutionCode.size() > 0)
+          )
+        );
     }
 
-    function isValidMindLoomSavedPostWrite() {
-      return request.resource.data.keys().hasOnly(['authorId', 'savedAt'])
-        && request.resource.data.keys().hasAll(['authorId', 'savedAt'])
-        && request.resource.data.authorId is string
-        && request.resource.data.authorId.size() > 0
-        && request.resource.data.savedAt == request.time;
+    function isSafeBeneficiaryCreate() {
+      let route = beneficiaryRouteFrom(request.resource.data);
+      return request.resource.data.keys().hasOnly(beneficiaryClientCreateFields())
+        && request.resource.data.name is string
+        && request.resource.data.country is string
+        && isSupportedBeneficiaryRoute(route)
+        && beneficiaryRouteFieldsMatch(request.resource.data, route)
+        && beneficiaryOptionalStringFieldsAreSafe(request.resource.data)
+        && beneficiaryProviderChannelFieldsAreSafe(request.resource.data, route)
+        && beneficiarySwiftFieldsAreSafe(request.resource.data, route)
+        && beneficiaryHasRequiredDestinationForRoute(request.resource.data, route)
+        && (!('verificationStatus' in request.resource.data) || request.resource.data.verificationStatus == 'UNVERIFIED')
+        && (!('isAppUser' in request.resource.data) || request.resource.data.isAppUser is bool)
+        && (!('lastTransferAtMs' in request.resource.data) || request.resource.data.lastTransferAtMs is int);
     }
 
-    function isValidFollowEdgeCreate(edgeUserId) {
-      return isSignedIn()
-        && request.auth.uid == edgeUserId
-        && request.resource.data.keys().hasOnly(['createdAt'])
-        && request.resource.data.createdAt == request.time;
+    function isSafeBeneficiaryUpdate() {
+      let route = beneficiaryRouteFrom(request.resource.data);
+      return request.writeFields.hasOnly(beneficiaryClientUpdateFields())
+        && (!request.writeFields.hasAny(['name']) || request.resource.data.name is string)
+        && (!request.writeFields.hasAny(['country']) || request.resource.data.country is string)
+        && isSupportedBeneficiaryRoute(route)
+        && beneficiaryRouteFieldsMatch(request.resource.data, route)
+        && beneficiaryOptionalStringFieldsAreSafe(request.resource.data)
+        && beneficiaryProviderChannelFieldsAreSafe(request.resource.data, route)
+        && beneficiarySwiftFieldsAreSafe(request.resource.data, route)
+        && beneficiaryHasRequiredDestinationForRoute(request.resource.data, route)
+        // The client can only clear stale verification after editing recipient
+        // details. Provider-confirmed statuses are server-owned.
+        && (!request.writeFields.hasAny(['verificationStatus']) ||
+          request.resource.data.verificationStatus == 'UNVERIFIED')
+        && (!request.writeFields.hasAny(['isAppUser']) || request.resource.data.isAppUser is bool)
+        && (!request.writeFields.hasAny(['lastTransferAtMs']) || request.resource.data.lastTransferAtMs is int);
     }
 
-    function isValidChatInvitationCreate(senderId) {
+    function isOpenJobStatus(status) {
+      return status in ['OPEN', 'open', 'ACTIVE', 'active'];
+    }
+
+    function isPendingJobApplicationStatus(status) {
+      return status in ['PENDING', 'pending', 'VIEWED', 'viewed', 'WAITLISTED', 'waitlisted'];
+    }
+
+    function isFinalEmployerDecision(status) {
+      return status in ['APPROVED', 'approved', 'REJECTED', 'rejected', 'REJECTED_BY_EMPLOYER', 'rejected_by_employer'];
+    }
+
+    function isEmployerForJob(jobId) {
+      let jobPath = /databases/$(database)/documents/jobs/$(jobId);
+      return jobId is string
+        && jobId.size() > 0
+        && exists(jobPath)
+        && (
+          get(jobPath).data.employerUid == request.auth.uid ||
+          get(jobPath).data.employerId == request.auth.uid
+        );
+    }
+
+    function jobApplicationEmployerMatchesCreate(jobId, applicantUid, expectedApplicationId) {
+      let jobPath = /databases/$(database)/documents/jobs/$(jobId);
+      return jobId is string
+        && jobId.size() > 0
+        && applicantUid is string
+        && applicantUid == request.auth.uid
+        && expectedApplicationId is string
+        && exists(jobPath)
+        && get(jobPath).data.isDeleted != true
+        && isOpenJobStatus(get(jobPath).data.status)
+        && (!('isActive' in get(jobPath).data) || get(jobPath).data.isActive == true)
+        && (!('applicationDeadline' in get(jobPath).data) || request.time <= get(jobPath).data.applicationDeadline)
+        && request.resource.data.applicationId == expectedApplicationId
+        && request.resource.data.jobId == jobId
+        && request.resource.data.userId == applicantUid
+        && request.resource.data.volunteerUid == applicantUid
+        && request.resource.data.employerUid == get(jobPath).data.employerUid
+        && request.resource.data.employerId == get(jobPath).data.employerId
+        && isPendingJobApplicationStatus(request.resource.data.status)
+        && applicantUid != get(jobPath).data.employerUid
+        && applicantUid != get(jobPath).data.employerId;
+    }
+
+    function isVolunteerJobResumeFieldPatch() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['resumeStoragePath', 'resumeDownloadUrl', 'resumeFileName', 'resumeUploadedAt', 'lastUpdatedAt']);
+    }
+
+    function isEmployerJobApplicationReviewPatch() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['status', 'lastUpdatedAt'])
+        && isPendingJobApplicationStatus(resource.data.status)
+        && isFinalEmployerDecision(request.resource.data.status);
+    }
+
+    // Blind Date: status transitions must go through Cloud Functions (join / rejoin / accept / decline).
+    function blindDateProfileIsActive(uid) {
+      return exists(/databases/$(database)/documents/blindDateProfiles/$(uid)) &&
+        get(/databases/$(database)/documents/blindDateProfiles/$(uid)).data.status in ['active', 'ACTIVE'];
+    }
+
+    // Rejoin hold: block new invites until partner rejoins or 3 days after matchReleasedAt.
+    function blindDateSenderCanInvite(senderUid) {
+      let profilePath = /databases/$(database)/documents/blindDateProfiles/$(senderUid);
+      return exists(profilePath) && (
+        !('formerMatchedPartnerId' in get(profilePath).data) ||
+        get(profilePath).data.get('formerMatchedPartnerId', null) == null ||
+        (
+          ('matchReleasedAt' in get(profilePath).data) &&
+          request.time >= get(profilePath).data.matchReleasedAt + duration.value(3, 'd')
+        )
+      );
+    }
+
+    function isSafeBlindDateProfileClientPatch() {
+      return !request.writeFields.hasAny([
+        'status',
+        'userId',
+        'createdAt',
+        'formerMatchedPartnerId',
+        'matchedPartnerId',
+        'matchedChatId',
+        'matchReleasedAt',
+        'matchHoldExpiredAt',
+        'partnerRejoinedAt'
+      ]);
+    }
+
+    function userCanAccessDating(uid) {
+      let userPath = /databases/$(database)/documents/users/$(uid);
+      let userData = exists(userPath) ? get(userPath).data : {};
+      return exists(userPath)
+        && ('birthDate' in userData)
+        && userData.get('canAccessDating', true) != false
+        && userData.get('isMinor', false) != true
+        && userData.get('requiresParentalConsent', false) != true;
+    }
+
+    function isSafeDatingProfilePayload() {
+      return !request.resource.data.keys().hasAny(['phone']);
+    }
+
+    function isSafeBlindDateInvitationResend(senderUid, recipientUid) {
+      return senderUid is string
+        && recipientUid is string
+        && senderUid.size() > 0
+        && recipientUid.size() > 0
+        && senderUid != recipientUid
+        && request.resource.data.senderId == senderUid
+        && request.resource.data.recipientId == recipientUid
+        && request.resource.data.status == 'pending'
+        && resource.data.status in ['declined', 'DECLINED']
+        && userCanAccessDating(senderUid)
+        && blindDateProfileIsActive(senderUid)
+        && blindDateProfileIsActive(recipientUid)
+        && blindDateSenderCanInvite(senderUid)
+        && !hasUserBlocked(recipientUid, senderUid)
+        && !hasUserBlocked(senderUid, recipientUid);
+    }
+
+    // Chats: treat users in exitedParticipantIds as no longer authorized (prevents modified clients
+    // from continuing to read messages/calls after leaving a group).
+    function exitedParticipantIdsFrom(data) {
+      return (('exitedParticipantIds' in data) && (data.exitedParticipantIds is list))
+        ? data.exitedParticipantIds
+        : [];
+    }
+
+    function isActiveChatParticipant(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      let isDirect = inferredDirectChat(chat);
       return isSignedIn()
-        && request.auth.uid == senderId
+        && (request.auth.uid in chat.participants)
+        // Only treat `exitedParticipantIds` as authoritative for group chats.
+        && (isDirect || !(request.auth.uid in exitedParticipantIdsFrom(chat)))
+        && !isDirectChatBlocked(chat);
+    }
+
+    function isActiveChatParticipantAfter(chatId) {
+      let chat = getAfter(/databases/$(database)/documents/chats/$(chatId)).data;
+      let isDirect = inferredDirectChat(chat);
+      return isSignedIn()
+        && existsAfter(/databases/$(database)/documents/chats/$(chatId))
+        && (request.auth.uid in chat.participants)
+        // Only treat `exitedParticipantIds` as authoritative for group chats.
+        && (isDirect || !(request.auth.uid in exitedParticipantIdsFrom(chat)))
+        && !isDirectChatBlocked(chat);
+    }
+
+    function canReadChatHistory(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      let isDirect = inferredDirectChat(chat);
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/chats/$(chatId))
+        && (request.auth.uid in chat.participants)
+        // Group exits hide the conversation history. Direct chat blocks still prevent writes/calls,
+        // but do not poison inbox/list queries for existing threads.
+        && (isDirect || !(request.auth.uid in exitedParticipantIdsFrom(chat)));
+    }
+
+    function hasUserBlocked(blockerUid, blockedUid) {
+      return blockerUid is string
+        && blockedUid is string
+        && (
+          exists(/databases/$(database)/documents/users/$(blockerUid)/blocked_users/$(blockedUid)) ||
+          exists(/databases/$(database)/documents/users/$(blockerUid)/blockedUsers/$(blockedUid))
+        );
+    }
+
+    // Android / legacy clients sometimes omit `chatType` or use different casing.
+    // Treat explicit `group` as group; otherwise two-participant chats behave as direct for exit + block rules.
+    function isExplicitGroupChatType(data) {
+      return ('chatType' in data) && data.chatType is string && (
+        data.chatType == 'group' ||
+        data.chatType == 'Group' ||
+        data.chatType == 'GROUP'
+      );
+    }
+
+    function isExplicitDirectChatType(data) {
+      return ('chatType' in data) && data.chatType is string && (
+        data.chatType == 'direct' ||
+        data.chatType == 'Direct' ||
+        data.chatType == 'DIRECT'
+      );
+    }
+
+    function inferredDirectChat(data) {
+      let participants = (('participants' in data) && (data.participants is list)) ? data.participants : [];
+      return isExplicitDirectChatType(data)
+        || (!isExplicitGroupChatType(data) && participants.size() == 2);
+    }
+
+    function isDirectChatBlocked(data) {
+      let participants = (('participants' in data) && (data.participants is list)) ? data.participants : [];
+      let firstUid = participants.size() >= 1 ? participants[0] : "";
+      let secondUid = participants.size() >= 2 ? participants[1] : "";
+      return inferredDirectChat(data)
+        && participants.size() == 2
+        && (
+          hasUserBlocked(firstUid, secondUid) ||
+          hasUserBlocked(secondUid, firstUid)
+        );
+    }
+
+    function hasPendingChatInvitation(senderUid, recipientUid) {
+      let primaryPath = /databases/$(database)/documents/users/$(recipientUid)/invitations/$(senderUid);
+      let legacyPath = /databases/$(database)/documents/users/$(recipientUid)/chat_invitations/$(senderUid);
+      return senderUid is string
+        && recipientUid is string
+        && senderUid.size() > 0
+        && recipientUid.size() > 0
+        && (
+          (
+            exists(primaryPath) &&
+            get(primaryPath).data.status in ['pending', 'PENDING'] &&
+            get(primaryPath).data.senderId == senderUid
+          ) ||
+          (
+            exists(legacyPath) &&
+            get(legacyPath).data.status in ['pending', 'PENDING', 'new', 'NEW'] &&
+            (
+              !('senderId' in get(legacyPath).data) ||
+              get(legacyPath).data.senderId == senderUid
+            )
+            )
+        );
+    }
+
+    function isSafeChatInvitationCreate(recipientUid, senderUid) {
+      return recipientUid is string
+        && senderUid is string
+        && recipientUid.size() > 0
+        && senderUid.size() > 0
+        && recipientUid != senderUid
         && request.resource.data.keys().hasOnly([
           'senderId',
           'senderName',
-          'inviterName',
           'senderProfilePicUrl',
           'senderProfileImageUrl',
+          'senderAvatarUrl',
           'status',
+          'source',
           'timestamp',
           'context'
         ])
-        && request.resource.data.keys().hasAll(['senderId', 'status', 'timestamp', 'context'])
-        && request.resource.data.senderId == senderId
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.senderId == senderUid
         && request.resource.data.status == 'pending'
-        && request.resource.data.timestamp == request.time
-        && request.resource.data.context is string
-        && request.resource.data.context.size() > 0
-        && request.resource.data.context.size() <= 500
-        && (
-          ('senderName' in request.resource.data &&
-            request.resource.data.senderName is string &&
-            request.resource.data.senderName.size() > 0 &&
-            request.resource.data.senderName.size() <= 120) ||
-          ('inviterName' in request.resource.data &&
-            request.resource.data.inviterName is string &&
-            request.resource.data.inviterName.size() > 0 &&
-            request.resource.data.inviterName.size() <= 120)
-        )
+        && (!('senderName' in request.resource.data) || currentUserPublicNameMatches(request.resource.data.senderName))
         && (!('senderProfilePicUrl' in request.resource.data) ||
           request.resource.data.senderProfilePicUrl == null ||
-          (request.resource.data.senderProfilePicUrl is string &&
-            request.resource.data.senderProfilePicUrl.size() <= 2048))
+          request.resource.data.senderProfilePicUrl is string)
         && (!('senderProfileImageUrl' in request.resource.data) ||
           request.resource.data.senderProfileImageUrl == null ||
-          (request.resource.data.senderProfileImageUrl is string &&
-            request.resource.data.senderProfileImageUrl.size() <= 2048));
+          request.resource.data.senderProfileImageUrl is string)
+        && (!('senderAvatarUrl' in request.resource.data) ||
+          request.resource.data.senderAvatarUrl == null ||
+          request.resource.data.senderAvatarUrl is string)
+        && (!('source' in request.resource.data) || request.resource.data.source is string)
+        && (!('timestamp' in request.resource.data) || request.resource.data.timestamp is timestamp)
+        && (!('context' in request.resource.data) || request.resource.data.context is string)
+        && (userCanAccessDating(request.auth.uid) || chatInvitationSkipsDatingGate())
+        && !hasUserBlocked(recipientUid, senderUid)
+        && !hasUserBlocked(senderUid, recipientUid);
     }
 
-    function isValidChatInvitationRecipientUpdate(userId) {
-      return isOwner(userId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'lastUpdatedAt'])
-        && request.resource.data.status in ['accepted', 'declined', 'rejected']
-        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastUpdatedAt']) ||
-          request.resource.data.lastUpdatedAt == request.time);
+    // Social Inbox invites from known product surfaces — not dating-gated.
+    // Use exact labels / anchored prefixes only; never trust broad wildcards (e.g. "User Directory foo").
+    function chatInvitationSkipsDatingGate() {
+      return ('context' in request.resource.data)
+        && request.resource.data.context is string
+        && (
+          (
+            request.resource.data.context == 'User Directory'
+            && 'source' in request.resource.data
+            && request.resource.data.source == 'chat'
+          )
+          || request.resource.data.context == 'MindLoom'
+          || request.resource.data.context.matches('^Ad: .{1,120}$')
+          || request.resource.data.context.matches('^Garage Shop: .{1,120}$')
+          || request.resource.data.context.matches('^Marketplace: .{1,120}$')
+        );
     }
 
-    function isDatingEligibleAccount(userId) {
-      return exists(/databases/$(database)/documents/users/$(userId))
-        && isDatingEligibleUserData(get(/databases/$(database)/documents/users/$(userId)).data);
+    function currentUserPublicNameMatches(value) {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      let userData = exists(userPath) ? get(userPath).data : {};
+      return value is string
+        && value.size() > 0
+        && value.size() <= 120
+        && exists(userPath)
+        && (
+          (('name' in userData) && userData.name == value) ||
+          (('username' in userData) && userData.username == value) ||
+          (('email' in userData) && userData.email == value)
+        );
     }
 
-    function isDatingEligibleUserData(userData) {
-      return (
-        !('profileStatus' in userData) ||
-        !(userData.profileStatus is string) ||
-        userData.profileStatus.matches('(?i)^active$')
-      ) && (
-        (('canAccessDating' in userData) && userData.canAccessDating == true) ||
-        (!('canAccessDating' in userData) &&
-          ('isMinor' in userData) &&
-          userData.isMinor == false)
-      );
+    function canCreateDirectChatFromInvitation() {
+      let participants = request.resource.data.participants;
+      let firstUid = participants[0];
+      let secondUid = participants[1];
+      return request.resource.data.chatType == 'direct'
+        && participants.size() == 2
+        && firstUid is string
+        && secondUid is string
+        && firstUid != secondUid
+        && !hasUserBlocked(firstUid, secondUid)
+        && !hasUserBlocked(secondUid, firstUid)
+        && (
+          (request.auth.uid == firstUid && hasPendingChatInvitation(secondUid, firstUid)) ||
+          (request.auth.uid == secondUid && hasPendingChatInvitation(firstUid, secondUid))
+        );
     }
 
-    function isBlindDateProfileActive(userId) {
-      return exists(/databases/$(database)/documents/blindDateProfiles/$(userId))
-        && get(/databases/$(database)/documents/blindDateProfiles/$(userId)).data.status == 'active';
+    function canCreateGroupChat() {
+      return request.resource.data.chatType == 'group'
+        && request.resource.data.groupCreatorId == request.auth.uid
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() >= 2
+        && request.auth.uid in request.resource.data.participants
+        && (
+          !('exitedParticipantIds' in request.resource.data) ||
+          request.resource.data.exitedParticipantIds == []
+        );
     }
 
-    function blindDatePreferenceAcceptsGender(preference, gender) {
-      return preference == 'EVERYONE' ||
-        (preference == 'MEN' && gender == 'MALE') ||
-        (preference == 'WOMEN' && gender == 'FEMALE');
-    }
-
-    function isBlindDatePreferenceCompatible(senderId, recipientId) {
-      let sender = get(/databases/$(database)/documents/blindDateProfiles/$(senderId)).data;
-      let recipient = get(/databases/$(database)/documents/blindDateProfiles/$(recipientId)).data;
-      return blindDatePreferenceAcceptsGender(
-        sender.get('lookingFor', 'EVERYONE'),
-        recipient.get('gender', 'OTHER')
-      ) && blindDatePreferenceAcceptsGender(
-        recipient.get('lookingFor', 'EVERYONE'),
-        sender.get('gender', 'OTHER')
-      );
-    }
-
-    function hasDatingBlock(blockerId, targetId) {
-      let privacyPath = /databases/$(database)/documents/users/$(blockerId)/settings/chat_privacy;
-      return exists(privacyPath) && targetId in get(privacyPath).data.get('blockedUserIds', []);
-    }
-
-    function isValidBlindDateInvitePayload(senderId, recipientId) {
-      return request.resource.data.keys().hasOnly([
-          'senderId',
-          'senderName',
-          'senderProfilePictureUrl',
-          'recipientId',
-          'recipientName',
-          'recipientProfilePictureUrl',
-          'status',
-          'matchedChatId',
-          'sentAt',
-          'updatedAt',
-          'respondedAt'
-        ])
-        && request.resource.data.keys().hasAll([
-          'senderId',
-          'recipientId',
-          'status',
-          'matchedChatId',
-          'sentAt',
+    function isSafeChatPreviewPatch() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly([
+          'lastMessage',
+          'lastMessageText',
+          'lastMessageTimestamp',
+          'lastMessageId',
+          'lastMessageSenderId',
+          'lastMessageType',
+          'lastMessageDelivered',
+          'lastMessageRead',
           'updatedAt'
         ])
-        && request.resource.data.senderId == senderId
-        && request.resource.data.recipientId == recipientId
-        && request.resource.data.status == 'pending'
-        && request.resource.data.matchedChatId == ''
-        && request.resource.data.sentAt == request.time
-        && request.resource.data.updatedAt == request.time
-        && (!('respondedAt' in request.resource.data) || request.resource.data.respondedAt == null)
-        && request.resource.data.senderName is string
-        && request.resource.data.senderName.size() > 0
-        && request.resource.data.senderName.size() <= 120
-        && request.resource.data.recipientName is string
-        && request.resource.data.recipientName.size() > 0
-        && request.resource.data.recipientName.size() <= 120
-        && request.resource.data.senderProfilePictureUrl is string
-        && request.resource.data.senderProfilePictureUrl.size() <= 2048
-        && request.resource.data.recipientProfilePictureUrl is string
-        && request.resource.data.recipientProfilePictureUrl.size() <= 2048;
+        && (!('lastMessage' in request.resource.data) || request.resource.data.lastMessage is string)
+        && (!('lastMessageText' in request.resource.data) || request.resource.data.lastMessageText is string)
+        && (!('lastMessageId' in request.resource.data) || request.resource.data.lastMessageId is string)
+        && (!('lastMessageType' in request.resource.data) ||
+          request.resource.data.lastMessageType in ['TEXT', 'IMAGE', 'VIDEO', 'AUDIO'])
+        && (!('lastMessageDelivered' in request.resource.data) ||
+          request.resource.data.lastMessageDelivered is bool)
+        && (!('lastMessageRead' in request.resource.data) ||
+          request.resource.data.lastMessageRead is bool)
+        && (!('lastMessageSenderId' in request.resource.data)
+          || request.resource.data.lastMessageSenderId == request.auth.uid);
     }
 
-    function isValidBlindDateInvitationCreate(recipientUserId, senderUserId) {
-      return isSignedIn()
-        && request.auth.uid == senderUserId
-        && recipientUserId != senderUserId
-        && isDatingEligibleAccount(senderUserId)
-        && isDatingEligibleAccount(recipientUserId)
-        && isBlindDateProfileActive(senderUserId)
-        && isBlindDateProfileActive(recipientUserId)
-        && isBlindDatePreferenceCompatible(senderUserId, recipientUserId)
-        && !hasDatingBlock(senderUserId, recipientUserId)
-        && !hasDatingBlock(recipientUserId, senderUserId)
-        && isValidBlindDateInvitePayload(senderUserId, recipientUserId);
+    function isOwnChatExitPatch() {
+      let beforeExited = exitedParticipantIdsFrom(resource.data);
+      let afterExited = exitedParticipantIdsFrom(request.resource.data);
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            'exitedParticipantIds',
+            'lastMessage',
+            'lastMessageText',
+            'lastMessageTimestamp',
+            'lastMessageId',
+            'lastMessageSenderId',
+            'lastMessageType',
+            'lastMessageDelivered',
+            'lastMessageRead',
+            'updatedAt'
+          ])
+        && (!('lastMessage' in request.resource.data) || request.resource.data.lastMessage is string)
+        && (!('lastMessageText' in request.resource.data) || request.resource.data.lastMessageText is string)
+        && (!('lastMessageId' in request.resource.data) || request.resource.data.lastMessageId is string)
+        && (!('lastMessageType' in request.resource.data) ||
+          request.resource.data.lastMessageType in ['TEXT', 'IMAGE', 'VIDEO', 'AUDIO'])
+        && (!('lastMessageDelivered' in request.resource.data) ||
+          request.resource.data.lastMessageDelivered is bool)
+        && (!('lastMessageRead' in request.resource.data) ||
+          request.resource.data.lastMessageRead is bool)
+        && (!('lastMessageSenderId' in request.resource.data)
+          || request.resource.data.lastMessageSenderId == request.auth.uid)
+        && beforeExited is list
+        && afterExited is list
+        && request.auth.uid in afterExited
+        && !(request.auth.uid in beforeExited)
+        && afterExited.hasAll(beforeExited)
+        && afterExited.size() == beforeExited.size() + 1;
     }
 
-    function userProfileChangedKeys() {
-      return request.resource.data.diff(resource.data).affectedKeys();
+    function isUpdatedAtTouchOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']);
     }
 
-    function isSafeUserProfileUpdate() {
-      return userProfileChangedKeys().hasOnly([
+    function isStandardSelfServiceRole(role) {
+      return role in ['user', 'volunteer', 'organizer', 'employer'];
+    }
+
+    function existingCanonicalRoleAllows(role, userId) {
+      return (
+          ('role' in resource.data) &&
+          resource.data.role == role
+        ) ||
+        (
+          !('role' in resource.data) &&
+          (
+            (('userRole' in resource.data) && resource.data.userRole == role) ||
+            (('userType' in resource.data) && resource.data.userType == role) ||
+            (role == 'organizer' && exists(/databases/$(database)/documents/organizers/$(userId))) ||
+            (role == 'employer' && exists(/databases/$(database)/documents/employers/$(userId))) ||
+            (role in ['user', 'volunteer'] &&
+              !exists(/databases/$(database)/documents/organizers/$(userId)) &&
+              !exists(/databases/$(database)/documents/employers/$(userId)))
+          )
+        );
+    }
+
+    function isSafeSelfRoleAliasSync(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let role = request.resource.data.role;
+      return isOwner(userId)
+        && changed.hasOnly(['role', 'userRole', 'userType', 'updatedAt'])
+        && role is string
+        && request.resource.data.userRole == role
+        && request.resource.data.userType == role
+        && isStandardSelfServiceRole(role)
+        && existingCanonicalRoleAllows(role, userId);
+    }
+
+    function userClientCreateFields() {
+      return [
+        'uid',
+        'email',
         'name',
         'username',
-        'phone',
         'phoneNumber',
-        'email',
-        'emailVerified',
-        'profileImageUrl',
-        'profilePictureUrl',
         'country',
-        'bio',
+        'userType',
+        'role',
+        'userRole',
+        'profileStatus',
+        'emailVerified',
+        'phoneVerified',
+        'phoneVerificationMethod',
+        'wallet',
+        'createdAt',
+        'updatedAt',
         'organizationName',
-        'datingContactPhone',
-        'fcmToken',
-        // Presence is client-authored status only; it cannot change roles or wallet data.
-        'presenceState',
-        'lastActiveAt',
-        'updatedAt'
-      ])
-        && (!userProfileChangedKeys().hasAny(['datingContactPhone']) ||
-          (request.resource.data.datingContactPhone is string &&
-            request.resource.data.datingContactPhone.size() >= 7 &&
-            request.resource.data.datingContactPhone.size() <= 32));
+        'companyName',
+        'businessRegistered',
+        'birthDate',
+        'isMinor',
+        'requiresParentalConsent',
+        'canAccessDating'
+      ];
     }
 
-    function isInitialWalletBootstrap() {
-      return userProfileChangedKeys().hasOnly(['wallet'])
-        && !('wallet' in resource.data)
+    function authEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function hasSafeInitialUserWallet() {
+      return ('wallet' in request.resource.data)
         && request.resource.data.wallet is map
-        && request.resource.data.wallet.balance == 0
-        && request.resource.data.wallet.currency is string;
+        && request.resource.data.wallet.keys().hasOnly(['balance'])
+        && request.resource.data.wallet.balance == 0;
+    }
+
+    function hasSafeInitialVerificationFields() {
+      return (!('emailVerified' in request.resource.data) ||
+          (
+            request.resource.data.emailVerified is bool &&
+            (
+              request.resource.data.emailVerified == false ||
+              (request.resource.data.emailVerified == true && authEmailVerified())
+            )
+          ))
+        && (!('emailVerifiedAt' in request.resource.data))
+        && (!('phoneVerified' in request.resource.data) || request.resource.data.phoneVerified == false)
+        && (!('phoneVerifiedAt' in request.resource.data))
+        && (!('phoneVerifiedNumber' in request.resource.data))
+        && (!('phoneVerifiedDigits' in request.resource.data))
+        && (!('phoneVerificationMethod' in request.resource.data) || request.resource.data.phoneVerificationMethod == null)
+        && (!('mobileMoneyPhoneOtpVerifiedAt' in request.resource.data))
+        && (!('verificationEmailLastSentAtMs' in request.resource.data));
+    }
+
+    function hasNoPrivilegedUserBootstrapFields() {
+      return !request.resource.data.keys().hasAny([
+        'fcmToken',
+        'fcmTokenUpdatedAt',
+        'apnsVoipToken',
+        'apnsVoipTokenUpdatedAt',
+        'paymentCustomerId',
+        'payoutAccountId',
+        'stripeAccountId',
+        'chargeCustomerId',
+        'lastFundingSource',
+        'agentEarnings',
+        'supportAccess',
+        'isStaff',
+        'staffAccessScope',
+        'staffOnboardingStatus',
+        'ownerBootstrappedAt',
+        'grantedByOwnerId',
+        'grantedAdminAt',
+        'supportGrantedAt',
+        'supportGrantedBy',
+        'supportNote',
+        'mobileMoneyPhoneOtpLastSentPhone',
+        'mobileMoneyPhoneOtpLastSentPhoneDigits',
+        'mobileMoneyPhoneOtpVerifiedPhone',
+        'mobileMoneyPhoneOtpVerifiedPhoneDigits',
+        'accountType',
+        'profileType'
+      ]);
+    }
+
+    function isSafeUserCreate(userId) {
+      let data = request.resource.data;
+      let role = data.role;
+      return isOwner(userId)
+        && data.keys().hasOnly(userClientCreateFields())
+        && ('uid' in data)
+        && data.uid == userId
+        && ('email' in data)
+        && data.email is string
+        && ('name' in data)
+        && data.name is string
+        && (!('username' in data) || data.username is string)
+        && (!('phoneNumber' in data) || data.phoneNumber is string)
+        && (!('country' in data) || data.country is string)
+        && role in ['user', 'organizer', 'employer', 'volunteer']
+        && (!('userRole' in data) || data.userRole == role)
+        && (!('userType' in data) || data.userType == role)
+        && (!('profileStatus' in data) || data.profileStatus == 'active')
+        && (!('organizationName' in data) || data.organizationName is string)
+        && (!('companyName' in data) || data.companyName is string)
+        && (!('businessRegistered' in data) || data.businessRegistered == false)
+        && (!('birthDate' in data) || data.birthDate is timestamp)
+        && (!('isMinor' in data) || data.isMinor is bool)
+        && (!('requiresParentalConsent' in data) || data.requiresParentalConsent is bool)
+        && (!('canAccessDating' in data) || data.canAccessDating is bool)
+        && hasSafeInitialUserWallet()
+        && hasSafeInitialVerificationFields()
+        && hasNoPrivilegedUserBootstrapFields();
+    }
+
+    function isSafeUserProfilePatch() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'uid',
+        'email',
+        'createdAt',
+        'role',
+        'userRole',
+        'userType',
+        'accountType',
+        'profileType',
+        'wallet',
+        'agentEarnings',
+        'fcmToken',
+        'fcmTokenUpdatedAt',
+        'apnsVoipToken',
+        'apnsVoipTokenUpdatedAt',
+        'emailVerified',
+        'emailVerifiedAt',
+        'phoneVerified',
+        'phoneVerifiedAt',
+        'phoneVerifiedNumber',
+        'phoneVerifiedDigits',
+        'phoneVerificationMethod',
+        'mobileMoneyPhoneOtpVerifiedAt',
+        'mobileMoneyPhoneOtpLastSentPhone',
+        'mobileMoneyPhoneOtpLastSentPhoneDigits',
+        'mobileMoneyPhoneOtpVerifiedPhone',
+        'mobileMoneyPhoneOtpVerifiedPhoneDigits',
+        'verificationEmailLastSentAtMs',
+        'paymentCustomerId',
+        'payoutAccountId',
+        'stripeAccountId',
+        'chargeCustomerId',
+        'lastFundingSource',
+        'supportAccess',
+        'isStaff',
+        'staffAccessScope',
+        'staffOnboardingStatus',
+        'ownerBootstrappedAt',
+        'grantedByOwnerId',
+        'grantedAdminAt',
+        'supportGrantedAt',
+        'supportGrantedBy',
+        'supportNote',
+        'birthDate',
+        'isMinor',
+        'requiresParentalConsent',
+        'canAccessDating',
+        'businessRegistered'
+      ]);
+    }
+
+    function messageReceiptMap(data, field) {
+      return ((field in data) && (data[field] is map)) ? data[field] : {};
+    }
+
+    function isSelfReceiptMapPatch(field) {
+      let beforeMap = messageReceiptMap(resource.data, field);
+      let afterMap = messageReceiptMap(request.resource.data, field);
+      // Only the current user may add/update their receipt key. Do not use
+      // beforeMap.diff(afterMap).affectedKeys().hasOnly([]): for an empty
+      // before map, adding the first key makes affectedKeys non-empty (false deny).
+      // addedKeys on before→after lists keys that were in before but not after (removals).
+      return afterMap.diff(beforeMap).affectedKeys().hasOnly([request.auth.uid])
+        && beforeMap.diff(afterMap).addedKeys().hasOnly([])
+        && (request.auth.uid in afterMap);
+    }
+
+    function isMessageReceiptPatch() {
+      // Only allow a participant to add their own delivery/read receipt key.
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['deliveredTo', 'readBy', 'isRead'])
+        && (!changed.hasAny(['deliveredTo']) || isSelfReceiptMapPatch('deliveredTo'))
+        && (!changed.hasAny(['readBy']) || isSelfReceiptMapPatch('readBy'))
+        && (
+          !changed.hasAny(['isRead']) ||
+          (
+            request.resource.data.isRead == true &&
+            resource.data.senderId != request.auth.uid &&
+            isSelfReceiptMapPatch('readBy')
+          )
+        );
+    }
+
+    function chatAttachmentRelativePath(chatId) {
+      return 'chat_attachments/' + chatId + '/[^/]+\\.(jpg|jpeg|png|heic|heif|mp4|mov|m4v|3gp|3gpp|webm|m4a|aac)';
+    }
+
+    function hasValidChatAttachmentPath(data, chatId) {
+      let re = chatAttachmentRelativePath(chatId);
+      return (
+          (('storagePath' in data) && data.storagePath is string && data.storagePath.matches(re))
+        ) || (
+          (('mediaStoragePath' in data) && data.mediaStoragePath is string && data.mediaStoragePath.matches(re))
+        );
+    }
+
+    function isEmptyChatMedia(data) {
+      let noUrl = !('mediaUrl' in data) || data.mediaUrl == null;
+      let noPaths = (!('mediaStoragePath' in data) || data.mediaStoragePath == null)
+        && (!('storagePath' in data) || data.storagePath == null);
+      let noLegacyType = !('mediaType' in data) || data.mediaType == null;
+      let mt = (!('messageType' in data) || data.messageType == null) ? 'TEXT' : data.messageType;
+      return noUrl && noPaths && noLegacyType && mt == 'TEXT';
+    }
+
+    function isCompleteChatMedia(data, chatId) {
+      let typeOk = (
+          (('mediaType' in data) && data.mediaType in ['image', 'video', 'audio'])
+        ) || (
+          (('messageType' in data) && data.messageType in ['IMAGE', 'VIDEO', 'AUDIO'])
+        );
+      return typeOk
+        && hasValidChatAttachmentPath(data, chatId)
+        && ('mediaUrl' in data)
+        && data.mediaUrl is string
+        && data.mediaUrl.size() > 0
+        && data.mediaUrl.size() <= 4000;
+    }
+
+    function isValidChatMessageCreate(chatId) {
+      let keys = request.resource.data.keys();
+      return keys.hasOnly([
+          'senderId',
+          'senderDisplayName',
+          'messageText',
+          'text',
+          'timestamp',
+          'isRead',
+          'deliveredTo',
+          'readBy',
+          'mediaUrl',
+          'mediaType',
+          'mediaStoragePath',
+          'storagePath',
+          'messageType',
+          'clientSentAtMs',
+          'replyToMessageId',
+          'replyToText',
+          'replyToSenderId',
+          'replyToSenderName',
+          'isDeleted'
+        ])
+        && request.resource.data.senderId == request.auth.uid
+        && (!('senderDisplayName' in request.resource.data) ||
+          currentUserPublicNameMatches(request.resource.data.senderDisplayName))
+        && request.resource.data.messageText is string
+        && request.resource.data.messageText.size() <= 2000
+        && (request.resource.data.messageText.size() > 0 || isCompleteChatMedia(request.resource.data, chatId))
+        && (!('text' in request.resource.data) || request.resource.data.text is string)
+        && (!('isDeleted' in request.resource.data) || request.resource.data.isDeleted == false)
+        && (isEmptyChatMedia(request.resource.data) || isCompleteChatMedia(request.resource.data, chatId))
+        && (!('messageType' in request.resource.data) ||
+          request.resource.data.messageType in ['TEXT', 'IMAGE', 'VIDEO', 'AUDIO'])
+        && (!('clientSentAtMs' in request.resource.data) ||
+          (
+            (request.resource.data.clientSentAtMs is int || request.resource.data.clientSentAtMs is float)
+            && request.resource.data.clientSentAtMs >= 0
+          ))
+        && (!('mediaStoragePath' in request.resource.data)
+          || request.resource.data.mediaStoragePath == null
+          || request.resource.data.mediaStoragePath is string)
+        && (!('storagePath' in request.resource.data)
+          || request.resource.data.storagePath == null
+          || request.resource.data.storagePath is string)
+        && isValidReplyReference(chatId)
+        && (!('replyToMessageId' in request.resource.data) || request.resource.data.replyToMessageId is string)
+        && (!('replyToText' in request.resource.data) ||
+          (request.resource.data.replyToText is string && request.resource.data.replyToText.size() <= 160))
+        && (!('replyToSenderId' in request.resource.data) || request.resource.data.replyToSenderId is string)
+        && (!('replyToSenderName' in request.resource.data) ||
+          (request.resource.data.replyToSenderName is string && request.resource.data.replyToSenderName.size() <= 120));
+    }
+
+    function isValidReplyReference(chatId) {
+      let replyId = (('replyToMessageId' in request.resource.data) &&
+        request.resource.data.replyToMessageId is string) ? request.resource.data.replyToMessageId : "";
+      let hasReply = replyId.size() > 0;
+      let replyPath = /databases/$(database)/documents/chats/$(chatId)/messages/$(replyId);
+      return !hasReply ||
+        (
+          exists(replyPath) &&
+          get(replyPath).data.senderId == request.resource.data.replyToSenderId &&
+          (!('isDeleted' in get(replyPath).data) || get(replyPath).data.isDeleted != true)
+        );
+    }
+
+    function isOwnMessageDeletePatch() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return resource.data.senderId == request.auth.uid
+        && request.resource.data.senderId == resource.data.senderId
+        && changed.hasOnly([
+          'isDeleted',
+          'deletedAt',
+          'deletedBy',
+          'messageText',
+          'text',
+          'mediaUrl',
+          'mediaType',
+          'mediaStoragePath',
+          'storagePath',
+          'messageType',
+          'updatedAt'
+        ])
+        && request.resource.data.isDeleted == true
+        && request.resource.data.deletedBy == request.auth.uid
+        && request.resource.data.messageText == 'Message deleted'
+        && (!('text' in request.resource.data) || request.resource.data.text == 'Message deleted')
+        && (!('mediaUrl' in request.resource.data) || request.resource.data.mediaUrl == null)
+        && (!('mediaType' in request.resource.data) || request.resource.data.mediaType == null)
+        && (!('mediaStoragePath' in request.resource.data) || request.resource.data.mediaStoragePath == null)
+        && (!('storagePath' in request.resource.data) || request.resource.data.storagePath == null)
+        && (!('messageType' in request.resource.data) || request.resource.data.messageType == null);
+    }
+
+    function canCreateChatCallFor(chatId, receiverId) {
+      let chatPath = /databases/$(database)/documents/chats/$(chatId);
+      return chatId is string
+        && chatId.size() > 0
+        && exists(chatPath)
+        && isActiveChatParticipant(chatId)
+        && !isDirectChatBlocked(get(chatPath).data)
+        && receiverId is string
+        && receiverId.size() > 0
+        && receiverId in get(chatPath).data.participants
+        && !(receiverId in exitedParticipantIdsFrom(get(chatPath).data));
+    }
+
+    function isCallSessionChatAllowed(data) {
+      let chatId = (('chatId' in data) && (data.chatId is string)) ? data.chatId : "";
+      let chatPath = /databases/$(database)/documents/chats/$(chatId);
+      return chatId.size() > 0
+        && exists(chatPath)
+        && !isDirectChatBlocked(get(chatPath).data);
+    }
+
+    function isCallSessionChatParticipant(data) {
+      let chatId = (('chatId' in data) && (data.chatId is string)) ? data.chatId : "";
+      let chatPath = /databases/$(database)/documents/chats/$(chatId);
+      let chat = get(chatPath).data;
+      let isDirect = inferredDirectChat(chat);
+      return isSignedIn()
+        && chatId.size() > 0
+        && exists(chatPath)
+        && (request.auth.uid in chat.participants)
+        && (isDirect || !(request.auth.uid in exitedParticipantIdsFrom(chat)))
+        && !isDirectChatBlocked(chat);
+    }
+
+    function acceptedCallParticipantsFrom(data) {
+      return (('acceptedParticipantIds' in data) && (data.acceptedParticipantIds is list))
+        ? data.acceptedParticipantIds
+        : [];
+    }
+
+    function declinedCallParticipantsFrom(data) {
+      return (('declinedParticipantIds' in data) && (data.declinedParticipantIds is list))
+        ? data.declinedParticipantIds
+        : [];
+    }
+
+    function endedCallParticipantsFrom(data) {
+      return (('endedParticipantIds' in data) && (data.endedParticipantIds is list))
+        ? data.endedParticipantIds
+        : [];
+    }
+
+    function isValidCallSessionSeed(data) {
+      let chatPath = /databases/$(database)/documents/chats/$(data.chatId);
+      let chat = get(chatPath).data;
+      let participants = (('participants' in chat) && (chat.participants is list)) ? chat.participants : [];
+      let exited = exitedParticipantIdsFrom(chat);
+      let participantIds = (('participantIds' in data) && (data.participantIds is list)) ? data.participantIds : [];
+      let accepted = acceptedCallParticipantsFrom(data);
+      let declined = declinedCallParticipantsFrom(data);
+      let ended = endedCallParticipantsFrom(data);
+      let isDirect = inferredDirectChat(chat);
+      return ('participantIds' in data)
+        && (data.participantIds is list)
+        && participantIds.size() >= 1
+        && participantIds.hasOnly(participants)
+        && !participantIds.hasAny(exited)
+        && !(request.auth.uid in participantIds)
+        && (data.receiverId in participantIds)
+        && (!isDirect || participantIds.size() == 1)
+        && accepted is list
+        && accepted.size() == 1
+        && accepted[0] == request.auth.uid
+        && declined is list
+        && declined.size() == 0
+        && ended is list
+        && ended.size() == 0;
+    }
+
+    // Call history is denormalized by Cloud Functions, but the initial row is
+    // created atomically with its call session by the caller. Requiring the
+    // matching after-state blocks fabricated history rows from being fanned out
+    // to other conversation members.
+    function isValidChatCallLogSeed(chatId, callId) {
+      let sessionPath = /databases/$(database)/documents/call_sessions/$(callId);
+      let session = getAfter(sessionPath).data;
+      let log = request.resource.data;
+      return existsAfter(sessionPath)
+        && log.keys().hasOnly([
+          'chatId',
+          'agoraChannelName',
+          'callerId',
+          'receiverId',
+          'participantIds',
+          'isGroupCall',
+          'groupName',
+          'callType',
+          'status',
+          'durationSeconds',
+          'startedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && session.chatId == chatId
+        && session.callerId == request.auth.uid
+        && log.chatId == chatId
+        && log.callerId == session.callerId
+        && log.receiverId == session.receiverId
+        && log.participantIds == session.participantIds
+        && log.agoraChannelName == session.agoraChannelName
+        && log.isGroupCall == isGroupCallSession(session)
+        && log.groupName == session.groupName
+        && log.callType == session.callType
+        && log.status == 'ringing'
+        && log.durationSeconds == 0;
+    }
+
+    function callSessionStatus(data) {
+      return (('status' in data) && (data.status is string)) ? data.status : "";
+    }
+
+    function isGroupCallSession(data) {
+      let participantIds = (('participantIds' in data) && (data.participantIds is list))
+        ? data.participantIds
+        : [];
+      return (('isGroup' in data) && data.isGroup == true) || participantIds.size() > 1;
+    }
+
+    function isValidCallSessionStatusTransition() {
+      let beforeStatus = callSessionStatus(resource.data);
+      let afterStatus = callSessionStatus(request.resource.data);
+      let callerId = (('callerId' in resource.data) && (resource.data.callerId is string))
+        ? resource.data.callerId
+        : "";
+      let isGroup = isGroupCallSession(resource.data);
+      return beforeStatus == afterStatus
+        || (
+          beforeStatus == 'ringing'
+          && (
+            (!isGroup && afterStatus == 'accepted')
+            || (!isGroup && afterStatus == 'declined' && request.auth.uid != callerId)
+            || (afterStatus == 'ended' && (!isGroup || request.auth.uid == callerId))
+            || (afterStatus == 'missed' && request.auth.uid == callerId)
+          )
+        )
+        || (
+          beforeStatus == 'accepted'
+          && afterStatus == 'ended'
+          && (!isGroup || request.auth.uid == callerId)
+        );
+    }
+
+    function callParticipantListUnchangedOrSelfAdded(beforeList, afterList) {
+      return beforeList is list
+        && afterList is list
+        && (
+          afterList == beforeList ||
+          (
+            afterList.hasAll(beforeList)
+            && afterList.size() == beforeList.size() + 1
+            // A participant may record only their own response, never add a different user.
+            && !(request.auth.uid in beforeList)
+            && request.auth.uid in afterList
+          )
+        );
+    }
+
+    function isCallSessionStatePatch() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly([
+          'status',
+          'acceptedParticipantIds',
+          'declinedParticipantIds',
+          'endedParticipantIds',
+          'answeredAt',
+          'endedAt',
+          'updatedAt'
+        ])
+        && (!changed.hasAny(['status']) || isValidCallSessionStatusTransition())
+        && callParticipantListUnchangedOrSelfAdded(acceptedCallParticipantsFrom(resource.data), acceptedCallParticipantsFrom(request.resource.data))
+        && callParticipantListUnchangedOrSelfAdded(declinedCallParticipantsFrom(resource.data), declinedCallParticipantsFrom(request.resource.data))
+        && callParticipantListUnchangedOrSelfAdded(endedCallParticipantsFrom(resource.data), endedCallParticipantsFrom(request.resource.data))
+        && (
+          !changed.hasAny(['status']) ||
+          request.resource.data.status != 'accepted' ||
+          acceptedCallParticipantsFrom(request.resource.data).size() >= 2
+        )
+        && (
+          !changed.hasAny(['status']) ||
+          !(request.resource.data.status in ['ended', 'declined', 'missed']) ||
+          request.auth.uid in endedCallParticipantsFrom(request.resource.data) ||
+          request.auth.uid in declinedCallParticipantsFrom(request.resource.data)
+        );
     }
 
     // --- DEPOSIT REQUESTS ---
+    // Created and updated only by Cloud Functions (Admin SDK) so clients cannot bypass
+    // server-side funding-method validation or live local-currency quote capture.
     match /deposit_requests/{requestId} {
       allow create: if false;
-      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isWalletAgent() || isPlatformAdmin();
-      allow update: if false;
-      allow delete: if false;
+      allow read: if (isSignedIn() && resource.data.userId == request.auth.uid) || isWalletAgent();
+      allow update, delete: if false;
     }
 
     match /wallets/{userId} {
-      allow get: if isOwner(userId) || isWalletAgent() || isPlatformAdmin();
-      allow list: if false;
+      allow read: if isOwner(userId);
       allow create, update, delete: if false;
     }
 
     match /provider_transactions/{transactionId} {
-      allow read, create, update, delete: if false;
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create, update, delete: if false;
     }
 
     match /provider_webhooks/{webhookId} {
-      allow read, create, update, delete: if false;
+      allow read, write: if false;
+    }
+
+    match /user_private/{userId} {
+      allow read, write: if false;
     }
 
     // --- USER-SPECIFIC DATA ---
     match /users/{userId} {
+      // Root user docs stay readable to signed-in users for directory, chat, and wallet-recipient flows.
+      // Keep sensitive payout/provider fields off the root user doc where possible; prefer subcollections
+      // or callable functions for finance-specific details.
       allow read: if isSignedIn();
 
-      allow create: if isOwner(userId)
-        && request.resource.data.role in ['user', 'organizer', 'employer', 'volunteer']
-        && request.resource.data.wallet.balance == 0;
+      allow create: if isSafeUserCreate(userId);
 
+      // Block privilege and wallet mutations from the client; server uses Admin SDK for balances.
+      // Android may self-heal role/userRole/userType only when it mirrors an existing non-privileged role.
       allow update: if
         (
           isOwner(userId) &&
           (
-            isSafeUserProfileUpdate() ||
-            isInitialWalletBootstrap()
+            isSafeUserProfilePatch() ||
+            isSafeSelfRoleAliasSync(userId)
           )
         );
 
@@ -633,15 +1353,50 @@ service cloud.firestore {
       }
 
       match /blindDateInvitations/{invitationId} {
-        allow create: if isValidBlindDateInvitationCreate(userId, invitationId);
+        allow create: if request.auth.uid == invitationId
+          && userCanAccessDating(request.auth.uid)
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.recipientId == userId
+          && request.resource.data.status == 'pending'
+          && blindDateProfileIsActive(request.auth.uid)
+          && blindDateProfileIsActive(userId)
+          && blindDateSenderCanInvite(request.auth.uid)
+          && !hasUserBlocked(userId, invitationId)
+          && !hasUserBlocked(invitationId, userId);
         allow read: if request.auth.uid == userId;
-        allow update, delete: if false;
+        // Accept/decline must go through Cloud Functions (Admin SDK). Sender may re-send after decline.
+        allow update: if request.auth.uid == invitationId
+          && isSafeBlindDateInvitationResend(invitationId, userId);
+        allow delete: if false;
       }
 
       match /blindDateSentInvitations/{recipientId} {
-        allow create: if isValidBlindDateInvitationCreate(recipientId, userId);
-        allow read: if request.auth.uid == userId;
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.auth.uid == userId
+          && userCanAccessDating(request.auth.uid)
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.recipientId == recipientId
+          && request.resource.data.status == 'pending'
+          && blindDateProfileIsActive(request.auth.uid)
+          && blindDateProfileIsActive(recipientId)
+          && blindDateSenderCanInvite(request.auth.uid)
+          && !hasUserBlocked(recipientId, request.auth.uid)
+          && !hasUserBlocked(request.auth.uid, recipientId);
         allow update, delete: if false;
+      }
+
+      // Denormalized call history for Social Inbox (synced from `chats/{chatId}/call_logs/*` via Cloud Functions).
+      match /call_history/{callLogId} {
+        allow read, list: if isOwner(userId);
+        allow delete: if isOwner(userId);
+        allow create, update: if false;
+      }
+
+      // User-hidden call rows stay tombstoned so Cloud Functions do not re-sync them into `call_history`.
+      match /call_history_hidden/{callLogId} {
+        allow read, list: if isOwner(userId);
+        allow create, update, delete: if isOwner(userId);
       }
 
       match /hostedEvents/{eventId} {
@@ -649,82 +1404,141 @@ service cloud.firestore {
       }
 
       match /beneficiaries/{phone} {
-        allow read, delete: if isOwner(userId);
-        // Creation and updates are server-owned so provider-verification fields
-        // cannot be forged from an Android client.
-        allow create, update: if false;
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isSafeBeneficiaryCreate();
+        allow update: if isOwner(userId) && isSafeBeneficiaryUpdate();
+        allow delete: if isOwner(userId);
       }
 
       match /payment_methods/{methodId} {
         allow read: if request.auth != null && request.auth.uid == userId;
         allow create: if false;
+        // isDefault: user preference. last4: legacy client self-heal from masked PAN; prefer server-side writes later.
         allow update: if request.auth != null
           && request.auth.uid == userId
-          && request.writeFields.hasOnly(['isDefault']);
-        allow delete: if request.auth != null && request.auth.uid == userId;
-      }
-
-      // Literal path: any authenticated user may read (mutual block checks for calls/chats).
-      match /settings/chat_privacy {
-        allow read: if request.auth != null;
-        allow write: if isOwner(userId);
+          && request.writeFields.hasOnly(['isDefault', 'last4']);
+        // Deletion goes through the callable so its private bank-number mirror and
+        // provider-side Stripe links are cleaned up together.
+        allow delete: if false;
       }
 
       match /settings/{settingId} {
-        allow read: if isSignedIn() && isOwner(userId) && settingId != 'chat_privacy';
-        allow write: if isOwner(userId) && settingId != 'chat_privacy';
+        allow read, write: if isOwner(userId);
       }
 
       match /invitations/{senderId} {
         allow read: if isSignedIn() && (isOwner(userId) || isOwner(senderId));
-        allow list: if isSignedIn() && isOwner(userId);
-        allow create: if isValidChatInvitationCreate(senderId);
-        allow update: if isValidChatInvitationRecipientUpdate(userId);
-        allow delete: if isSignedIn() && isOwner(userId);
+        // The recipient lists this path directly. The sender uses a collection-group
+        // query constrained by the stored senderId to mark invitations already sent.
+        allow list: if isSignedIn() && (
+          isOwner(userId) ||
+          (('senderId' in resource.data) && resource.data.senderId == request.auth.uid)
+        );
+        allow create: if isSignedIn()
+          && isOwner(senderId)
+          && isSafeChatInvitationCreate(userId, senderId);
+        allow update, delete: if isSignedIn() && isOwner(userId);
       }
 
       // Legacy chat invitation path used by older screens.
       match /chat_invitations/{senderId} {
         allow read: if isSignedIn() && (isOwner(userId) || isOwner(senderId));
-        allow list: if isSignedIn() && isOwner(userId);
-        allow create: if isValidChatInvitationCreate(senderId);
-        allow update: if isValidChatInvitationRecipientUpdate(userId);
-        allow delete: if isSignedIn() && isOwner(userId);
+        allow list: if isSignedIn() && (
+          isOwner(userId) ||
+          (('senderId' in resource.data) && resource.data.senderId == request.auth.uid)
+        );
+        allow create: if isSignedIn()
+          && isOwner(senderId)
+          && isSafeChatInvitationCreate(userId, senderId);
+        allow update, delete: if isSignedIn() && isOwner(userId);
       }
 
       match /jokes/{jokeId} {
-        allow read: if isSignedIn() && (isOwner(userId) || isVisibleMindLoomData(resource.data));
-        allow create: if isValidMindLoomPostCreate(userId);
-        allow update: if isValidMindLoomOwnerTextUpdate(userId) || isValidMindLoomLikeUpdate();
-        allow delete: if isOwner(userId) && resource.data.authorId == userId;
+        function isLiveLinkedJoke(data) {
+          return data.get('mediaType', '') in ['LIVE_SESSION', 'LIVE_REPLAY'] ||
+            data.get('sourceType', '') in ['LIVE_SESSION', 'LIVE_REPLAY'] ||
+            data.get('sourceLiveSessionId', '') != '';
+        }
+
+        // Live/replay posts must reference a broadcast the author actually hosts, so nobody can
+        // publish fake "Live now" cards (and follower pushes) for someone else's stream.
+        function isOwnLiveLinkedJoke(data) {
+          let sid = data.get('sourceLiveSessionId', '');
+          let sessionPath = /databases/$(database)/documents/live_sessions/$(sid);
+          return sid is string && sid.size() > 0 && sid.size() <= 128 &&
+            data.get('sourceLiveHostId', request.auth.uid) == request.auth.uid &&
+            exists(sessionPath) &&
+            get(sessionPath).data.hostId == request.auth.uid &&
+            (
+              data.get('sourceLiveShareUrl', null) == null ||
+              data.sourceLiveShareUrl == 'https://softsolutionstech.com/live?sessionId=' + sid + '&hostId=' + request.auth.uid
+            );
+        }
+
+        function isAllowedJokeLiveReference(data) {
+          return !isLiveLinkedJoke(data) || isOwnLiveLinkedJoke(data);
+        }
+
+        function isOwnLikeToggle() {
+          let before = resource.data.get('likes', []).toSet();
+          let after = request.resource.data.likes.toSet();
+          return after.difference(before).hasOnly([request.auth.uid]) &&
+            before.difference(after).hasOnly([request.auth.uid]);
+        }
+
+        allow read: if isSignedIn();
+        allow create: if isOwner(userId) &&
+          request.resource.data.authorId == request.auth.uid &&
+          isAllowedJokeLiveReference(request.resource.data) &&
+          (!('commentsCount' in request.resource.data) || request.resource.data.commentsCount == 0) &&
+          (!('likes' in request.resource.data) ||
+            (request.resource.data.likes is list && request.resource.data.likes.size() <= 500));
+        // Owner edits: keep authorId stable. Others may only add/remove their own like (commentsCount is server-maintained).
+        allow update: if
+          (
+            isOwner(userId) &&
+            request.resource.data.authorId == resource.data.authorId &&
+            request.resource.data.authorId == request.auth.uid &&
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['commentsCount']) &&
+            isAllowedJokeLiveReference(request.resource.data) &&
+            (
+              !('likes' in request.resource.data) ||
+              (request.resource.data.likes is list && request.resource.data.likes.size() <= 500)
+            )
+          ) ||
+          (
+            isSignedIn() &&
+            !isOwner(userId) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) &&
+            request.resource.data.authorId == resource.data.authorId &&
+            request.resource.data.likes is list &&
+            request.resource.data.likes.size() <= 500 &&
+            isOwnLikeToggle()
+          );
+        allow delete: if isOwner(userId);
 
         match /comments/{commentId} {
-          allow read: if isSignedIn() &&
-            (isOwner(userId) ||
-              isVisibleMindLoomData(get(/databases/$(database)/documents/users/$(userId)/jokes/$(jokeId)).data));
-          allow create: if isValidMindLoomCommentCreate(userId) &&
-            isVisibleMindLoomData(get(/databases/$(database)/documents/users/$(userId)/jokes/$(jokeId)).data);
+          allow read: if isSignedIn();
+          // Every author field present must be the caller, so a comment cannot impersonate another user.
+          allow create: if isSignedIn() &&
+            ('authorId' in request.resource.data || 'authorUid' in request.resource.data) &&
+            request.resource.data.get('authorId', request.auth.uid) == request.auth.uid &&
+            request.resource.data.get('authorUid', request.auth.uid) == request.auth.uid &&
+            request.resource.data.get('text', '') is string &&
+            request.resource.data.get('text', '').size() <= 2000;
           allow update, delete: if false;
         }
       }
 
-      match /saved_jokes/{jokeId} {
-        allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidMindLoomSavedPostWrite();
-        allow delete: if isOwner(userId);
-      }
-
       match /followers/{followerId} {
         allow read: if isSignedIn();
-        allow create: if isValidFollowEdgeCreate(followerId);
-        allow delete: if isSignedIn() && request.auth.uid == followerId;
+        allow create, delete: if isSignedIn() && request.auth.uid == followerId;
         allow update: if false;
       }
 
       match /following/{followingId} {
         allow read: if isSignedIn();
-        allow create: if isValidFollowEdgeCreate(userId);
-        allow delete: if isSignedIn() && request.auth.uid == userId;
+        allow create, delete: if isSignedIn() && request.auth.uid == userId;
         allow update: if false;
       }
 
@@ -734,42 +1548,28 @@ service cloud.firestore {
         allow create, delete: if false;
       }
 
-      // Incoming call signaling mirror — CallSessionViewModel listens here (not call_sessions queries).
-      match /incoming_call_sessions/{sessionId} {
-        allow read: if isOwner(userId);
-        allow create, update, delete: if false;
+      // User block lists (UserSafetyRepository). Without these, directory chat invitations
+      // fail on fetchBlockedUserIds because collection reads are denied.
+      match /blocked_users/{blockedUid} {
+        allow read, write: if isOwner(userId);
       }
 
-      // Denormalized call log feed for Social Inbox Calls tab (iOS CallsRepository primary path).
-      match /call_history/{entryId} {
-        allow read: if isOwner(userId);
-        allow create, update, delete: if false;
+      match /blockedUsers/{blockedUid} {
+        allow read, write: if isOwner(userId);
       }
 
-      // Legacy user-scoped feed retained for historical Android call entries.
-      match /call_logs/{entryId} {
-        allow read: if isOwner(userId);
-        allow create, update, delete: if false;
-      }
-
-      // User-hidden call history rows (swipe delete in Calls tab).
-      match /call_history_hidden/{hiddenId} {
-        allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId);
-        allow delete: if isOwner(userId);
+      // Owner-only dating contact details (phone). Public dating_profiles must not store phone.
+      match /dating_private/{docId} {
+        allow read, write: if isOwner(userId) && userCanAccessDating(userId);
       }
     }
 
     // --- BLIND DATE RULES ---
     match /blindDateProfiles/{userId} {
-      allow read: if isSignedIn() && isDatingEligibleAccount(request.auth.uid);
+      allow read: if isSignedIn() && userCanAccessDating(request.auth.uid);
       allow create: if false;
-      allow update: if
-        (isOwner(userId) &&
-          isDatingEligibleAccount(userId) &&
-          !('status' in request.writeFields) &&
-          !('userId' in request.writeFields) &&
-          !('createdAt' in request.writeFields));
+      // Do not allow client-side status or match-state writes (would bypass paid rejoin and hold flow).
+      allow update: if isOwner(userId) && isSafeBlindDateProfileClientPatch();
     }
 
     // --- CHAT RULES ---
@@ -777,162 +1577,310 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.participants is list
         && request.resource.data.participants.size() >= 2
-        && request.auth.uid in request.resource.data.participants;
+        && request.auth.uid in request.resource.data.participants
+        && (
+          canCreateDirectChatFromInvitation() ||
+          canCreateGroupChat()
+        );
       // IMPORTANT: allow reading the chat doc even if the user is marked "exited" or a direct
       // chat later becomes blocked.
-      // Otherwise `whereField("participants", arrayContains: uid)` can return a doc that then fails
-      // stricter read rules, causing the entire Social Inbox query to fail with permission_denied.
-      // Message/call_log subcollections still use canReadChatHistory for exited group members.
+      // Otherwise `whereField("participants", arrayContains: uid)` can return a doc that then fails rules,
+      // causing the entire Social Inbox query to fail with `permission_denied`.
+      // Message writes and call creation remain restricted via the active-participant checks below.
       allow read: if isSignedIn()
-        && resource.data.participants is list
         && request.auth.uid in resource.data.participants;
       allow update: if isSignedIn()
-        && resource.data.get('participants', []) is list
-        && request.auth.uid in resource.data.get('participants', [])
+        && request.auth.uid in resource.data.participants
+        && (inferredDirectChat(resource.data) || !(request.auth.uid in exitedParticipantIdsFrom(resource.data)))
+        && !isDirectChatBlocked(resource.data)
+        && request.resource.data.participants == resource.data.participants
         && (
-          (chatParticipantListUnchanged() && chatParticipantContentOnlyUpdate())
-          || chatLastCallMetadataOnlyUpdate()
+          isSafeChatPreviewPatch() ||
+          isOwnChatExitPatch() ||
+          isUpdatedAtTouchOnly()
         );
 
       match /messages/{messageId} {
         allow read: if canReadChatHistory(chatId);
         allow create: if isSignedIn()
           && request.resource.data.senderId == request.auth.uid
-          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
-        // Recipients may update delivery/read fields; senders may soft-delete their own messages.
+          && (isActiveChatParticipant(chatId) || isActiveChatParticipantAfter(chatId))
+          && isValidChatMessageCreate(chatId);
         allow update: if isSignedIn()
-          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
-          && (
-            (
-              resource.data.senderId == request.auth.uid &&
-              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                'isDeleted',
-                'deletedAt',
-                'messageText',
-                'mediaUrl',
-                'storagePath'
-              ]) &&
-              request.resource.data.isDeleted == true &&
-              request.resource.data.messageText == 'Message deleted' &&
-              request.resource.data.mediaUrl == null &&
-              request.resource.data.storagePath == null
-            )
-            || (
-              request.auth.uid != resource.data.senderId &&
-              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                'deliveredTo',
-                'readBy',
-                'isRead'
-              ]) &&
-              request.resource.data.deliveredTo is list &&
-              request.resource.data.readBy is list &&
-              request.resource.data.deliveredTo.hasAll(resource.data.deliveredTo) &&
-              request.resource.data.readBy.hasAll(resource.data.readBy) &&
-              request.auth.uid in request.resource.data.deliveredTo &&
-              request.auth.uid in request.resource.data.readBy &&
-              request.resource.data.senderId == resource.data.senderId &&
-              request.resource.data.senderDisplayName == resource.data.senderDisplayName &&
-              request.resource.data.messageText == resource.data.messageText &&
-              request.resource.data.messageType == resource.data.messageType &&
-              request.resource.data.mediaUrl == resource.data.mediaUrl &&
-              request.resource.data.storagePath == resource.data.storagePath &&
-              request.resource.data.replyToMessageId == resource.data.replyToMessageId &&
-              request.resource.data.replyToText == resource.data.replyToText &&
-              request.resource.data.replyToSenderName == resource.data.replyToSenderName &&
-              request.resource.data.isDeleted == resource.data.isDeleted &&
-              request.resource.data.deletedAt == resource.data.deletedAt
-            )
-          );
+          && isActiveChatParticipant(chatId)
+          && (isMessageReceiptPatch() || isOwnMessageDeletePatch());
         allow delete: if false;
       }
 
       match /call_logs/{callId} {
-        allow read: if isSignedIn()
-          && get(/databases/$(database)/documents/chats/$(chatId)).data.participants is list
-          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow read: if canReadChatHistory(chatId);
         allow create: if isSignedIn()
-          && get(/databases/$(database)/documents/chats/$(chatId)).data.participants is list
-          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
-          && request.resource.data.callerId == request.auth.uid;
-        allow update: if isSignedIn()
-          && get(/databases/$(database)/documents/chats/$(chatId)).data.participants is list
-          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
-          && callLogParticipantUpdateAllowed(chatId);
+          && isActiveChatParticipant(chatId)
+          && request.resource.data.callerId == request.auth.uid
+          && request.resource.data.chatId == chatId
+          && canCreateChatCallFor(chatId, request.resource.data.receiverId)
+          && isValidChatCallLogSeed(chatId, callId)
+          && request.resource.data.status == 'ringing'
+          && request.resource.data.callType in ['audio', 'video'];
+        allow update: if false;
         allow delete: if false;
       }
     }
 
-    function callSessionStatusIsRinging(data) {
-      return data.get('status', '') == 'ringing';
-    }
-
-    function callSessionReceiverIsAuthUser(data) {
-      return data.get('receiverId', '') is string &&
-        data.get('receiverId', '') != '' &&
-        data.get('receiverId', '') == request.auth.uid;
-    }
-
-    function callSessionParticipantIdsContainAuthUser(data) {
-      return data.get('participantIds', []) is list &&
-        request.auth.uid in data.get('participantIds', []);
-    }
-
     match /call_sessions/{sessionId} {
-      allow get: if isCallSessionParticipant(resource.data);
-      // One list rule per query shape (Firestore rejects OR for collection queries):
-      // 1:1 incoming — receiverId + status
-      allow list: if isSignedIn() &&
-        callSessionStatusIsRinging(resource.data) &&
-        callSessionReceiverIsAuthUser(resource.data);
-      // Group / multi-party — participantIds array-contains + status
-      allow list: if isSignedIn() &&
-        callSessionStatusIsRinging(resource.data) &&
-        callSessionParticipantIdsContainAuthUser(resource.data);
-      // Conversation screen — call_sessions by chatId (signaling only; messages stay under chats)
-      allow list: if isSignedIn() &&
-        resource.data.chatId is string &&
-        resource.data.chatId != '' &&
-        isCallSessionChatMember(resource.data);
-      // Per-chat ringing — chatId + status (optional narrow query)
-      allow list: if isSignedIn() &&
-        callSessionStatusIsRinging(resource.data) &&
-        resource.data.chatId is string &&
-        resource.data.chatId != '' &&
-        isCallSessionChatMember(resource.data);
-      allow create: if callSessionCreateAllowed();
-      allow update: if isCallSessionParticipant(resource.data) && callSessionParticipantUpdateAllowed();
-      // Participants may remove stale signaling docs (ended/declined); admin SDK used for bulk cleanup.
-      allow delete: if isSignedIn() &&
-        isCallSessionParticipant(resource.data) &&
-        resource.data.get('status', '') in ['ended', 'declined', 'accepted', 'ringing'];
+      allow read: if isCallSessionChatParticipant(resource.data)
+        && isCallSessionChatAllowed(resource.data);
+      allow create: if isSignedIn()
+        && request.resource.data.callerId == request.auth.uid
+        && canCreateChatCallFor(request.resource.data.chatId, request.resource.data.receiverId)
+        && isValidCallSessionSeed(request.resource.data)
+        && request.resource.data.status == 'ringing'
+        && request.resource.data.callType in ['audio', 'video'];
+      // Allow participants to update session state (Agora join/leave signaling).
+      allow update: if isCallSessionChatParticipant(resource.data)
+        && isCallSessionChatAllowed(resource.data)
+        && isCallSessionStatePatch();
+      allow delete: if false;
     }
 
     // --- ORGANIZERS ---
     match /organizers/{organizerId} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(organizerId);
+      // walletTransfers are server-authoritative (Cloud Function createOrganizerWalletTransfer + Admin SDK).
+      allow create: if isOwner(organizerId) &&
+        !request.resource.data.keys().hasAny(['walletTransfers', 'organizerWalletTransfers', 'walletUpdatedAt']);
+      allow update: if isOwner(organizerId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['walletTransfers', 'organizerWalletTransfers', 'walletUpdatedAt']);
       allow delete: if false;
     }
 
     // --- EMPLOYERS ---
     match /employers/{employerId} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(employerId);
+      allow create: if isOwner(employerId)
+        && request.resource.data.keys().hasOnly([
+          'uid', 'organizationName', 'contactEmail', 'description', 'profileCompleted',
+          'profileUrl', 'createdAt', 'updatedAt', 'lastUpdatedAt'
+        ])
+        && (!('uid' in request.resource.data) || request.resource.data.uid == employerId);
+      allow update: if isOwner(employerId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'uid', 'organizationName', 'contactEmail', 'description', 'profileCompleted',
+          'profileUrl', 'updatedAt', 'lastUpdatedAt'
+        ])
+        && (!('uid' in request.resource.data) || request.resource.data.uid == employerId);
       allow delete: if false;
+    }
+
+    function eventParticipantCount(data) {
+      return ('participantsCount' in data && data.participantsCount is int) ?
+        data.participantsCount :
+        0;
+    }
+
+    function organizerEventIdentityIsStable() {
+      return (!('organizerId' in resource.data) ||
+          request.resource.data.organizerId == resource.data.organizerId)
+        && (!('organizerUid' in resource.data) ||
+          request.resource.data.organizerUid == resource.data.organizerUid)
+        && (!('participantsCount' in resource.data) ||
+          request.resource.data.participantsCount == resource.data.participantsCount);
+    }
+
+    function organizerEventCreateIsSafe() {
+      return ('organizerId' in request.resource.data || 'organizerUid' in request.resource.data)
+        && (!('organizerId' in request.resource.data) ||
+          request.resource.data.organizerId == request.auth.uid)
+        && (!('organizerUid' in request.resource.data) ||
+          request.resource.data.organizerUid == request.auth.uid)
+        && ('participantsCount' in request.resource.data)
+        && request.resource.data.participantsCount is int
+        && request.resource.data.participantsCount == 0
+        && ('volunteerLimit' in request.resource.data)
+        && request.resource.data.volunteerLimit is int
+        && request.resource.data.volunteerLimit > 0
+        && ('payment' in request.resource.data)
+        && request.resource.data.payment is number
+        && request.resource.data.payment >= 0
+        && ('eventFee' in request.resource.data)
+        && request.resource.data.eventFee is number
+        && request.resource.data.eventFee == request.resource.data.payment;
+    }
+
+    function organizerEventTermsAreSafe() {
+      return (
+          !('volunteerLimit' in request.resource.data) ||
+          (
+            request.resource.data.volunteerLimit is int &&
+            request.resource.data.volunteerLimit >= eventParticipantCount(resource.data)
+          )
+        )
+        && (
+          eventParticipantCount(resource.data) == 0 ||
+          (
+            (!('payment' in resource.data) || request.resource.data.payment == resource.data.payment)
+            && (!('eventFee' in resource.data) || request.resource.data.eventFee == resource.data.eventFee)
+          )
+        );
+    }
+
+    function organizerEventVisibilityIsSafe() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return eventParticipantCount(resource.data) == 0 ||
+        (
+          !changed.hasAny(['isDeleted', 'isActive'])
+          && (!changed.hasAny(['status']) || request.resource.data.status in [
+            'OPEN', 'open', 'ACTIVE', 'active', 'CLOSED', 'closed', 'COMPLETED', 'completed'
+          ])
+        );
+    }
+
+    function organizerEventClientUpdateIsSafe() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'titleLowercase', 'description', 'category', 'locationName', 'locationAddress',
+          'eventDateTime', 'eventTimestamp', 'volunteerLimit', 'payment', 'eventFee',
+          'requirements', 'contactInfo', 'isActive', 'closeEntries', 'opportunityType',
+          'status', 'organizerName', 'isDeleted', 'lastUpdatedAt', 'updatedAt'
+        ])
+        && organizerEventIdentityIsStable()
+        && organizerEventTermsAreSafe()
+        && organizerEventVisibilityIsSafe();
+    }
+
+    function eventApplicationIsUnpaidOrExempt(data) {
+      return ('paymentStatus' in data && data.paymentStatus in ['NOT_REQUIRED', 'STAFF_EXEMPT']) ||
+        (
+          !('paymentStatus' in data)
+          && (!('ticketPrice' in data) || data.ticketPrice == 0)
+          && (!('transactionAmount' in data) || data.transactionAmount == 0)
+          && (!('organizerNetAmount' in data) || data.organizerNetAmount == 0)
+        );
     }
 
     // --- EVENTS ---
     match /events/{eventId} {
       allow read: if isSignedIn();
-      allow create: if isOrganizer() && request.resource.data.organizerId == request.auth.uid;
-      allow update, delete: if isOrganizer() && resource.data.organizerId == request.auth.uid;
+      allow create: if isOrganizer() && organizerEventCreateIsSafe();
+      allow update: if isOrganizer() && (
+        resource.data.organizerId == request.auth.uid ||
+        resource.data.organizerUid == request.auth.uid
+      ) && organizerEventClientUpdateIsSafe();
+      allow delete: if isOrganizer() && (
+        resource.data.organizerId == request.auth.uid ||
+        resource.data.organizerUid == request.auth.uid
+      ) && ('participantsCount' in resource.data)
+        && resource.data.participantsCount is int
+        && resource.data.participantsCount == 0;
+
+      match /applications/{appId} {
+        allow read: if isSignedIn() && (
+          request.auth.uid == appId ||
+          resource.data.userId == request.auth.uid ||
+          resource.data.volunteerUid == request.auth.uid ||
+          resource.data.volunteerId == request.auth.uid ||
+          (
+            isOrganizer() && (
+              get(/databases/$(database)/documents/events/$(eventId)).data.organizerId == request.auth.uid ||
+              get(/databases/$(database)/documents/events/$(eventId)).data.organizerUid == request.auth.uid
+            )
+          )
+        );
+        allow create: if false;
+        allow update: if isSignedIn()
+          && isOrganizer()
+          && (
+            get(/databases/$(database)/documents/events/$(eventId)).data.organizerId == request.auth.uid ||
+            get(/databases/$(database)/documents/events/$(eventId)).data.organizerUid == request.auth.uid
+          )
+          && eventApplicationIsUnpaidOrExempt(resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'lastUpdatedAt']);
+        allow delete: if false;
+      }
     }
 
     // --- JOBS ---
     match /jobs/{jobId} {
       allow read: if isSignedIn();
-      allow create: if isEmployer() && request.resource.data.employerUid == request.auth.uid;
-      allow update, delete: if isEmployer() && resource.data.employerUid == request.auth.uid;
+      allow create: if isEmployer()
+        && request.resource.data.employerUid == request.auth.uid
+        && request.resource.data.employerId == request.auth.uid
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.postingId == jobId
+        && request.resource.data.volunteersNeeded is int
+        && request.resource.data.volunteersNeeded > 0
+        && request.resource.data.totalSlots is int
+        && request.resource.data.totalSlots == request.resource.data.volunteersNeeded
+        && request.resource.data.slotsFilled is int
+        && request.resource.data.slotsFilled == 0
+        && request.resource.data.applicantsCount is int
+        && request.resource.data.applicantsCount == 0
+        && request.resource.data.isActive == true
+        && isOpenJobStatus(request.resource.data.status);
+      allow update: if isEmployer()
+        && isEmployerForJob(jobId)
+        && request.resource.data.employerUid == request.auth.uid
+        && request.resource.data.employerId == request.auth.uid
+        && (!('createdBy' in resource.data) || request.resource.data.createdBy == resource.data.createdBy)
+        && (!('postingId' in resource.data) || request.resource.data.postingId == resource.data.postingId)
+        && (
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'title', 'eventName', 'organizationName', 'jobTitle', 'description',
+              'locationString', 'locationName', 'location', 'category', 'jobType',
+              'salaryOrCompensation', 'date', 'time', 'applicationDeadline',
+              'eventDateTime', 'eventTimestamp', 'volunteersNeeded', 'totalSlots',
+              'isActive', 'employerUid', 'employerId', 'employerName', 'timestamp',
+              'lastUpdatedAt', 'status', 'isDeleted'
+            ])
+            && request.resource.data.volunteersNeeded is int
+            && request.resource.data.volunteersNeeded > 0
+            && request.resource.data.totalSlots is int
+            && request.resource.data.totalSlots == request.resource.data.volunteersNeeded
+            && request.resource.data.totalSlots >= resource.data.slotsFilled
+            && request.resource.data.isActive is bool
+            && request.resource.data.status in ['OPEN', 'open', 'CLOSED', 'closed', 'ARCHIVED', 'archived', 'CANCELLED', 'cancelled']
+            && (!('isDeleted' in request.resource.data) || request.resource.data.isDeleted != false)
+          )
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['applicantsCount', 'slotsFilled', 'lastUpdatedAt'])
+            && request.resource.data.applicantsCount is int
+            && request.resource.data.applicantsCount >= 0
+            && request.resource.data.slotsFilled is int
+            && request.resource.data.slotsFilled >= 0
+            && request.resource.data.slotsFilled <= request.resource.data.totalSlots
+          )
+        );
+      // Keep applications and resumes auditable; client deletion only closes the posting.
+      allow delete: if false;
+
+      match /applications/{appId} {
+        allow read: if isSignedIn() && (
+          request.auth.uid == appId ||
+          resource.data.userId == request.auth.uid ||
+          resource.data.volunteerUid == request.auth.uid ||
+          resource.data.volunteerId == request.auth.uid ||
+          (isEmployer() && (
+            get(/databases/$(database)/documents/jobs/$(jobId)).data.employerUid == request.auth.uid ||
+            get(/databases/$(database)/documents/jobs/$(jobId)).data.employerId == request.auth.uid
+          ))
+        );
+
+        allow create: if isSignedIn()
+          && request.auth.uid == appId
+          && isApplicationOwnerFromData(request.resource.data)
+          && request.resource.data.jobId == jobId
+          && jobApplicationEmployerMatchesCreate(jobId, appId, appId);
+
+        allow update: if isSignedIn() && (
+          (isEmployer() && (
+            get(/databases/$(database)/documents/jobs/$(jobId)).data.employerUid == request.auth.uid ||
+            get(/databases/$(database)/documents/jobs/$(jobId)).data.employerId == request.auth.uid
+          ) && isEmployerJobApplicationReviewPatch()) ||
+          (request.auth.uid == appId && isVolunteerJobResumeFieldPatch())
+        );
+
+        allow delete: if false;
+      }
     }
 
     // --- APPLICATIONS ---
@@ -942,104 +1890,641 @@ service cloud.firestore {
           resource.data.employerUid == request.auth.uid ||
           resource.data.employerId == request.auth.uid
         )) ||
-        isApplicationOwnerFromData(resource.data)
+        (resource.data.userId == request.auth.uid)
       );
-      allow update: if isEmployer() && (
-        resource.data.employerUid == request.auth.uid ||
-        resource.data.employerId == request.auth.uid
+      allow update: if isSignedIn() && (
+        (isEmployer()
+          && isEmployerForJob(resource.data.jobId)
+          && isEmployerJobApplicationReviewPatch()) ||
+        (isApplicationOwnerFromData(resource.data) && isVolunteerJobResumeFieldPatch())
       );
-      allow create: if isSignedIn() && isApplicationOwnerFromData(request.resource.data);
-      allow delete: if isSignedIn() && isApplicationOwnerFromData(resource.data);
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && 'jobId' in request.resource.data
+        && request.resource.data.jobId is string
+        && jobApplicationEmployerMatchesCreate(
+          request.resource.data.jobId,
+          request.auth.uid,
+          applicationId
+        );
+      allow delete: if false;
     }
 
     match /live_sessions/{sessionId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.hostId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.hostId == request.auth.uid;
+      function isActiveLiveStatus(status) {
+        return isActiveLiveSessionStatus(status);
+      }
+
+      function isEndedLiveStatus(status) {
+        return isEndedLiveSessionStatus(status);
+      }
+
+      function liveSessionRequiredKeys(data) {
+        return data.keys().hasAll(['hostId', 'hostUid', 'hostName', 'title', 'status', 'agoraChannelName']);
+      }
+
+      function liveSessionAllowedKeys(data) {
+        return data.keys().hasOnly([
+          'agoraChannelName',
+          'channelName',
+          'hostId',
+          'hostUid',
+          'hostName',
+          'hostUsername',
+          'title',
+          'status',
+          'chatEnabled',
+          'sourceType',
+          'sourceId',
+          'viewAccessMode',
+          'stageAccessMode',
+          'replayVisibility',
+          'notifyFollowers',
+          'sharePath',
+          'shareUrl',
+          'createdAt',
+          'startTime',
+          'updatedAt',
+          'endedAt',
+          'archiveStatus',
+          'archiveUploadStatus',
+          'archivePrimaryFile',
+          'archiveFileCount',
+          'archiveResourceId',
+          'archiveSid',
+          'archiveRecorderUid',
+          'archiveObjectPrefix',
+          'archiveStartedAt',
+          'archiveStoppedAt',
+          'archiveReadyAt',
+          'archiveError'
+        ]);
+      }
+
+      function liveSessionSourceTypeFromData(data) {
+        let value = data.sourceType;
+        return value is string ? value : 'standalone';
+      }
+
+      function liveSessionSourceIdFromData(data) {
+        let value = data.sourceId;
+        return value is string ? value : '';
+      }
+
+      function liveSessionStageAccessModeFromData(data) {
+        let mode = data.stageAccessMode;
+        return mode is string ? mode : 'request_to_join';
+      }
+
+      function liveSessionHasOwnedOrganizerEventSourceFromData(data, hostUid) {
+        let sourceId = liveSessionSourceIdFromData(data);
+        return liveSessionSourceTypeFromData(data) == 'organizer_event'
+          && sourceId != ''
+          && exists(/databases/$(database)/documents/events/$(sourceId))
+          && (
+            get(/databases/$(database)/documents/events/$(sourceId)).data.organizerId == hostUid ||
+            get(/databases/$(database)/documents/events/$(sourceId)).data.organizerUid == hostUid
+          );
+      }
+
+      function validLiveSessionEventAudienceConfiguration(data, hostUid) {
+        let sourceType = liveSessionSourceTypeFromData(data);
+        let viewMode = liveSessionViewAccessModeFromData(data);
+        let stageMode = liveSessionStageAccessModeFromData(data);
+        let requiresOwnedOrganizerEvent = sourceType == 'organizer_event'
+          || viewMode == 'accepted_event_volunteers'
+          || stageMode == 'open_to_accepted_volunteers';
+        return !requiresOwnedOrganizerEvent
+          || liveSessionHasOwnedOrganizerEventSourceFromData(data, hostUid);
+      }
+
+      function validLiveSessionWatchStageConfiguration(data) {
+        let viewMode = liveSessionViewAccessModeFromData(data);
+        let stageMode = liveSessionStageAccessModeFromData(data);
+        return viewMode != 'invite_only'
+          || stageMode in ['request_to_join', 'approved_volunteers'];
+      }
+
+      function liveArchiveFieldsMissingOnCreate() {
+        return !('archiveStatus' in request.resource.data)
+          && !('archiveUploadStatus' in request.resource.data)
+          && !('archivePlaybackUrl' in request.resource.data)
+          && !('archivePrimaryFile' in request.resource.data)
+          && !('archiveFileCount' in request.resource.data)
+          && !('archiveResourceId' in request.resource.data)
+          && !('archiveSid' in request.resource.data)
+          && !('archiveRecorderUid' in request.resource.data)
+          && !('archiveObjectPrefix' in request.resource.data)
+          && !('archiveStartedAt' in request.resource.data)
+          && !('archiveStoppedAt' in request.resource.data)
+          && !('archiveReadyAt' in request.resource.data)
+          && !('archiveError' in request.resource.data);
+      }
+
+      function validLiveSessionCreate() {
+        return canCreateLiveSessionHost()
+          && liveSessionRequiredKeys(request.resource.data)
+          && liveSessionAllowedKeys(request.resource.data)
+          && request.resource.data.hostId == request.auth.uid
+          && request.resource.data.hostUid == request.auth.uid
+          && request.resource.data.hostName is string
+          && request.resource.data.hostName.size() > 0
+          && request.resource.data.hostName.size() <= 120
+          && (!('hostUsername' in request.resource.data) || request.resource.data.hostUsername == null || (
+            request.resource.data.hostUsername is string &&
+            request.resource.data.hostUsername.size() <= 120
+          ))
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 120
+          && request.resource.data.agoraChannelName is string
+          && request.resource.data.agoraChannelName.size() > 0
+          && request.resource.data.agoraChannelName.size() <= 64
+          && (!('sourceType' in request.resource.data) || request.resource.data.sourceType in ['standalone', 'organizer_event', 'mindloom'])
+          && (!('sourceId' in request.resource.data) || request.resource.data.sourceId == null || (
+            request.resource.data.sourceId is string &&
+            request.resource.data.sourceId.size() <= 160
+          ))
+          && (!('viewAccessMode' in request.resource.data) || request.resource.data.viewAccessMode in ['public', 'followers_only', 'invite_only', 'accepted_event_volunteers'])
+          && (!('stageAccessMode' in request.resource.data) || request.resource.data.stageAccessMode in ['host_only', 'request_to_join', 'approved_volunteers', 'open_to_accepted_volunteers'])
+          && (!('replayVisibility' in request.resource.data) || request.resource.data.replayVisibility in ['owner_only', 'shared_link', 'followers_only', 'public'])
+          && (!('notifyFollowers' in request.resource.data) || request.resource.data.notifyFollowers is bool)
+          && (!('channelName' in request.resource.data)
+            || request.resource.data.channelName == request.resource.data.agoraChannelName)
+          && validLiveShareFields(request.resource.data, sessionId, request.auth.uid)
+          && validLiveSessionEventAudienceConfiguration(request.resource.data, request.auth.uid)
+          && validLiveSessionWatchStageConfiguration(request.resource.data)
+          && (!('chatEnabled' in request.resource.data) || request.resource.data.chatEnabled == true)
+          && liveArchiveFieldsMissingOnCreate()
+          && isActiveLiveStatus(request.resource.data.status);
+      }
+
+      function validLiveSessionUpdate() {
+        return liveSessionAllowedKeys(request.resource.data)
+          && request.resource.data.hostId == resource.data.hostId
+          && request.resource.data.hostUid == resource.data.hostUid
+          && request.resource.data.agoraChannelName == resource.data.agoraChannelName
+          && (!('channelName' in resource.data) || !('channelName' in request.resource.data) || request.resource.data.channelName == resource.data.channelName)
+          && validLiveShareFields(request.resource.data, sessionId, resource.data.hostId)
+          && validLiveSessionEventAudienceConfiguration(request.resource.data, resource.data.hostId)
+          && validLiveSessionWatchStageConfiguration(request.resource.data)
+          && request.resource.data.hostName is string
+          && request.resource.data.hostName.size() > 0
+          && request.resource.data.hostName.size() <= 120
+          && (!('hostUsername' in request.resource.data) || request.resource.data.hostUsername == null || (
+            request.resource.data.hostUsername is string &&
+            request.resource.data.hostUsername.size() <= 120
+          ))
+          && (!('sourceType' in request.resource.data) || request.resource.data.sourceType == resource.data.sourceType)
+          && (!('sourceId' in request.resource.data) || request.resource.data.sourceId == resource.data.sourceId)
+          && (!('viewAccessMode' in request.resource.data) || request.resource.data.viewAccessMode in ['public', 'followers_only', 'invite_only', 'accepted_event_volunteers'])
+          && (!('stageAccessMode' in request.resource.data) || request.resource.data.stageAccessMode in ['host_only', 'request_to_join', 'approved_volunteers', 'open_to_accepted_volunteers'])
+          && (!('replayVisibility' in request.resource.data) || request.resource.data.replayVisibility in ['owner_only', 'shared_link', 'followers_only', 'public'])
+          && (!('notifyFollowers' in request.resource.data) || request.resource.data.notifyFollowers is bool)
+          && request.resource.data.title == resource.data.title
+          && (!('chatEnabled' in request.resource.data) || request.resource.data.chatEnabled is bool)
+          && (
+            request.resource.data.status == resource.data.status ||
+            request.resource.data.status in ['ENDED', 'ended', 'Ended']
+          )
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'status',
+            'chatEnabled',
+            'viewAccessMode',
+            'stageAccessMode',
+            'replayVisibility',
+            'notifyFollowers',
+            'updatedAt',
+            'endedAt'
+          ])
+          && liveViewAccessModeNotWidenedOnUpdate()
+          && liveStageAccessModeNotWidenedOnUpdate();
+      }
+
+      function validLiveShareFields(data, sessionId, hostUid) {
+        return (!('sharePath' in data) || (
+          data.sharePath is string &&
+          data.sharePath == '/live?sessionId=' + sessionId + '&hostId=' + hostUid
+        ))
+          && (!('shareUrl' in data) || (
+            data.shareUrl is string &&
+            (
+              data.shareUrl == 'https://softsolutionstech.com/live?sessionId=' + sessionId + '&hostId=' + hostUid ||
+              data.shareUrl == 'https://www.softsolutionstech.com/live?sessionId=' + sessionId + '&hostId=' + hostUid ||
+              data.shareUrl == 'https://volunteersapp-968b2.web.app/live?sessionId=' + sessionId + '&hostId=' + hostUid ||
+              data.shareUrl == 'https://volunteersapp-968b2.firebaseapp.com/live?sessionId=' + sessionId + '&hostId=' + hostUid
+            )
+          ));
+      }
+
+      function liveSessionHostIdFromData(data) {
+        let hostId = ('hostId' in data && data.hostId is string) ? data.hostId : '';
+        let hostUid = ('hostUid' in data && data.hostUid is string) ? data.hostUid : '';
+        return hostId.size() > 0 ? hostId : hostUid;
+      }
+
+      function liveChatEnabled(sessionId) {
+        let session = get(/databases/$(database)/documents/live_sessions/$(sessionId)).data;
+        return !('chatEnabled' in session) || session.chatEnabled == true;
+      }
+
+      function liveSessionHostId(sessionId) {
+        return liveSessionHostIdFromData(
+          get(/databases/$(database)/documents/live_sessions/$(sessionId)).data
+        );
+      }
+
+      function liveSessionViewAccessMode(sessionId) {
+        let mode = get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.viewAccessMode;
+        return mode is string ? mode : 'public';
+      }
+
+      function liveSessionSourceType(sessionId) {
+        let value = get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.sourceType;
+        return value is string ? value : '';
+      }
+
+      function liveSessionSourceId(sessionId) {
+        let value = get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.sourceId;
+        return value is string ? value : '';
+      }
+
+      function liveSessionHasOwnedOrganizerEventSource(sessionId) {
+        let sourceId = liveSessionSourceId(sessionId);
+        let hostId = liveSessionHostId(sessionId);
+        return liveSessionSourceType(sessionId) == 'organizer_event'
+          && sourceId != ''
+          && exists(/databases/$(database)/documents/events/$(sourceId))
+          && (
+            get(/databases/$(database)/documents/events/$(sourceId)).data.organizerId == hostId ||
+            get(/databases/$(database)/documents/events/$(sourceId)).data.organizerUid == hostId
+          );
+      }
+
+      function liveJoinRequestDocId(sessionId, uid) {
+        return sessionId + '_' + uid;
+      }
+
+      function hasAcceptedLiveJoinRequest(sessionId, uid) {
+        return uid is string
+          && exists(/databases/$(database)/documents/join_requests/$(liveJoinRequestDocId(sessionId, uid)))
+          && get(/databases/$(database)/documents/join_requests/$(liveJoinRequestDocId(sessionId, uid))).data.status in ['accepted', 'ACCEPTED', 'Accepted'];
+      }
+
+      function isApprovedLiveEventVolunteer(sessionId, uid) {
+        let sourceType = liveSessionSourceType(sessionId);
+        let sourceId = liveSessionSourceId(sessionId);
+        return uid is string
+          && sourceType == 'organizer_event'
+          && liveSessionHasOwnedOrganizerEventSource(sessionId)
+          && sourceId != ''
+          && exists(/databases/$(database)/documents/events/$(sourceId)/applications/$(uid))
+          && get(/databases/$(database)/documents/events/$(sourceId)/applications/$(uid)).data.status in ['APPROVED', 'ACCEPTED', 'ATTENDED', 'COMPLETED', 'approved', 'accepted', 'attended', 'completed'];
+      }
+
+      function canReadLiveInteraction(sessionId, uid) {
+        return uid is string && (
+          liveSessionHostId(sessionId) == uid ||
+          (
+            !hasUserBlocked(liveSessionHostId(sessionId), uid) &&
+            !hasUserBlocked(uid, liveSessionHostId(sessionId)) &&
+            !isLiveViewerBlocked(sessionId, uid) &&
+            (
+              isLiveInvitedViewer(sessionId, uid) ||
+              liveSessionViewAccessMode(sessionId) == 'public' ||
+              (liveSessionViewAccessMode(sessionId) == 'followers_only' &&
+                exists(/databases/$(database)/documents/users/$(liveSessionHostId(sessionId))/followers/$(uid))) ||
+              (liveSessionViewAccessMode(sessionId) == 'invite_only' &&
+                hasAcceptedLiveJoinRequest(sessionId, uid)) ||
+              (liveSessionViewAccessMode(sessionId) == 'accepted_event_volunteers' &&
+                isApprovedLiveEventVolunteer(sessionId, uid))
+            )
+          )
+        );
+      }
+
+      function liveSessionReplayVisibility(sessionId) {
+        let value = get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.replayVisibility;
+        return value is string ? value : 'owner_only';
+      }
+
+      function liveSessionReplayVisibilityFromData(data) {
+        let value = data.replayVisibility;
+        return value is string ? value : 'owner_only';
+      }
+
+      function liveSessionViewAccessModeFromData(data) {
+        let mode = data.viewAccessMode;
+        return mode is string ? mode : 'public';
+      }
+
+      function liveViewAccessOpennessRank(mode) {
+        return mode == 'public' ? 3
+          : mode == 'followers_only' ? 2
+          : mode == 'invite_only' ? 1
+          : 0;
+      }
+
+      function liveStageAccessOpennessRank(mode) {
+        return mode == 'open_to_accepted_volunteers' ? 3
+          : mode == 'approved_volunteers' ? 2
+          : mode == 'request_to_join' ? 1
+          : 0;
+      }
+
+      function isEndingLiveSessionUpdate() {
+        return !isEndedLiveStatus(resource.data.status)
+          && isEndedLiveStatus(request.resource.data.status);
+      }
+
+      function liveViewAccessModeNotWidenedOnUpdate() {
+        return !('viewAccessMode' in request.resource.data)
+          || request.resource.data.viewAccessMode == resource.data.viewAccessMode
+          || isEndingLiveSessionUpdate()
+          || liveViewAccessOpennessRank(request.resource.data.viewAccessMode)
+            <= liveViewAccessOpennessRank(liveSessionViewAccessModeFromData(resource.data));
+      }
+
+      function liveStageAccessModeNotWidenedOnUpdate() {
+        return !('stageAccessMode' in request.resource.data)
+          || request.resource.data.stageAccessMode == resource.data.stageAccessMode
+          || isEndingLiveSessionUpdate()
+          || liveStageAccessOpennessRank(request.resource.data.stageAccessMode)
+            <= liveStageAccessOpennessRank(liveSessionStageAccessModeFromData(resource.data));
+      }
+
+      // List queries cannot enforce block checks (not expressible in query constraints).
+      // Block filtering is applied client-side in LiveSessionsViewModel and on single-doc reads below.
+      function canDiscoverLiveSession(data, uid) {
+        let hostId = liveSessionHostIdFromData(data);
+        return uid == hostId ||
+          (
+            (
+              !isEndedLiveStatus(data.status) &&
+              (
+                liveSessionViewAccessModeFromData(data) == 'public' ||
+                (
+                  liveSessionViewAccessModeFromData(data) == 'followers_only' &&
+                  exists(/databases/$(database)/documents/users/$(hostId)/followers/$(uid))
+                )
+              )
+            ) ||
+            (
+              isEndedLiveStatus(data.status) &&
+              (
+                liveSessionReplayVisibilityFromData(data) == 'public' ||
+                (
+                  liveSessionReplayVisibilityFromData(data) == 'followers_only' &&
+                  exists(/databases/$(database)/documents/users/$(hostId)/followers/$(uid))
+                )
+              )
+            )
+          );
+      }
+
+      function canReadLiveSessionDocument(sessionId, uid) {
+        let session = get(/databases/$(database)/documents/live_sessions/$(sessionId)).data;
+        let hostId = liveSessionHostIdFromData(session);
+        return uid == hostId ||
+          (
+            !(hasUserBlocked(hostId, uid) || hasUserBlocked(uid, hostId) || isLiveViewerBlocked(sessionId, uid)) &&
+            (
+              (
+                isEndedLiveStatus(session.status) &&
+                (
+                  liveSessionReplayVisibility(sessionId) == 'public' ||
+                  (
+                    liveSessionReplayVisibility(sessionId) == 'followers_only' &&
+                    exists(/databases/$(database)/documents/users/$(hostId)/followers/$(uid))
+                  )
+                )
+              ) ||
+              (
+                !isEndedLiveStatus(session.status) &&
+                canReadLiveInteraction(sessionId, uid)
+              )
+            )
+          );
+      }
+
+      function validLiveViewerRole(sessionId, viewerId, roleValue) {
+        return (
+          liveSessionHostId(sessionId) == viewerId &&
+          roleValue == 'HOST'
+        ) || (
+          liveSessionHostId(sessionId) != viewerId &&
+          roleValue == 'VIEWER'
+        );
+      }
+
+      function isLiveViewerBlocked(sessionId, uid) {
+        return uid is string
+          && exists(/databases/$(database)/documents/live_sessions/$(sessionId)/blocked_users/$(uid));
+      }
+
+      // Written only by Cloud Functions after validating a signed share-link token.
+      function isLiveInvitedViewer(sessionId, uid) {
+        return uid is string
+          && exists(/databases/$(database)/documents/live_sessions/$(sessionId)/invited_viewers/$(uid));
+      }
+
+      allow get: if isSignedIn() && canReadLiveSessionDocument(sessionId, request.auth.uid);
+      allow list: if isSignedIn() && canDiscoverLiveSession(resource.data, request.auth.uid);
+      allow create: if isSignedIn() && validLiveSessionCreate();
+      allow update: if isSignedIn() && resource.data.hostId == request.auth.uid && validLiveSessionUpdate();
       allow delete: if false;
 
       match /likes/{userId} {
-        allow read: if isSignedIn();
+        allow get, list: if isSignedIn() && canReadLiveSessionDocument(sessionId, request.auth.uid);
         allow create, update: if isSignedIn()
           && request.auth.uid == userId
-          && request.resource.data.userId == request.auth.uid;
+          && request.resource.data.keys().hasOnly(['userId', 'createdAt'])
+          && request.resource.data.userId == request.auth.uid
+          && canReadLiveInteraction(sessionId, request.auth.uid)
+          && !isLiveViewerBlocked(sessionId, request.auth.uid)
+          && isActiveLiveStatus(get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.status);
         allow delete: if isSignedIn() && request.auth.uid == userId;
       }
 
+      // Once a session ends, chat history follows replay visibility instead of the live audience.
       match /comments/{commentId} {
-        allow read: if isSignedIn();
+        allow get, list: if isSignedIn() && canReadLiveSessionDocument(sessionId, request.auth.uid);
         allow create: if isSignedIn()
+          && request.resource.data.keys().hasOnly(['authorId', 'authorName', 'text', 'createdAt'])
           && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.authorName is string
+          && request.resource.data.authorName.size() > 0
+          && request.resource.data.authorName.size() <= 120
+          && liveIdentityMatches(request.auth.uid, request.resource.data.authorName)
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 500
-          && get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.get('chatEnabled', true) == true
-          && (
-            !('replyToCommentId' in request.resource.data) ||
-            (
-              request.resource.data.replyToCommentId is string &&
-              request.resource.data.replyToCommentId.size() > 0 &&
-              request.resource.data.replyToCommentId.size() <= 128
-            )
-          );
+          && canReadLiveInteraction(sessionId, request.auth.uid)
+          && !isLiveViewerBlocked(sessionId, request.auth.uid)
+          && liveChatEnabled(sessionId)
+          && isActiveLiveStatus(get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.status);
         allow update, delete: if false;
       }
 
-      match /viewers/{userId} {
-        allow read: if isSignedIn();
-        allow create, update: if isSignedIn() && request.auth.uid == userId;
-        allow delete: if isSignedIn() && request.auth.uid == userId;
+      match /viewers/{viewerId} {
+        allow get, list: if isSignedIn() && canReadLiveSessionDocument(sessionId, request.auth.uid);
+        allow create, update: if isSignedIn()
+          && request.auth.uid == viewerId
+          && request.resource.data.keys().hasOnly(['userId', 'displayName', 'role', 'isVisibleToAudience', 'joinedAt', 'lastSeenAt'])
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.displayName is string
+          && request.resource.data.displayName.size() > 0
+          && request.resource.data.displayName.size() <= 120
+          && liveIdentityMatches(request.auth.uid, request.resource.data.displayName)
+          && (!('isVisibleToAudience' in request.resource.data) || request.resource.data.isVisibleToAudience is bool)
+          && validLiveViewerRole(sessionId, viewerId, request.resource.data.role)
+          && canReadLiveInteraction(sessionId, request.auth.uid)
+          && !isLiveViewerBlocked(sessionId, request.auth.uid)
+          && isActiveLiveStatus(get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.status);
+        allow delete: if isSignedIn() && request.auth.uid == viewerId;
       }
 
-      match /blocked_users/{blockedUserId} {
-        allow read: if isSignedIn();
-        allow create, update, delete: if isSignedIn()
-          && get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.hostId == request.auth.uid;
+      match /blocked_users/{blockedUid} {
+        allow get, list: if isSignedIn() && (
+          liveSessionHostId(sessionId) == request.auth.uid ||
+          blockedUid == request.auth.uid
+        );
+        allow create, update: if isSignedIn()
+          && liveSessionHostId(sessionId) == request.auth.uid
+          && request.resource.data.keys().hasOnly(['userId', 'displayName', 'blockedByUid', 'createdAt', 'updatedAt'])
+          && request.resource.data.userId == blockedUid
+          && request.resource.data.blockedByUid == request.auth.uid
+          && request.resource.data.displayName is string
+          && request.resource.data.displayName.size() > 0
+          && request.resource.data.displayName.size() <= 120;
+        allow delete: if isSignedIn()
+          && liveSessionHostId(sessionId) == request.auth.uid;
+      }
+
+      match /invited_viewers/{viewerUid} {
+        allow get: if isSignedIn() && (
+          viewerUid == request.auth.uid ||
+          liveSessionHostId(sessionId) == request.auth.uid
+        );
+        allow list: if isSignedIn() && liveSessionHostId(sessionId) == request.auth.uid;
+        allow write: if false;
+      }
+
+      // Server-only replay object URL (written by Cloud Functions Admin SDK).
+      match /server_archive/{docId} {
+        allow read, write: if false;
       }
     }
 
     // --- NEW: JOIN LIVE STREAM REQUESTS ---
     match /join_requests/{requestId} {
-      // Volunteers can create requests to join streams
-      allow create: if isSignedIn() && request.resource.data.volunteerId == request.auth.uid;
+      function validJoinRequestKeys(data) {
+        return data.keys().hasOnly(['streamId', 'hostId', 'volunteerId', 'volunteerName', 'status', 'requestedRole', 'createdAt', 'updatedAt']);
+      }
 
-      // Users can read their own requests
-      allow read: if isSignedIn() && (
+      function validJoinRequestCreate() {
+        return validJoinRequestKeys(request.resource.data)
+          && request.resource.data.streamId is string
+          && request.resource.data.streamId.size() > 0
+          && request.resource.data.hostId is string
+          && request.resource.data.hostId.size() > 0
+          && request.resource.data.volunteerId == request.auth.uid
+          && request.resource.data.volunteerName is string
+          && request.resource.data.volunteerName.size() > 0
+          && request.resource.data.volunteerName.size() <= 120
+          && liveIdentityMatches(request.auth.uid, request.resource.data.volunteerName)
+          && request.resource.data.status == 'pending'
+          && request.resource.data.requestedRole == 'publisher'
+          && requestId == request.resource.data.streamId + '_' + request.auth.uid
+          && exists(/databases/$(database)/documents/live_sessions/$(request.resource.data.streamId))
+          && get(/databases/$(database)/documents/live_sessions/$(request.resource.data.streamId)).data.hostId == request.resource.data.hostId
+          && !exists(/databases/$(database)/documents/live_sessions/$(request.resource.data.streamId)/blocked_users/$(request.auth.uid))
+          && !hasUserBlocked(request.resource.data.hostId, request.auth.uid)
+          && isActiveLiveSessionStatus(get(/databases/$(database)/documents/live_sessions/$(request.resource.data.streamId)).data.status)
+          && allowsLiveStageJoinRequest(request.resource.data.streamId);
+      }
+
+      allow create: if isSignedIn() && validJoinRequestCreate();
+
+      allow get: if isSignedIn() && (
         resource.data.volunteerId == request.auth.uid ||
-        // Organizers can read requests for their streams
-        get(/databases/$(database)/documents/live_sessions/$(resource.data.streamId)).data.hostId == request.auth.uid
+        resource.data.hostId == request.auth.uid
       );
 
-      // Only the organizer of the stream can update request status
-      allow update: if isSignedIn() && 
-        get(/databases/$(database)/documents/live_sessions/$(resource.data.streamId)).data.hostId == request.auth.uid &&
-        (request.resource.data.status in ['accepted', 'rejected'] || request.resource.data.status == resource.data.status);
+      allow list: if isSignedIn() && (
+        resource.data.volunteerId == request.auth.uid ||
+        resource.data.hostId == request.auth.uid
+      );
+
+      allow update: if isSignedIn()
+        && validJoinRequestKeys(request.resource.data)
+        && request.resource.data.streamId == resource.data.streamId
+        && request.resource.data.hostId == resource.data.hostId
+        && request.resource.data.volunteerId == resource.data.volunteerId
+        && request.resource.data.requestedRole == resource.data.requestedRole
+        && request.resource.data.volunteerName == resource.data.volunteerName
+        && (
+          (
+            request.auth.uid == resource.data.volunteerId &&
+            resource.data.status != 'accepted' &&
+            request.resource.data.status in ['pending', 'canceled']
+          ) ||
+          (
+            (
+              get(/databases/$(database)/documents/live_sessions/$(resource.data.streamId)).data.hostId == request.auth.uid ||
+              resource.data.hostId == request.auth.uid
+            ) &&
+            request.resource.data.status in ['accepted', 'rejected', resource.data.status]
+          )
+        );
 
       // No deletion allowed
       allow delete: if false;
     }
 
     // --- PAYOUT REQUESTS ---
+    // Raw SWIFT invoice tokens are server-only. The matching payout record stores
+    // a one-way hash so the sender can never read the provider-facing URL.
+    match /swift_transfer_invoice_secrets/{secretId} {
+      allow read, write: if false;
+    }
+
     match /payout_requests/{requestId} {
+      // Server-authoritative like deposit_requests: creation and status transitions must go through
+      // Cloud Functions / Admin SDK so clients cannot forge payout state or provider diagnostics.
       allow create: if false;
-      allow read: if isWalletAgent() || isPlatformAdmin() || (
-        isSignedIn() &&
-        (
-          resource.data.senderId == request.auth.uid ||
-          resource.data.recipientId == request.auth.uid
-        )
-      );
+      allow read: if isWalletAgent() || isPlatformAdmin() || (isSignedIn() && resource.data.senderId == request.auth.uid);
       allow update: if false;
       allow delete: if false;
     }
 
     // --- USER REPORTS ---
+    match /feedback/{feedbackId} {
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && request.resource.data.message is string
+        && request.resource.data.message.size() <= 4000
+        && request.resource.data.source is string;
+      allow read, update, delete: if isPlatformAdmin();
+    }
+
     // Supports both snake_case and camelCase collections used across screens.
     match /user_reports/{reportId} {
       allow create: if isSignedIn() &&
-        (!('reportingUserId' in request.resource.data) || request.resource.data.reportingUserId == request.auth.uid);
+        (!('reportingUserId' in request.resource.data) || request.resource.data.reportingUserId == request.auth.uid) &&
+        (!('reportedByUid' in request.resource.data) || request.resource.data.reportedByUid == request.auth.uid);
       allow read: if isPlatformAdmin() ||
-        (isSignedIn() && resource.data.reportingUserId == request.auth.uid);
+        (
+          isSignedIn() &&
+          (
+            resource.data.reportingUserId == request.auth.uid ||
+            resource.data.reportedByUid == request.auth.uid ||
+            resource.data.userId == request.auth.uid
+          )
+        );
       allow update, delete: if isPlatformAdmin();
     }
 
@@ -1049,12 +2534,14 @@ service cloud.firestore {
           !('reportingUserId' in request.resource.data) ||
           request.resource.data.reportingUserId == request.auth.uid ||
           ('userId' in request.resource.data && request.resource.data.userId == request.auth.uid)
-        );
+        ) &&
+        (!('reportedByUid' in request.resource.data) || request.resource.data.reportedByUid == request.auth.uid);
       allow read: if isPlatformAdmin() ||
         (
           isSignedIn() &&
           (
             resource.data.reportingUserId == request.auth.uid ||
+            resource.data.reportedByUid == request.auth.uid ||
             resource.data.userId == request.auth.uid
           )
         );
@@ -1063,13 +2550,15 @@ service cloud.firestore {
 
     // --- SYSTEM / PLATFORM REVENUE ---
     match /system/{docId} {
-      // Settlement mirrors contain provider float and operational readiness, not public app data.
-      allow read: if isSignedIn() &&
-        ((docId != 'platform_revenue' && docId != 'afriex_business_wallet') || isPlatformOwner());
+      allow read: if isSignedIn() && (
+        (docId != 'platform_revenue' &&
+          docId != 'afriex_business_wallet' &&
+          docId != 'stripe_platform_settlement_mirror') || isPlatformAdmin()
+      );
       allow write: if false;
 
       match /transactions/{txId} {
-        allow read: if isPlatformOwner();
+        allow read: if isPlatformAdmin();
         allow write: if false;
       }
     }
@@ -1091,28 +2580,147 @@ service cloud.firestore {
     }
 
     // --- APP CONFIG ---
-    // Used by Terms & Conditions / Privacy content shown in-app.
+    // Fee settings include provider costs, owner margins, and internal splits.
+    // Customer price previews are served through a restricted callable instead.
     match /app_config/{docId} {
-      allow read: if true;
+      allow read: if docId != 'fee_settings' || isPlatformAdmin();
       allow write: if isPlatformOwner();
     }
 
     // Legacy alias support in case content exists under camelCase collection.
     match /appConfig/{docId} {
-      allow read: if true;
+      allow read: if docId != 'fee_settings' || isPlatformAdmin();
       allow write: if isPlatformOwner();
     }
 
     // --- MARKETPLACE ---
+    function marketplaceListingOpenStatus(status) {
+      return status == null || status in ['AVAILABLE', 'ACTIVE', 'OPEN'];
+    }
+
+    function isMarketplaceStorageUrlForSeller(url, sellerId) {
+      return url is string
+        && url.size() > 0
+        && url.size() <= 2000
+        && (url.matches('https://firebasestorage.googleapis.com/.*')
+            || url.matches('https://.*\\.firebasestorage\\.app/.*'))
+        && (url.matches('.*marketplace_images%2F' + sellerId + '%2F.*')
+            || url.matches('.*marketplace_images/' + sellerId + '/.*'));
+    }
+
+    function marketplaceImageUrlsListValid(urls, sellerId) {
+      return urls is list
+        && urls.size() > 0
+        && urls.size() <= 20
+        && isMarketplaceStorageUrlForSeller(urls[0], sellerId)
+        && (urls.size() < 2 || isMarketplaceStorageUrlForSeller(urls[1], sellerId))
+        && (urls.size() < 3 || isMarketplaceStorageUrlForSeller(urls[2], sellerId))
+        && (urls.size() < 4 || isMarketplaceStorageUrlForSeller(urls[3], sellerId))
+        && (urls.size() < 5 || isMarketplaceStorageUrlForSeller(urls[4], sellerId))
+        && (urls.size() < 6 || isMarketplaceStorageUrlForSeller(urls[5], sellerId))
+        && (urls.size() < 7 || isMarketplaceStorageUrlForSeller(urls[6], sellerId))
+        && (urls.size() < 8 || isMarketplaceStorageUrlForSeller(urls[7], sellerId))
+        && (urls.size() < 9 || isMarketplaceStorageUrlForSeller(urls[8], sellerId))
+        && (urls.size() < 10 || isMarketplaceStorageUrlForSeller(urls[9], sellerId))
+        && (urls.size() < 11 || isMarketplaceStorageUrlForSeller(urls[10], sellerId))
+        && (urls.size() < 12 || isMarketplaceStorageUrlForSeller(urls[11], sellerId))
+        && (urls.size() < 13 || isMarketplaceStorageUrlForSeller(urls[12], sellerId))
+        && (urls.size() < 14 || isMarketplaceStorageUrlForSeller(urls[13], sellerId))
+        && (urls.size() < 15 || isMarketplaceStorageUrlForSeller(urls[14], sellerId))
+        && (urls.size() < 16 || isMarketplaceStorageUrlForSeller(urls[15], sellerId))
+        && (urls.size() < 17 || isMarketplaceStorageUrlForSeller(urls[16], sellerId))
+        && (urls.size() < 18 || isMarketplaceStorageUrlForSeller(urls[17], sellerId))
+        && (urls.size() < 19 || isMarketplaceStorageUrlForSeller(urls[18], sellerId))
+        && (urls.size() < 20 || isMarketplaceStorageUrlForSeller(urls[19], sellerId));
+    }
+
+    function marketplaceListingCreateMediaValid(data, sellerId) {
+      return ('imageUrls' in data)
+        && marketplaceImageUrlsListValid(data.imageUrls, sellerId);
+    }
+
+    function marketplaceListingPatchMediaValid(data, sellerId) {
+      return ('imageUrls' in data)
+        && marketplaceImageUrlsListValid(data.imageUrls, sellerId);
+    }
+
+    function isSafeMarketplaceItemPatch() {
+      let priorStatus = resource.data.get('status', 'AVAILABLE');
+      return marketplaceListingOpenStatus(priorStatus)
+        && request.resource.data.price is number
+        && request.resource.data.price > 0
+        && request.resource.data.price <= 50000
+        && marketplaceListingPatchMediaValid(request.resource.data, request.auth.uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title',
+          'description',
+          'category',
+          'price',
+          'sellerPhone',
+          'locationName',
+          'latitude',
+          'longitude',
+          'imageUrls',
+          'media',
+          'updatedAt'
+        ]);
+    }
+
+    function isSafeMarketplaceItemSoftDelete() {
+      return resource.data.sellerId == request.auth.uid
+        && request.resource.data.sellerId == resource.data.sellerId
+        && marketplaceListingOpenStatus(resource.data.get('status', 'AVAILABLE'))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'isDeleted',
+          'status',
+          'deletedAt'
+        ])
+        && request.resource.data.isDeleted == true
+        && request.resource.data.status == 'DELETED';
+    }
+
+    function isSafeAdvertisementContentPatch() {
+      return resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title',
+          'description',
+          'targetUrl',
+          'ownerPhone',
+          'media',
+          'mediaUrls',
+          'updatedAt'
+        ]);
+    }
+
+    function isSafeAdvertisementSoftDelete() {
+      return resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'isDeleted',
+          'status',
+          'deletedAt'
+        ])
+        && request.resource.data.isDeleted == true
+        && request.resource.data.status == 'DELETED';
+    }
+
     match /marketplace_items/{itemId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.sellerId == request.auth.uid;
-      // Checkout always re-reads the item, but the listing owner itself must
-      // also remain immutable so a client cannot redirect a sale to another user.
-      allow update: if isSignedIn() &&
-        resource.data.sellerId == request.auth.uid &&
-        request.resource.data.sellerId == resource.data.sellerId;
-      allow delete: if isSignedIn() && resource.data.sellerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.sellerId == request.auth.uid
+        && request.resource.data.price is number
+        && request.resource.data.price > 0
+        && request.resource.data.price <= 50000
+        && marketplaceListingOpenStatus(request.resource.data.get('status', 'AVAILABLE'))
+        && marketplaceListingCreateMediaValid(request.resource.data, request.auth.uid);
+      // Sellers may edit listing copy/media only while the listing is still open.
+      // Commerce fields (status, sold*, reserved*) are server-owned via Cloud Functions.
+      allow update: if isSignedIn()
+        && resource.data.sellerId == request.auth.uid
+        && request.resource.data.sellerId == resource.data.sellerId
+        && (isSafeMarketplaceItemPatch() || isSafeMarketplaceItemSoftDelete());
+      allow delete: if false;
     }
 
     // --- GALLERY UPLOADS ---
@@ -1124,9 +2732,28 @@ service cloud.firestore {
     }
 
     match /purchase_requests/{requestId} {
-      // Retired internal-wallet purchase trigger. Commerce starts only through
-      // App Check-protected Stripe Checkout callables.
-      allow create: if false;
+      // Bind seller to the live listing so buyers cannot forge payouts to arbitrary users.
+      allow create: if isSignedIn()
+        && request.resource.data.buyerId == request.auth.uid
+        && request.resource.data.buyerId != request.resource.data.sellerId
+        && !hasUserBlocked(request.resource.data.sellerId, request.auth.uid)
+        && !hasUserBlocked(request.auth.uid, request.resource.data.sellerId)
+        && request.resource.data.status == 'pending'
+        // Legacy clients default to card checkout; newer clients may explicitly choose mobile money.
+        && request.resource.data.get('fundingPreference', 'STRIPE_CARD')
+          in ['STRIPE_CARD', 'AFRIEX_MOBILE_MONEY']
+        && request.resource.data.itemId is string
+        && request.resource.data.price is number
+        && request.resource.data.price > 0
+        && request.resource.data.price <= 50000
+        && request.resource.data.sellerId
+          == get(/databases/$(database)/documents/marketplace_items/$(request.resource.data.itemId)).data.sellerId
+        && get(/databases/$(database)/documents/marketplace_items/$(request.resource.data.itemId)).data.isDeleted != true
+        && marketplaceListingOpenStatus(
+          get(/databases/$(database)/documents/marketplace_items/$(request.resource.data.itemId)).data.get('status', 'AVAILABLE')
+        )
+        && request.resource.data.price
+          == get(/databases/$(database)/documents/marketplace_items/$(request.resource.data.itemId)).data.price;
       allow read: if isSignedIn() && (request.auth.uid == resource.data.buyerId || request.auth.uid == resource.data.sellerId);
       allow update, delete: if false;
     }
@@ -1134,10 +2761,9 @@ service cloud.firestore {
     // --- JOKES ---
     // Collection-group compatibility for MindLoom feed (e.g., collectionGroup("jokes")).
     // Keep this read-only; writes stay scoped to /users/{userId}/jokes/{jokeId} above.
-    match /{path=**}/jokes/{jokeId} {   
-      allow read: if isSignedIn() &&
-        (resource.data.authorId == request.auth.uid || isVisibleMindLoomData(resource.data));
-    }   
+    match /{path=**}/jokes/{jokeId} {
+      allow read: if isSignedIn();
+    }
 
     match /jokes/{jokeId} {
       allow read: if isSignedIn();
@@ -1149,9 +2775,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       // Ad creation + fee debit must happen in Cloud Functions (Admin SDK).
       allow create: if false;
-      allow update: if isSignedIn() &&
-        resource.data.ownerId == request.auth.uid &&
-        request.resource.data.ownerId == resource.data.ownerId;
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && (isSafeAdvertisementContentPatch() || isSafeAdvertisementSoftDelete());
       allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 
@@ -1162,46 +2789,53 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Public seller profile metadata used to label and open Garage Shop listings.
-    // Payment and order records remain restricted to their participants below.
-    match /garage_shop_profiles/{ownerId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() &&
-        ownerId == request.auth.uid &&
-        request.resource.data.ownerId == request.auth.uid &&
-        request.resource.data.shopName is string &&
-        request.resource.data.contactName is string &&
-        request.resource.data.isOpen is bool &&
-        request.resource.data.keys().hasOnly([
-          'ownerId', 'shopName', 'contactName', 'isOpen', 'updatedAt'
-        ]);
-      allow update: if isSignedIn() &&
-        ownerId == request.auth.uid &&
-        resource.data.ownerId == request.auth.uid &&
-        request.resource.data.ownerId == resource.data.ownerId &&
-        request.resource.data.shopName is string &&
-        request.resource.data.contactName is string &&
-        request.resource.data.isOpen is bool &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'ownerId', 'shopName', 'contactName', 'isOpen', 'updatedAt'
-        ]);
-      allow delete: if false;
-    }
-
     match /garage_sale_payments/{paymentId} {
-      allow create: if isSignedIn() && request.resource.data.buyerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.buyerId == request.auth.uid
+        && request.resource.data.buyerId != request.resource.data.sellerId
+        && request.resource.data.garageSaleId is string
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.amount <= 50000
+        // Legacy clients default to card checkout; newer clients may explicitly choose mobile money.
+        && request.resource.data.get('fundingPreference', 'STRIPE_CARD')
+          in ['STRIPE_CARD', 'AFRIEX_MOBILE_MONEY']
+        && exists(/databases/$(database)/documents/garage_sales/$(request.resource.data.garageSaleId))
+        && get(/databases/$(database)/documents/garage_sales/$(request.resource.data.garageSaleId)).data.ownerId == request.resource.data.sellerId
+        && get(/databases/$(database)/documents/garage_sales/$(request.resource.data.garageSaleId)).data.isDeleted != true
+        && (
+          !exists(/databases/$(database)/documents/garage_shop_profiles/$(request.resource.data.sellerId))
+          || get(/databases/$(database)/documents/garage_shop_profiles/$(request.resource.data.sellerId)).data.isOpen != false
+        );
       allow read: if isSignedIn() && (request.auth.uid == resource.data.buyerId || request.auth.uid == resource.data.sellerId);
       allow update, delete: if false;
     }
 
+    match /garage_shop_profiles/{ownerId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && ownerId == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.isOpen is bool;
+      allow update: if isSignedIn()
+        && ownerId == request.auth.uid
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.isOpen is bool;
+      allow delete: if false;
+    }
+
     // --- DATING LOOP ---
     match /dating_profiles/{userId} {
-      allow read: if isSignedIn() && isDatingEligibleAccount(request.auth.uid);
-      allow create, update: if isOwner(userId) && isDatingEligibleAccount(userId);
-      allow delete: if isOwner(userId);
+      allow read: if isSignedIn() && userCanAccessDating(request.auth.uid);
+      allow create, update: if isOwner(userId)
+        && userCanAccessDating(userId)
+        && isSafeDatingProfilePayload();
+      allow delete: if isOwner(userId) && userCanAccessDating(userId);
     }
 
     // --- APPLICATIONS IN SUBCOLLECTIONS (e.g. events/{eventId}/applications/{appId}) ---
+    // Job applications under jobs/{jobId}/applications are governed by the explicit jobs/* match above.
     match /{path=**}/applications/{appId} {
       allow read: if isSignedIn() &&
         (
@@ -1209,9 +2843,27 @@ service cloud.firestore {
           isApplicationManagerFromData(resource.data) ||
           appId == request.auth.uid
         );
-      allow create: if isSignedIn() && isApplicationOwnerFromData(request.resource.data);
-      allow update: if isSignedIn() && isApplicationManagerFromData(resource.data);
-      allow delete: if isSignedIn() &&
+      // Event applications are created only by the `applyForEvent` Cloud Function (Admin SDK).
+      allow create: if isSignedIn() && isApplicationOwnerFromData(request.resource.data)
+        && !path.matches('^jobs/.+')
+        && !path.matches('^events/.+');
+      // Event applications are provider-managed. Keep this legacy catch-all from
+      // overriding the stricter /events/{eventId}/applications rule above.
+      allow update: if isSignedIn()
+        && !path.matches('^events/.+')
+        && !path.matches('^jobs/.+')
+        && (
+        isApplicationManagerFromData(resource.data) ||
+        (
+          appId == request.auth.uid &&
+          path.matches('^jobs/.+') &&
+          isVolunteerJobResumeFieldPatch()
+        )
+      );
+      allow delete: if isSignedIn()
+        && !path.matches('^events/.+')
+        && !path.matches('^jobs/.+')
+        &&
         (isApplicationOwnerFromData(resource.data) || isApplicationManagerFromData(resource.data));
     }
   }
