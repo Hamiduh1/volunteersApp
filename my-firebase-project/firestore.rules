@@ -52,11 +52,26 @@ service cloud.firestore {
         : '';
     }
 
+    // Clients trim display names, so compare trimmed values. A generic placeholder is only
+    // accepted when the profile has no name, username or email to impersonate.
     function liveIdentityMatches(uid, submittedName) {
-      return submittedName == liveProfileName(uid)
-        || submittedName == liveProfileUsername(uid)
-        || submittedName == liveProfileEmail(uid)
-        || submittedName == liveAuthEmail();
+      let submitted = submittedName is string ? submittedName.trim() : '';
+      let profileName = liveProfileName(uid).trim();
+      let profileUsername = liveProfileUsername(uid).trim();
+      let profileEmail = liveProfileEmail(uid).trim();
+      let authEmail = liveAuthEmail().trim();
+      let authName = request.auth.token.name is string ? request.auth.token.name.trim() : '';
+      return (submitted != '' && (
+          submitted == profileName
+          || submitted == profileUsername
+          || submitted == profileEmail
+          || submitted == authEmail
+          || submitted == authName
+        ))
+        || (
+          profileName == '' && profileUsername == '' && profileEmail == '' && authEmail == '' && authName == ''
+          && submitted in ['Viewer', 'User', 'Host', 'Anonymous Host']
+        );
     }
 
     function liveSessionStageAccessMode(streamId) {
@@ -68,6 +83,27 @@ service cloud.firestore {
     function allowsLiveStageJoinRequest(streamId) {
       let mode = liveSessionStageAccessMode(streamId);
       return mode in ['request_to_join', 'approved_volunteers', 'open_to_accepted_volunteers'];
+    }
+
+    // Stage requests must come from someone in the stream's audience. Invite-only is the
+    // exception: an accepted request is how a viewer is admitted in the first place.
+    function liveJoinRequesterCanView(streamId, uid) {
+      let session = get(/databases/$(database)/documents/live_sessions/$(streamId)).data;
+      let hostId = session.get('hostId', '');
+      let mode = session.get('viewAccessMode', 'public');
+      let sourceType = session.get('sourceType', '');
+      let sourceId = session.get('sourceId', '');
+      return mode in ['public', 'invite_only']
+        || exists(/databases/$(database)/documents/live_sessions/$(streamId)/invited_viewers/$(uid))
+        || (mode == 'followers_only'
+          && hostId is string && hostId != ''
+          && exists(/databases/$(database)/documents/users/$(hostId)/followers/$(uid)))
+        || (mode == 'accepted_event_volunteers'
+          && sourceType in ['organizer_event', 'event']
+          && sourceId is string && sourceId != ''
+          && exists(/databases/$(database)/documents/events/$(sourceId)/applications/$(uid))
+          && get(/databases/$(database)/documents/events/$(sourceId)/applications/$(uid)).data.get('status', '')
+            in ['APPROVED', 'ACCEPTED', 'ATTENDED', 'COMPLETED', 'approved', 'accepted', 'attended', 'completed']);
     }
 
     function isOwner(userId) {
@@ -1532,7 +1568,10 @@ service cloud.firestore {
 
       match /followers/{followerId} {
         allow read: if isSignedIn();
-        allow create, delete: if isSignedIn() && request.auth.uid == followerId;
+        // Following unlocks followers-only lives and replays, so a blocked user can't re-follow.
+        allow create: if isSignedIn() && request.auth.uid == followerId
+          && !hasUserBlocked(userId, followerId);
+        allow delete: if isSignedIn() && request.auth.uid == followerId;
         allow update: if false;
       }
 
@@ -1946,6 +1985,14 @@ service cloud.firestore {
           'startTime',
           'updatedAt',
           'endedAt',
+          'endTime',
+          'description',
+          'viewerCount',
+          'notifyFollowersOnStart',
+          'acceptedVolunteerIds',
+          'blockedViewerIds',
+          'linkedEventId',
+          'hostProfilePicUrl',
           'archiveStatus',
           'archiveUploadStatus',
           'archivePrimaryFile',
@@ -1961,9 +2008,20 @@ service cloud.firestore {
         ]);
       }
 
+      // Android writes 'event' for the same organizer-event link that iOS calls 'organizer_event'.
       function liveSessionSourceTypeFromData(data) {
         let value = data.sourceType;
-        return value is string ? value : 'standalone';
+        return value == 'event' ? 'organizer_event' : value is string ? value : 'standalone';
+      }
+
+      function validAndroidLiveSessionFields(data) {
+        return (!('description' in data) || (data.description is string && data.description.size() <= 2000))
+          && (!('viewerCount' in data) || data.viewerCount is int)
+          && (!('notifyFollowersOnStart' in data) || data.notifyFollowersOnStart is bool)
+          && (!('acceptedVolunteerIds' in data) || (data.acceptedVolunteerIds is list && data.acceptedVolunteerIds.size() <= 200))
+          && (!('blockedViewerIds' in data) || (data.blockedViewerIds is list && data.blockedViewerIds.size() <= 500))
+          && (!('linkedEventId' in data) || data.linkedEventId == liveSessionSourceIdFromData(data))
+          && (!('hostProfilePicUrl' in data) || (data.hostProfilePicUrl is string && data.hostProfilePicUrl.size() <= 2048));
       }
 
       function liveSessionSourceIdFromData(data) {
@@ -2030,6 +2088,8 @@ service cloud.firestore {
           && request.resource.data.hostName is string
           && request.resource.data.hostName.size() > 0
           && request.resource.data.hostName.size() <= 120
+          // hostName appears on discovery cards and in "X is live" pushes, so it must be the host's own.
+          && liveIdentityMatches(request.auth.uid, request.resource.data.hostName)
           && (!('hostUsername' in request.resource.data) || request.resource.data.hostUsername == null || (
             request.resource.data.hostUsername is string &&
             request.resource.data.hostUsername.size() <= 120
@@ -2037,10 +2097,15 @@ service cloud.firestore {
           && request.resource.data.title is string
           && request.resource.data.title.size() > 0
           && request.resource.data.title.size() <= 120
+          // Binding the channel to the host stops another user from claiming a live channel
+          // and minting a publisher token or a cloud recording for it.
           && request.resource.data.agoraChannelName is string
-          && request.resource.data.agoraChannelName.size() > 0
-          && request.resource.data.agoraChannelName.size() <= 64
-          && (!('sourceType' in request.resource.data) || request.resource.data.sourceType in ['standalone', 'organizer_event', 'mindloom'])
+          && request.resource.data.agoraChannelName.matches('live-' + request.auth.uid + '-[0-9]{9,13}')
+          && (!('createdAt' in request.resource.data) || request.resource.data.createdAt == request.time)
+          && (!('startTime' in request.resource.data) || request.resource.data.startTime == request.time)
+          && (!('updatedAt' in request.resource.data) || request.resource.data.updatedAt == request.time)
+          && validAndroidLiveSessionFields(request.resource.data)
+          && (!('sourceType' in request.resource.data) || request.resource.data.sourceType in ['standalone', 'organizer_event', 'event', 'mindloom'])
           && (!('sourceId' in request.resource.data) || request.resource.data.sourceId == null || (
             request.resource.data.sourceId is string &&
             request.resource.data.sourceId.size() <= 160
@@ -2054,7 +2119,7 @@ service cloud.firestore {
           && validLiveShareFields(request.resource.data, sessionId, request.auth.uid)
           && validLiveSessionEventAudienceConfiguration(request.resource.data, request.auth.uid)
           && validLiveSessionWatchStageConfiguration(request.resource.data)
-          && (!('chatEnabled' in request.resource.data) || request.resource.data.chatEnabled == true)
+          && (!('chatEnabled' in request.resource.data) || request.resource.data.chatEnabled is bool)
           && liveArchiveFieldsMissingOnCreate()
           && isActiveLiveStatus(request.resource.data.status);
       }
@@ -2066,8 +2131,14 @@ service cloud.firestore {
           && request.resource.data.agoraChannelName == resource.data.agoraChannelName
           && (!('channelName' in resource.data) || !('channelName' in request.resource.data) || request.resource.data.channelName == resource.data.channelName)
           && validLiveShareFields(request.resource.data, sessionId, resource.data.hostId)
-          && validLiveSessionEventAudienceConfiguration(request.resource.data, resource.data.hostId)
+          // Only re-check event ownership when the audience changes, so a host can still end
+          // or moderate a stream whose linked event was deleted mid-broadcast.
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['viewAccessMode', 'stageAccessMode'])
+            || validLiveSessionEventAudienceConfiguration(request.resource.data, resource.data.hostId)
+          )
           && validLiveSessionWatchStageConfiguration(request.resource.data)
+          && validAndroidLiveSessionFields(request.resource.data)
           && request.resource.data.hostName is string
           && request.resource.data.hostName.size() > 0
           && request.resource.data.hostName.size() <= 120
@@ -2087,7 +2158,9 @@ service cloud.firestore {
             request.resource.data.status == resource.data.status ||
             request.resource.data.status in ['ENDED', 'ended', 'Ended']
           )
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          // affectedKeys (not changedKeys) so fields can't be added, e.g. forged archive* paths,
+          // and nothing may be removed, e.g. dropping viewAccessMode to fall back to public.
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'status',
             'chatEnabled',
             'viewAccessMode',
@@ -2095,8 +2168,16 @@ service cloud.firestore {
             'replayVisibility',
             'notifyFollowers',
             'updatedAt',
-            'endedAt'
+            'endedAt',
+            'endTime',
+            'acceptedVolunteerIds',
+            'blockedViewerIds'
           ])
+          && request.resource.data.diff(resource.data).removedKeys().size() == 0
+          && (
+            !('updatedAt' in request.resource.data.diff(resource.data).affectedKeys())
+            || request.resource.data.updatedAt == request.time
+          )
           && liveViewAccessModeNotWidenedOnUpdate()
           && liveStageAccessModeNotWidenedOnUpdate();
       }
@@ -2317,6 +2398,12 @@ service cloud.firestore {
         );
       }
 
+      function liveTimestampIsNowOrUnchanged(field) {
+        return !(field in request.resource.data)
+          || request.resource.data[field] == request.time
+          || (resource != null && field in resource.data && request.resource.data[field] == resource.data[field]);
+      }
+
       function isLiveViewerBlocked(sessionId, uid) {
         return uid is string
           && exists(/databases/$(database)/documents/live_sessions/$(sessionId)/blocked_users/$(uid));
@@ -2359,6 +2446,7 @@ service cloud.firestore {
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 500
+          && request.resource.data.createdAt == request.time
           && canReadLiveInteraction(sessionId, request.auth.uid)
           && !isLiveViewerBlocked(sessionId, request.auth.uid)
           && liveChatEnabled(sessionId)
@@ -2377,11 +2465,15 @@ service cloud.firestore {
           && request.resource.data.displayName.size() <= 120
           && liveIdentityMatches(request.auth.uid, request.resource.data.displayName)
           && (!('isVisibleToAudience' in request.resource.data) || request.resource.data.isVisibleToAudience is bool)
+          // Future timestamps would leave ghost viewers in counts and pin fake activity.
+          && liveTimestampIsNowOrUnchanged('joinedAt')
+          && liveTimestampIsNowOrUnchanged('lastSeenAt')
           && validLiveViewerRole(sessionId, viewerId, request.resource.data.role)
           && canReadLiveInteraction(sessionId, request.auth.uid)
           && !isLiveViewerBlocked(sessionId, request.auth.uid)
           && isActiveLiveStatus(get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.status);
-        allow delete: if isSignedIn() && request.auth.uid == viewerId;
+        allow delete: if isSignedIn()
+          && (request.auth.uid == viewerId || liveSessionHostId(sessionId) == request.auth.uid);
       }
 
       match /blocked_users/{blockedUid} {
@@ -2441,12 +2533,16 @@ service cloud.firestore {
           && !exists(/databases/$(database)/documents/live_sessions/$(request.resource.data.streamId)/blocked_users/$(request.auth.uid))
           && !hasUserBlocked(request.resource.data.hostId, request.auth.uid)
           && isActiveLiveSessionStatus(get(/databases/$(database)/documents/live_sessions/$(request.resource.data.streamId)).data.status)
-          && allowsLiveStageJoinRequest(request.resource.data.streamId);
+          && allowsLiveStageJoinRequest(request.resource.data.streamId)
+          && liveJoinRequesterCanView(request.resource.data.streamId, request.auth.uid);
       }
 
       allow create: if isSignedIn() && validJoinRequestCreate();
 
+      // A first-time requester checks for their own request id before creating it; the id
+      // embeds their uid, so a missing doc reveals nothing about anyone else.
       allow get: if isSignedIn() && (
+        (resource == null && requestId.matches('[A-Za-z0-9_-]+_' + request.auth.uid)) ||
         resource.data.volunteerId == request.auth.uid ||
         resource.data.hostId == request.auth.uid
       );
@@ -2464,10 +2560,13 @@ service cloud.firestore {
         && request.resource.data.requestedRole == resource.data.requestedRole
         && request.resource.data.volunteerName == resource.data.volunteerName
         && (
+          // A rejected requester can't flip back to pending and re-notify the host.
           (
             request.auth.uid == resource.data.volunteerId &&
-            resource.data.status != 'accepted' &&
-            request.resource.data.status in ['pending', 'canceled']
+            !(resource.data.status in ['accepted', 'rejected']) &&
+            request.resource.data.status in ['pending', 'canceled'] &&
+            !exists(/databases/$(database)/documents/live_sessions/$(resource.data.streamId)/blocked_users/$(request.auth.uid)) &&
+            isActiveLiveSessionStatus(get(/databases/$(database)/documents/live_sessions/$(resource.data.streamId)).data.status)
           ) ||
           (
             (
