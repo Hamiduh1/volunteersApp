@@ -94,7 +94,8 @@ service cloud.firestore {
       let sourceType = session.get('sourceType', '');
       let sourceId = session.get('sourceId', '');
       return mode in ['public', 'invite_only']
-        || exists(/databases/$(database)/documents/live_sessions/$(streamId)/invited_viewers/$(uid))
+        || (mode != 'accepted_event_volunteers'
+          && exists(/databases/$(database)/documents/live_sessions/$(streamId)/invited_viewers/$(uid)))
         || (mode == 'followers_only'
           && hostId is string && hostId != ''
           && exists(/databases/$(database)/documents/users/$(hostId)/followers/$(uid)))
@@ -2233,7 +2234,7 @@ service cloud.firestore {
       function liveSessionHasOwnedOrganizerEventSource(sessionId) {
         let sourceId = liveSessionSourceId(sessionId);
         let hostId = liveSessionHostId(sessionId);
-        return liveSessionSourceType(sessionId) == 'organizer_event'
+        return liveSessionSourceType(sessionId) in ['organizer_event', 'event']
           && sourceId != ''
           && exists(/databases/$(database)/documents/events/$(sourceId))
           && (
@@ -2256,7 +2257,7 @@ service cloud.firestore {
         let sourceType = liveSessionSourceType(sessionId);
         let sourceId = liveSessionSourceId(sessionId);
         return uid is string
-          && sourceType == 'organizer_event'
+          && sourceType in ['organizer_event', 'event']
           && liveSessionHasOwnedOrganizerEventSource(sessionId)
           && sourceId != ''
           && exists(/databases/$(database)/documents/events/$(sourceId)/applications/$(uid))
@@ -2271,7 +2272,8 @@ service cloud.firestore {
             !hasUserBlocked(uid, liveSessionHostId(sessionId)) &&
             !isLiveViewerBlocked(sessionId, uid) &&
             (
-              isLiveInvitedViewer(sessionId, uid) ||
+              (liveSessionViewAccessMode(sessionId) != 'accepted_event_volunteers' &&
+                isLiveInvitedViewer(sessionId, uid)) ||
               liveSessionViewAccessMode(sessionId) == 'public' ||
               (liveSessionViewAccessMode(sessionId) == 'followers_only' &&
                 exists(/databases/$(database)/documents/users/$(liveSessionHostId(sessionId))/followers/$(uid))) ||
