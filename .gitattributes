@@ -1,0 +1,8 @@
+# Functions lint enforces LF (eslint linebreak-style); keep these LF on Windows checkouts too.
+my-firebase-project/my-firebase-functions/**/*.ts text eol=lf
+my-firebase-project/my-firebase-functions/**/*.js text eol=lf
+my-firebase-project/my-firebase-functions/**/*.cjs text eol=lf
+my-firebase-project/my-firebase-functions/**/*.json text eol=lf
+my-firebase-project/my-firebase-functions/.eslintrc.js text eol=lf
+my-firebase-project/my-firebase-functions/.editorconfig text eol=lf
+scripts/*.cjs text eol=lf
