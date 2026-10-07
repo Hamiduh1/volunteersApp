@@ -38,8 +38,27 @@ data class LiveSession(
     val archiveStatus: String? = null,
     val archivePlaybackUrl: String? = null,
     val archivePrimaryFile: String? = null,
-    val archiveObjectPrefix: String? = null
+    val archiveObjectPrefix: String? = null,
+    /** Written every minute by current host apps; null for streams started on older builds. */
+    val hostHeartbeatAt: Date? = null,
+    val peakViewerCount: Long = 0L,
+    /** Agora uid the host joined with (server-issued); null for hosts on older builds. */
+    val hostAgoraUid: Int? = null,
 ) {
+    /** A LIVE doc whose host stopped heartbeating (app killed or offline) before the server reconciler ran. */
+    fun isLiveStale(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val heartbeat = hostHeartbeatAt?.time ?: return false
+        return isLive && nowMs - heartbeat > LIVE_HOST_STALE_AFTER_MS
+    }
+
+    /** Broadcast length for ended streams, used as the replay duration label. */
+    val broadcastDurationMs: Long?
+        get() {
+            val start = (startTime ?: createdAt)?.time ?: return null
+            val end = (endedAt ?: endTime)?.time ?: return null
+            return (end - start).takeIf { it > 0L }
+        }
+
     val resolvedChannelName: String
         get() = agoraChannelName.ifBlank { channelName }
 
@@ -81,3 +100,6 @@ data class LiveSession(
         }
     }
 }
+
+/** Three missed host heartbeats (sent every 60 s). */
+const val LIVE_HOST_STALE_AFTER_MS = 3 * 60_000L

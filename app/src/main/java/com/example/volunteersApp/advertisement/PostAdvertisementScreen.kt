@@ -34,6 +34,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.volunteersApp.wallet.PlatformFeeKind
+import com.example.volunteersApp.wallet.PlatformFeePaymentChoice
+import com.example.volunteersApp.wallet.PlatformFeePaymentSelector
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
@@ -64,6 +67,8 @@ fun PostAdvertisementScreen(
     val submitUploadProgress by viewModel.submitUploadProgress.collectAsState()
     var showPublishConfirm by remember { mutableStateOf(false) }
     var formError by remember { mutableStateOf<String?>(null) }
+    var adPayment by remember { mutableStateOf(PlatformFeePaymentChoice.Stripe) }
+    val adFeeDue = existingAd == null && (publicFees?.adListingFeeUsd ?: 0.0) > 0.0
 
     var draftHydrated by remember(existingAd?.id) { mutableStateOf(existingAd != null) }
     LaunchedEffect(existingAd?.id) {
@@ -164,6 +169,14 @@ fun PostAdvertisementScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = SponsoredA11yPalette.textSecondary
                     )
+                    if (adFeeDue) {
+                        PlatformFeePaymentSelector(
+                            kind = PlatformFeeKind.SPONSORED_AD,
+                            choice = adPayment,
+                            onChoiceChange = { adPayment = it },
+                            enabled = !isProcessing
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -172,7 +185,14 @@ fun PostAdvertisementScreen(
                         showPublishConfirm = false
                         formError = null
                         if (existingAd == null) {
-                            viewModel.postNewAdvertisement(title, description, targetUrl, ownerPhone, selectedMedia)
+                            viewModel.postNewAdvertisement(
+                                title,
+                                description,
+                                targetUrl,
+                                ownerPhone,
+                                selectedMedia,
+                                payment = if (adFeeDue) adPayment else PlatformFeePaymentChoice.Stripe
+                            )
                         } else {
                             viewModel.updateAdvertisement(
                                 adId = existingAd.id,

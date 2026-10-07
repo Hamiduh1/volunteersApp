@@ -30,12 +30,22 @@ import com.google.firebase.auth.FirebaseAuth
 
 import com.google.firebase.auth.auth
 
+import com.google.firebase.firestore.DocumentSnapshot
+
+import com.google.firebase.firestore.FieldPath
+
 import com.google.firebase.firestore.FirebaseFirestoreException
 
 import com.google.firebase.firestore.ListenerRegistration
 
+import com.google.firebase.firestore.Query
+
 import com.google.firebase.firestore.firestore
 
+
+import java.text.Normalizer
+
+import kotlinx.coroutines.CancellationException
 
 import kotlinx.coroutines.Job
 
@@ -87,7 +97,9 @@ data class LiveStreamsUiState(
 
     val replayLinkLoadingId: String? = null,
 
-    val replayLinkError: String? = null
+    val replayLinkError: String? = null,
+
+    val isLoadingOlderReplays: Boolean = false
 
 ) {
 
@@ -109,6 +121,11 @@ data class LiveStreamsUiState(
 
             }
 
+            // Ghost rooms (host app gone) stay visible only to their host under "My streams".
+            if (studioFeed != LiveStudioFeed.HOSTED) {
+                sessions = sessions.filter { !it.isLiveStale() }
+            }
+
             if (studioFeed == LiveStudioFeed.HOSTED && !currentUserId.isNullOrBlank()) {
 
                 sessions = sessions.filter { it.hostId == currentUserId }
@@ -127,23 +144,44 @@ data class LiveStreamsUiState(
 
             }
 
-            if (searchQuery.isBlank()) return sessions
+            val terms = normalizeForSearch(searchQuery).split(' ').filter { it.isNotBlank() }
 
+            if (terms.isEmpty()) return sessions
+
+            // Every word must appear somewhere (title, description, host, @handle, channel), YouTube-style.
             return sessions.filter { session ->
 
-                session.title.contains(searchQuery, ignoreCase = true) ||
+                val haystack = normalizeForSearch(
+                    listOf(
+                        session.title,
+                        session.description,
+                        session.hostName,
+                        session.hostUsername.orEmpty(),
+                        session.hostUsername?.let { "@$it" }.orEmpty(),
+                        session.resolvedChannelName
+                    ).joinToString(" ")
+                )
 
-                    session.description.contains(searchQuery, ignoreCase = true) ||
-
-                    session.hostName.contains(searchQuery, ignoreCase = true) ||
-
-                    session.resolvedChannelName.contains(searchQuery, ignoreCase = true)
+                terms.all { haystack.contains(it) }
 
             }
 
         }
 
 }
+
+
+
+private val searchDiacritics = Regex("\\p{Mn}+")
+
+private val searchSeparators = Regex("[^\\p{L}\\p{N}@#]+")
+
+internal fun normalizeForSearch(text: String): String =
+    Normalizer.normalize(text, Normalizer.Form.NFD)
+        .replace(searchDiacritics, "")
+        .lowercase()
+        .replace(searchSeparators, " ")
+        .trim()
 
 
 
@@ -165,6 +203,27 @@ class LiveStreamsViewModel : ViewModel() {
 
     private var liveListener: ListenerRegistration? = null
 
+    private var activeLiveListener: ListenerRegistration? = null
+
+    private var recentLiveSessions: List<LiveSession> = emptyList()
+
+    private var activeLiveSessions: List<LiveSession> = emptyList()
+
+    private var publicReplayListener: ListenerRegistration? = null
+
+    private var publicReplaySessions: List<LiveSession> = emptyList()
+    // The replay listener covers one page; search and "Past streams" page through the rest so every
+    // public replay is findable. Paging by document id reuses the existing composite index.
+    private var olderReplaySessions: List<LiveSession> = emptyList()
+    private var publicReplayLastDoc: DocumentSnapshot? = null
+    private var publicReplayFirstPageFull = false
+    private var replayPagingJob: Job? = null
+    private var replayPagingExhausted = false
+
+    private val followedHostListeners = mutableMapOf<String, List<ListenerRegistration>>()
+
+    private val followedHostSessions = mutableMapOf<String, List<LiveSession>>()
+
     private var archiveListener: ListenerRegistration? = null
 
     private var userRequestsListener: ListenerRegistration? = null
@@ -172,6 +231,8 @@ class LiveStreamsViewModel : ViewModel() {
     private var followingListener: ListenerRegistration? = null
 
     private var eventApplicationsListener: ListenerRegistration? = null
+
+    private var organizedEventIds: Set<String> = emptySet()
 
     private var authListener: FirebaseAuth.AuthStateListener? = null
 
@@ -321,9 +382,31 @@ class LiveStreamsViewModel : ViewModel() {
 
 
 
+        val currentUserId = auth.currentUser?.uid ?: return
+
+        // Shared rules only allow list queries they can prove (canDiscoverLiveSession), so the feed
+        // is merged from: public live, my own sessions, public replays, and followed hosts' streams.
+        // Invite-only / event-volunteer streams aren't listable; they open from links or event pages.
         val query = db.collection(FirestoreCollection.LIVE_SESSIONS)
 
+            .whereEqualTo("viewAccessMode", LiveViewAccessMode.PUBLIC.raw)
+
+            .whereIn("status", ACTIVE_LIST_STATUSES)
+
             .limit(120)
+
+        activeLiveListener?.remove()
+        activeLiveListener = db.collection(FirestoreCollection.LIVE_SESSIONS)
+            .whereEqualTo("hostId", currentUserId)
+            .limit(120)
+            .addSnapshotListener { snapshots, error ->
+                if (error != null) {
+                    Log.w(TAG, "Active live listen failed.", error)
+                    return@addSnapshotListener
+                }
+                activeLiveSessions = snapshots?.documents?.mapNotNull { it.toLiveSession() } ?: emptyList()
+                publishMergedLiveSessions()
+            }
 
 
 
@@ -365,9 +448,85 @@ class LiveStreamsViewModel : ViewModel() {
 
             }
 
-            val sessions = snapshots?.documents?.mapNotNull { it.toLiveSession() }
+            recentLiveSessions = snapshots?.documents?.mapNotNull { it.toLiveSession() } ?: emptyList()
+            hasReceivedLiveSnapshot = true
+            publishMergedLiveSessions()
 
-                ?.sortedWith(
+        }
+
+        publicReplayListener?.remove()
+        publicReplayListener = db.collection(FirestoreCollection.LIVE_SESSIONS)
+            .whereEqualTo("replayVisibility", LiveReplayVisibility.PUBLIC.raw)
+            .whereIn("status", ENDED_LIST_STATUSES)
+            .orderBy(FieldPath.documentId())
+            .limit(REPLAY_PAGE_SIZE)
+            .addSnapshotListener { snapshots, error ->
+                if (error != null) {
+                    Log.w(TAG, "Public replays listen failed.", error)
+                    return@addSnapshotListener
+                }
+                publicReplaySessions = snapshots?.documents?.mapNotNull { it.toLiveSession() } ?: emptyList()
+                if (olderReplaySessions.isEmpty()) {
+                    publicReplayLastDoc = snapshots?.documents?.lastOrNull()
+                    publicReplayFirstPageFull = (snapshots?.size() ?: 0) >= REPLAY_PAGE_SIZE
+                    replayPagingExhausted = !publicReplayFirstPageFull
+                }
+                publishMergedLiveSessions()
+                if (needsFullReplayCatalog()) loadAllPublicReplays()
+            }
+
+        syncFollowedHostListeners(_uiState.value.followingHostIds)
+
+    }
+
+    private fun syncFollowedHostListeners(followingIds: Set<String>) {
+        if (liveListener == null) return
+        val wanted = followingIds.filter { it.isNotBlank() }.sorted().take(MAX_FOLLOWED_HOST_LISTENERS).toSet()
+        (followedHostListeners.keys - wanted).forEach { hostId ->
+            followedHostListeners.remove(hostId)?.forEach { it.remove() }
+            followedHostSessions.remove("$hostId/live")
+            followedHostSessions.remove("$hostId/replay")
+        }
+        (wanted - followedHostListeners.keys).forEach { hostId ->
+            val sessions = db.collection(FirestoreCollection.LIVE_SESSIONS).whereEqualTo("hostId", hostId)
+            val live = sessions
+                .whereEqualTo("viewAccessMode", LiveViewAccessMode.FOLLOWERS_ONLY.raw)
+                .whereIn("status", ACTIVE_LIST_STATUSES)
+                .addSnapshotListener { snapshots, error ->
+                    if (error != null) {
+                        Log.w(TAG, "Followed host live listen failed ($hostId).", error)
+                        return@addSnapshotListener
+                    }
+                    followedHostSessions["$hostId/live"] = snapshots?.documents?.mapNotNull { it.toLiveSession() } ?: emptyList()
+                    publishMergedLiveSessions()
+                }
+            val replays = sessions
+                .whereEqualTo("replayVisibility", LiveReplayVisibility.FOLLOWERS_ONLY.raw)
+                .whereIn("status", ENDED_LIST_STATUSES)
+                .limit(30)
+                .addSnapshotListener { snapshots, error ->
+                    if (error != null) {
+                        Log.w(TAG, "Followed host replays listen failed ($hostId).", error)
+                        return@addSnapshotListener
+                    }
+                    followedHostSessions["$hostId/replay"] = snapshots?.documents?.mapNotNull { it.toLiveSession() } ?: emptyList()
+                    publishMergedLiveSessions()
+                }
+            followedHostListeners[hostId] = listOf(live, replays)
+        }
+        publishMergedLiveSessions()
+    }
+
+    private fun publishMergedLiveSessions() {
+        if (!hasReceivedLiveSnapshot) return
+        val merged = (
+            activeLiveSessions + recentLiveSessions + publicReplaySessions + olderReplaySessions +
+                followedHostSessions.values.flatten()
+        ).distinctBy { it.sessionId }
+        run {
+            val sessions = merged
+
+                .sortedWith(
 
                     compareByDescending<LiveSession> { liveSessionSortTime(it) }
 
@@ -538,6 +697,8 @@ class LiveStreamsViewModel : ViewModel() {
 
                 _uiState.update { it.copy(followingHostIds = followingIds) }
 
+                syncFollowedHostListeners(followingIds)
+
             }
 
     }
@@ -549,6 +710,8 @@ class LiveStreamsViewModel : ViewModel() {
         val currentUserId = auth.currentUser?.uid ?: return
 
         eventApplicationsListener?.remove()
+
+        loadOrganizedEventIds(currentUserId)
 
         eventApplicationsListener = db.collectionGroup(FirestoreCollectionGroup.APPLICATIONS)
 
@@ -582,10 +745,30 @@ class LiveStreamsViewModel : ViewModel() {
 
                     ?: emptySet()
 
-                _uiState.update { it.copy(acceptedEventIds = acceptedEventIds) }
+                _uiState.update { it.copy(acceptedEventIds = acceptedEventIds + organizedEventIds) }
 
             }
 
+    }
+
+    /** Organizers can open "accepted event volunteers" streams linked to events they run. */
+    private fun loadOrganizedEventIds(currentUserId: String) {
+        viewModelScope.launch {
+            val ids = runCatching {
+                db.collection(FirestoreCollection.EVENTS)
+                    .whereEqualTo("organizerId", currentUserId)
+                    .get()
+                    .await()
+                    .documents
+                    .flatMap { doc -> listOfNotNull(doc.id, doc.getString("eventId")?.trim()?.takeIf { it.isNotBlank() }) }
+                    .toSet()
+            }.onFailure { Log.w(TAG, "Organized events lookup failed.", it) }
+                .getOrDefault(emptySet())
+            organizedEventIds = ids
+            if (ids.isNotEmpty()) {
+                _uiState.update { it.copy(acceptedEventIds = it.acceptedEventIds + ids) }
+            }
+        }
     }
 
 
@@ -604,25 +787,29 @@ class LiveStreamsViewModel : ViewModel() {
 
                 _uiState.update { it.copy(submittingRequestStreamId = streamId) }
 
-                val request = JoinLiveStreamRequest(
-
-                    volunteerId = currentUser.uid,
-
-                    volunteerName = currentUser.displayName ?: "Anonymous",
-
-                    volunteerProfilePicUrl = currentUser.photoUrl?.toString(),
-
-                    streamId = streamId,
-
-                    hostId = stream.hostId,
-
-                    status = LiveJoinRequestStatus.PENDING.raw
-
-                )
-
                 val requestId = "${streamId}_${currentUser.uid}"
+                val requestRef = db.collection(FirestoreCollection.JOIN_REQUESTS).document(requestId)
 
-                db.collection(FirestoreCollection.JOIN_REQUESTS).document(requestId).set(request).await()
+                // Shared rules don't let a requester move a decided request back to pending.
+                val existingStatus = runCatching { requestRef.get().await().getString("status") }
+                    .getOrNull()?.trim()?.lowercase()
+                if (existingStatus == LiveJoinRequestStatus.PENDING.raw) {
+                    _uiState.update { it.copy(submittingRequestStreamId = null, requestSubmissionError = null) }
+                    return@launch
+                }
+                val blockedMessage = when (existingStatus) {
+                    LiveJoinRequestStatus.ACCEPTED.raw -> "You're already approved for this stage. Open the live to join."
+                    LiveJoinRequestStatus.REJECTED.raw -> "The host declined your stage request for this live."
+                    else -> null
+                }
+                if (blockedMessage != null) {
+                    _uiState.update { it.copy(submittingRequestStreamId = null, requestSubmissionError = blockedMessage) }
+                    return@launch
+                }
+
+                requestRef
+                    .set(liveJoinRequestPayload(db, currentUser, streamId, stream.hostId))
+                    .await()
 
                 _uiState.update { it.copy(submittingRequestStreamId = null, requestSubmissionError = null) }
 
@@ -630,13 +817,19 @@ class LiveStreamsViewModel : ViewModel() {
 
                 Log.e(TAG, "Error submitting join request", e)
 
+                val denied = e is com.google.firebase.firestore.FirebaseFirestoreException &&
+                    e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED
                 _uiState.update {
 
                     it.copy(
 
                         submittingRequestStreamId = null,
 
-                        requestSubmissionError = e.localizedMessage ?: "Failed to submit request"
+                        requestSubmissionError = if (denied) {
+                            "You can't request the stage for this live right now."
+                        } else {
+                            "We couldn't send your stage request. Check your connection and try again."
+                        }
 
                     )
 
@@ -702,15 +895,74 @@ class LiveStreamsViewModel : ViewModel() {
 
 
 
-    fun onStudioFilterChange(filter: LiveStudioFilter) = _uiState.update { it.copy(studioFilter = filter) }
+    fun onStudioFilterChange(filter: LiveStudioFilter) {
+        _uiState.update { it.copy(studioFilter = filter) }
+        if (needsFullReplayCatalog()) loadAllPublicReplays()
+    }
 
 
 
-    fun onStudioFeedChange(feed: LiveStudioFeed) = _uiState.update { it.copy(studioFeed = feed) }
+    fun onStudioFeedChange(feed: LiveStudioFeed) {
+        _uiState.update { it.copy(studioFeed = feed) }
+        if (needsFullReplayCatalog()) loadAllPublicReplays()
+    }
 
 
 
-    fun onSearchQueryChange(query: String) = _uiState.update { it.copy(searchQuery = query) }
+    fun onSearchQueryChange(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+        if (needsFullReplayCatalog()) loadAllPublicReplays()
+    }
+
+
+
+    private fun needsFullReplayCatalog(): Boolean {
+        val state = _uiState.value
+        if (state.studioFeed != LiveStudioFeed.DISCOVER) return false
+        return state.searchQuery.isNotBlank() || state.studioFilter == LiveStudioFilter.ENDED
+    }
+
+
+
+    private fun loadAllPublicReplays() {
+        if (replayPagingExhausted || !publicReplayFirstPageFull) return
+        if (replayPagingJob?.isActive == true) return
+        val startCursor = publicReplayLastDoc ?: return
+        replayPagingJob = viewModelScope.launch {
+            var cursor: DocumentSnapshot = startCursor
+            val loaded = olderReplaySessions.toMutableList()
+            _uiState.update { it.copy(isLoadingOlderReplays = true) }
+            try {
+                while (loaded.size < MAX_EXTRA_REPLAYS) {
+                    val page = db.collection(FirestoreCollection.LIVE_SESSIONS)
+                        .whereEqualTo("replayVisibility", LiveReplayVisibility.PUBLIC.raw)
+                        .whereIn("status", ENDED_LIST_STATUSES)
+                        .orderBy(FieldPath.documentId())
+                        .startAfter(cursor)
+                        .limit(REPLAY_PAGE_SIZE)
+                        .get()
+                        .await()
+                    loaded += page.documents.mapNotNull { it.toLiveSession() }
+                    olderReplaySessions = loaded.distinctBy { it.sessionId }
+                    publishMergedLiveSessions()
+                    val last = page.documents.lastOrNull()
+                    if (last == null || page.size() < REPLAY_PAGE_SIZE) {
+                        replayPagingExhausted = true
+                        break
+                    }
+                    cursor = last
+                    publicReplayLastDoc = last
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Keep what loaded; the next search or filter change resumes from the last cursor.
+                Log.w(TAG, "Loading older public replays failed", e)
+            } finally {
+                _uiState.update { it.copy(isLoadingOlderReplays = false) }
+            }
+        }
+    }
 
 
 
@@ -739,6 +991,33 @@ class LiveStreamsViewModel : ViewModel() {
     private fun detachAllListeners() {
 
         liveListener?.remove()
+
+        activeLiveListener?.remove()
+
+        activeLiveListener = null
+
+        publicReplayListener?.remove()
+
+        publicReplayListener = null
+
+        followedHostListeners.values.flatten().forEach { it.remove() }
+
+        followedHostListeners.clear()
+
+        followedHostSessions.clear()
+
+        activeLiveSessions = emptyList()
+
+        recentLiveSessions = emptyList()
+
+        publicReplaySessions = emptyList()
+
+        replayPagingJob?.cancel()
+        replayPagingJob = null
+        olderReplaySessions = emptyList()
+        publicReplayLastDoc = null
+        publicReplayFirstPageFull = false
+        replayPagingExhausted = false
 
         archiveListener?.remove()
 
@@ -781,6 +1060,17 @@ class LiveStreamsViewModel : ViewModel() {
         const val MAX_PREFLIGHT_RETRIES = 4
 
         const val PREFLIGHT_RETRY_DELAY_MS = 1_200L
+
+        const val MAX_FOLLOWED_HOST_LISTENERS = 15
+
+        const val REPLAY_PAGE_SIZE = 120L
+
+        const val MAX_EXTRA_REPLAYS = 1_000
+
+        // Each value must be in the rules' isActive/isEndedLiveSessionStatus lists for the query to be provable.
+        val ACTIVE_LIST_STATUSES = listOf("LIVE", "live", "Live", "ACTIVE", "active", "Active")
+
+        val ENDED_LIST_STATUSES = listOf("ENDED", "ended", "Ended", "COMPLETED", "completed", "Completed")
 
         fun liveSessionSortTime(session: LiveSession): Long =
 

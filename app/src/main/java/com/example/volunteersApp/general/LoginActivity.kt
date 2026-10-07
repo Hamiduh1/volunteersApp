@@ -38,6 +38,8 @@ class LoginActivity : ComponentActivity() {
     private var pendingLiveHostId: String? = null
     private var pendingLiveShareToken: String? = null
 
+    private var routingLiveLink = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -151,7 +153,6 @@ class LoginActivity : ComponentActivity() {
         if (target != null) {
             if (viewModel.isUserLoggedIn()) {
                 redirectToStream(target)
-                finish()
             } else {
                 pendingStreamSessionId = target.sessionId
                 pendingLiveHostId = target.hostId
@@ -163,7 +164,10 @@ class LoginActivity : ComponentActivity() {
         return false
     }
 
+    // Finishing before LiveShareRouter resumes would cancel lifecycleScope and drop the link.
     private fun redirectToStream(target: LiveLaunchTarget) {
+        if (routingLiveLink) return
+        routingLiveLink = true
         lifecycleScope.launch {
             runCatching {
                 LiveShareRouter.launch(this@LoginActivity, target)
@@ -173,11 +177,21 @@ class LoginActivity : ComponentActivity() {
                     error.localizedMessage ?: "Could not open live stream.",
                     Toast.LENGTH_LONG
                 ).show()
+                if (viewModel.isUserLoggedIn()) {
+                    startActivity(
+                        Intent(this@LoginActivity, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        }
+                    )
+                }
             }
+            finish()
         }
     }
 
     private fun navigateAfterLogin() {
+        // A live link is already being opened; MainActivity's CLEAR_TASK would close the live room.
+        if (routingLiveLink) return
         val pendingSessionId = pendingStreamSessionId ?: intent.getStringExtra(EXTRA_PENDING_STREAM_SESSION_ID)
             ?: intent.getStringExtra(LiveLaunchIntent.EXTRA_LIVE_SESSION_ID)
 
@@ -191,7 +205,6 @@ class LoginActivity : ComponentActivity() {
             pendingLiveHostId = null
             pendingLiveShareToken = null
             redirectToStream(target)
-            finish()
             return
         }
 

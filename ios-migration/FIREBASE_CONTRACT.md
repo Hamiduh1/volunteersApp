@@ -85,6 +85,7 @@ Functions currently called from client side:
 - `acceptBlindDateInvitation`
 - `declineBlindDateInvitation`
 - `rejoinBlindDate`
+- `getPlatformFeeMobileMoneyOptions` (see [PLATFORM_FEE_MOBILE_MONEY.md](./PLATFORM_FEE_MOBILE_MONEY.md))
 - `getSecureExchangeRate`
 - `getAfriexInstitutions`
 - `resolveAfriexAccount`

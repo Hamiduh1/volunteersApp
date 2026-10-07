@@ -245,7 +245,9 @@ class AdvertisementViewModel : ViewModel() {
         description: String,
         targetUrl: String,
         ownerPhone: String,
-        mediaUploads: List<GarageMediaUpload>
+        mediaUploads: List<GarageMediaUpload>,
+        payment: com.example.volunteersApp.wallet.PlatformFeePaymentChoice =
+            com.example.volunteersApp.wallet.PlatformFeePaymentChoice.Stripe
     ) {
         viewModelScope.launch {
             if (!submitMutex.tryLock()) {
@@ -323,6 +325,7 @@ class AdvertisementViewModel : ViewModel() {
                         )
                     }
                 )
+                payload.putAll(payment.toPayload())
 
                 val result = FunctionsClient.callMap(CallableFunction.POST_SPONSORED_AD, payload)
                 val outcome = com.example.volunteersApp.wallet.parseProviderCollectionOutcome(result)
@@ -345,6 +348,18 @@ class AdvertisementViewModel : ViewModel() {
                 }
                 (result?.get("checkoutUrl") as? String)?.takeIf { it.isNotBlank() }?.let { url ->
                     _events.emit(AdScreenEvent.OpenStripeCheckout(url))
+                }
+                com.example.volunteersApp.wallet.platformFeeMobileMoneyOrderId(result)?.let { orderId ->
+                    viewModelScope.launch {
+                        val finalStatus = com.example.volunteersApp.wallet.awaitPlatformFeeMobileMoneyOutcome(orderId)
+                            ?: return@launch
+                        refreshInternal(clearMessages = false)
+                        if (finalStatus.accessUnlocked) {
+                            _statusMessage.value = finalStatus.message
+                        } else {
+                            _errorMessage.value = finalStatus.message
+                        }
+                    }
                 }
                 _events.emit(AdScreenEvent.PostingSuccess)
             } catch (error: Exception) {

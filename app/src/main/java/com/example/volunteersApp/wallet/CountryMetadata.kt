@@ -570,6 +570,35 @@ fun globalCountryDialCode(country: String): String =
         ?: globalDialCodeByIso[normalizeGlobalCountryIso(country)])
         .orEmpty()
 
+private val countryIsosByDialDigits: Map<String, Set<String>> by lazy {
+    val collected = linkedMapOf<String, MutableSet<String>>()
+    fun add(dial: String, iso: String) {
+        val digits = dial.filter { it.isDigit() }
+        val normalizedIso = iso.trim().uppercase(Locale.US)
+        if (digits.isBlank() || normalizedIso.length != 2) return
+        collected.getOrPut(digits) { linkedSetOf() }.add(normalizedIso)
+    }
+    countryMeta.values.forEach { add(it.dial, it.iso) }
+    globalDialCodeByIso.forEach { (iso, dial) -> add(dial, iso) }
+    collected
+}
+
+/**
+ * ISO countries implied by an E.164 phone number (longest dial-code prefix wins).
+ * Shared codes such as +1 return every country on that code. Numbers without a
+ * leading "+" are ambiguous and return an empty set.
+ */
+fun countryIsosForPhoneNumber(phoneNumber: String?): Set<String> {
+    val trimmed = phoneNumber?.trim().orEmpty()
+    if (!trimmed.startsWith("+")) return emptySet()
+    val digits = trimmed.filter { it.isDigit() }
+    if (digits.length < 6) return emptySet()
+    for (length in minOf(4, digits.length) downTo 1) {
+        countryIsosByDialDigits[digits.take(length)]?.let { return it }
+    }
+    return emptySet()
+}
+
 // --- Backend-aligned mobile money corridors (mirrors Cloud Functions mobileMoneyCurrencyMap) ---
 
 private val mobileMoneyCurrencyMapBackend: Map<String, String> = mapOf(

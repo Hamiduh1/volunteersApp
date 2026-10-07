@@ -68,8 +68,8 @@ android {
         applicationId = "com.volunteersapp.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.0.12"
+        versionCode = 19
+        versionName = "1.0.15"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // --- Improvement 2: Set manifest placeholders here ---
@@ -312,6 +312,7 @@ dependencies {
     implementation(libs.facebook.login)
     implementation(libs.agora.rtc.full.sdk)
     implementation(libs.media3.exoplayer)
+    implementation(libs.media3.exoplayer.hls)
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
     implementation(libs.sceneform)

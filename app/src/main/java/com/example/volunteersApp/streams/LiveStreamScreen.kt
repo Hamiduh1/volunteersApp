@@ -8,6 +8,14 @@ import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import android.view.SurfaceView
+import android.view.TextureView
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.platform.LocalView
+import kotlinx.coroutines.delay
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -41,11 +49,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.PersonRemove
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material3.Switch
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
@@ -62,6 +82,7 @@ import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -81,7 +102,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -100,10 +120,18 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import io.agora.rtc2.RtcEngine
 import io.agora.rtc2.video.VideoCanvas
 
@@ -122,6 +150,15 @@ fun LiveStreamScreen(
     var showLiveComments by remember { mutableStateOf(false) }
     var showHostTools by remember { mutableStateOf(false) }
     var showEndStreamConfirm by remember { mutableStateOf(false) }
+    var shareSheet by remember { mutableStateOf<LiveRoomShareSheet?>(null) }
+    // Do not retain a previous account when auth changes while this screen is in the back stack.
+    val currentUid = Firebase.auth.currentUser?.uid
+    val openLiveShareSheet: () -> Unit = {
+        viewModel.shareLiveLink { url -> shareSheet = LiveRoomShareSheet(url = url, isReplay = false) }
+    }
+    val openReplayShareSheet: () -> Unit = {
+        viewModel.shareReplayLink { url -> shareSheet = LiveRoomShareSheet(url = url, isReplay = true) }
+    }
     val broadcastPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -136,8 +173,11 @@ fun LiveStreamScreen(
         }
     }
 
-    SideEffect {
-        if (!uiState.isLoading && session == null && uiState.error.isNullOrBlank()) {
+    var autoLeft by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.isLoading, session, uiState.error) {
+        // A second onLeave would pop the screen beneath a room that is still resolving.
+        if (!autoLeft && !uiState.isLoading && session == null && uiState.error.isNullOrBlank()) {
+            autoLeft = true
             onLeave()
         }
     }
@@ -165,22 +205,31 @@ fun LiveStreamScreen(
         }
     }
 
+    // Covers both the Activity and the in-app NavHost route; the host must confirm before ending.
+    BackHandler(enabled = true) { leaveOrConfirmEnd() }
+
+    val hostView = LocalView.current
+    DisposableEffect(hostView) {
+        hostView.keepScreenOn = true
+        onDispose { hostView.keepScreenOn = false }
+    }
+
     LiveStudioTheme {
     if (showEndStreamConfirm) {
         AlertDialog(
             onDismissRequest = { showEndStreamConfirm = false },
             title = { Text("End live stream?") },
             text = {
-                Text("Ending stops the broadcast for everyone watching. You can leave without ending only from Leave if you choose Cancel.")
+                Text("Ending stops the broadcast for everyone watching. Choose Cancel to keep streaming.")
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showEndStreamConfirm = false
-                        viewModel.endStream(onComplete = onLeave)
+                        viewModel.endStream(keepRoomForSummary = true)
                     }
                 ) {
-                    Text("End stream")
+                    Text("End stream", color = LiveStudioDanger, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -193,11 +242,104 @@ fun LiveStreamScreen(
 
     Box(modifier = Modifier.fillMaxSize().background(LiveStudioBackground)) {
             if (session != null) {
+                // The host always fills the screen; stage guests (and a guest's own camera) are tiles.
+                val mainRemoteUid = if (uiState.isHost) null else uiState.remoteUid
+                val mainIsLocal = uiState.isHost || (uiState.isOnStage && mainRemoteUid == null)
                 VideoRenderer(
                     engine = viewModel.getEngine(),
-                    publishLocally = uiState.isOnStage,
-                    remoteUid = uiState.remoteUid
+                    publishLocally = mainIsLocal,
+                    remoteUid = mainRemoteUid
                 )
+                if (!uiState.sessionEnded) {
+                    val hostLabel = session.hostName.ifBlank { "The host" }
+                    when {
+                        mainIsLocal && uiState.isVideoMuted -> LiveVideoPlaceholder(
+                            session = session,
+                            title = "Your camera is off",
+                            subtitle = "Viewers can still hear you. Turn video back on from the controls.",
+                        )
+                        !mainIsLocal && mainRemoteUid == null && !uiState.isLoading -> LiveVideoPlaceholder(
+                            session = session,
+                            title = if (uiState.isReconnecting) "Reconnecting…" else "Waiting for $hostLabel",
+                            subtitle = "The stream will start automatically.",
+                            showProgress = true,
+                        )
+                        !mainIsLocal && mainRemoteUid != null && mainRemoteUid in uiState.mutedVideoUids -> LiveVideoPlaceholder(
+                            session = session,
+                            title = "$hostLabel paused the video",
+                            subtitle = if (mainRemoteUid in uiState.mutedAudioUids) "Audio is muted too." else "You can still hear the stream.",
+                        )
+                    }
+                    val mainAudioMuted = if (mainIsLocal) {
+                        uiState.isAudioMuted
+                    } else {
+                        mainRemoteUid != null && mainRemoteUid in uiState.mutedAudioUids
+                    }
+                    if (mainAudioMuted) {
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.6f),
+                            contentColor = Color.White,
+                            shape = RoundedCornerShape(50),
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .statusBarsPadding()
+                                .padding(top = 116.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(Icons.Default.MicOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text(
+                                    if (mainIsLocal) "You're muted" else "$hostLabel is muted",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (!uiState.sessionEnded) {
+                    StageGuestTiles(
+                        engine = viewModel.getEngine(),
+                        remoteUids = uiState.remoteUids.filter { it != mainRemoteUid },
+                        showLocalTile = uiState.isOnStage && !mainIsLocal,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .statusBarsPadding()
+                            .padding(top = 76.dp, end = 12.dp)
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = uiState.isReconnecting && !uiState.sessionEnded,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 72.dp)
+                ) {
+                    Surface(color = LiveChromeScrim, shape = RoundedCornerShape(16.dp)) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                color = LiveStudioAccent,
+                                strokeWidth = 2.dp,
+                            )
+                            Text(
+                                "Reconnecting…",
+                                color = LiveStudioInk,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                }
 
                 if (!uiState.sessionEnded) {
                     Box(
@@ -224,13 +366,19 @@ fun LiveStreamScreen(
                 ) {
                     StreamHeader(
                         session = session,
+                        viewerCount = uiState.liveViewerCount ?: session.viewerCount,
                         incomingRequestsCount = if (uiState.isHost) uiState.incomingRequests.size else 0,
                         onLeave = { leaveOrConfirmEnd() },
                         onHostTools = if (uiState.isHost) {
                             { showHostTools = true }
                         } else {
                             null
-                        }
+                        },
+                        onEndStream = if (uiState.isHost) {
+                            { showEndStreamConfirm = true }
+                        } else {
+                            null
+                        },
                     )
                 }
 
@@ -241,7 +389,8 @@ fun LiveStreamScreen(
                     exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 60.dp)
+                        .statusBarsPadding()
+                        .padding(top = 72.dp)
                 ) {
                     IncomingRequestsPanel(
                         requests = uiState.incomingRequests,
@@ -257,6 +406,7 @@ fun LiveStreamScreen(
                 if (uiState.sessionEnded) {
                     SessionEndedOverlay(
                         session = session,
+                        summary = if (uiState.isHost) uiState.endSummary else null,
                         isHost = uiState.isHost,
                         mindLoomReplayShareInProgress = uiState.mindLoomReplayShareInProgress,
                         onLeave = onLeave,
@@ -269,16 +419,12 @@ fun LiveStreamScreen(
                                 )
                             )
                         },
-                        onShareReplay = {
-                            viewModel.shareReplayLink { url ->
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, url)
-                                }
-                                context.startActivity(Intent.createChooser(shareIntent, "Share Replay"))
-                            }
-                        },
+                        onShareReplay = openReplayShareSheet,
                         onPostReplayToMindLoom = viewModel::shareReplayToMindLoom,
+                        canWatchReplay = uiState.isHost ||
+                            session.canWatchReplay(currentUid) ||
+                            session.replayVisibility == LiveReplayVisibility.FOLLOWERS_ONLY,
+                        onReplayVisibility = if (uiState.isHost) viewModel::updateReplayVisibility else null,
                     )
                 }
 
@@ -292,13 +438,15 @@ fun LiveStreamScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.Bottom
                 ) {
-                    if (uiState.isHost) {
+                    // Stage guests publish too, so they get the same mic / camera controls plus "Leave stage".
+                    if (uiState.isHost || uiState.isOnStage) {
                         HostControlPanel(
                             isAudioMuted = uiState.isAudioMuted,
                             isVideoMuted = uiState.isVideoMuted,
                             onToggleAudio = viewModel::toggleAudio,
                             onToggleVideo = viewModel::toggleVideo,
                             onSwitchCamera = viewModel::switchCamera,
+                            onLeaveStage = if (!uiState.isHost && uiState.isOnStage) viewModel::leaveStage else null,
                             modifier = Modifier
                                 .align(Alignment.End)
                                 .padding(end = 16.dp)
@@ -314,13 +462,14 @@ fun LiveStreamScreen(
                         verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        ChatOverlay(
-                            comments = uiState.liveComments,
+                        // Keep the player clear by default. The full, writable conversation opens in a
+                        // YouTube-style bottom sheet from this preview or the chat action.
+                        LiveChatPeek(
+                            comments = uiState.liveComments.filterNot { it.authorId in uiState.blockedViewerIds },
                             chatEnabled = session.chatEnabled,
-                            onSendMessage = { text, replyTo ->
-                                viewModel.postLiveComment(text, replyTo)
-                            },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            totalCount = uiState.liveCommentsCount,
+                            onOpenFullChat = { showLiveComments = true },
                         )
                         Spacer(Modifier.width(12.dp))
                         LiveEngagementRail(
@@ -331,15 +480,9 @@ fun LiveStreamScreen(
                             onLikeClick = viewModel::toggleLiveLike,
                             // Pausing chat stops writes, not access to the existing conversation.
                             onCommentClick = { showLiveComments = true },
-                            onShareClick = {
-                                viewModel.shareLiveLink { url ->
-                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_TEXT, url)
-                                    }
-                                    context.startActivity(Intent.createChooser(shareIntent, "Share Live"))
-                                }
-                            }
+                            onShareClick = openLiveShareSheet,
+                            // Only the host can mint invite links for non-public rooms.
+                            showShare = uiState.isHost || session.viewAccessMode == LiveViewAccessMode.PUBLIC,
                         )
                         if (!uiState.isHost && !uiState.isOnStage) {
                             Spacer(Modifier.width(8.dp))
@@ -358,17 +501,27 @@ fun LiveStreamScreen(
                             }
                         }
                         if (!uiState.isHost && (
-                            session.stageAccessMode == LiveStageAccessMode.REQUEST_TO_JOIN &&
+                            session.stageAccessMode != LiveStageAccessMode.HOST_ONLY &&
                             !uiState.isOnStage
                         )) {
+                            val stageRequestPending = uiState.myStageRequestStatus
+                                .equals(LiveJoinRequestStatus.PENDING.raw, ignoreCase = true)
                             Spacer(Modifier.width(8.dp))
                             FilledIconButton(
                                 onClick = viewModel::requestJoinStage,
                                 colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary
+                                    containerColor = if (stageRequestPending) {
+                                        LiveStudioHighlight
+                                    } else {
+                                        MaterialTheme.colorScheme.primary
+                                    }
                                 )
                             ) {
-                                Icon(Icons.Default.People, "Request stage", tint = LiveStudioSurface)
+                                if (stageRequestPending) {
+                                    Icon(Icons.Default.HourglassTop, "Stage request pending", tint = LiveStudioHighlightInk)
+                                } else {
+                                    Icon(Icons.Default.People, "Request stage", tint = LiveStudioSurface)
+                                }
                             }
                         }
                     }
@@ -377,10 +530,14 @@ fun LiveStreamScreen(
 
                 if (showLiveComments) {
                     LiveCommentsBottomSheet(
-                        comments = uiState.liveComments,
+                        comments = uiState.liveComments.filterNot { it.authorId in uiState.blockedViewerIds },
                         chatEnabled = session.chatEnabled,
                         onDismiss = { showLiveComments = false },
-                        onSend = { text, replyTo -> viewModel.postLiveComment(text, replyTo) }
+                        onSend = { text, replyTo -> viewModel.postLiveComment(text, replyTo) },
+                        onDelete = if (uiState.isHost) viewModel::deleteLiveComment else null,
+                        hostId = session.hostId,
+                        totalCount = uiState.liveCommentsCount,
+                        onHideUser = if (uiState.isHost) viewModel::blockViewer else null,
                     )
                 }
             }
@@ -394,7 +551,7 @@ fun LiveStreamScreen(
                 ErrorOverlay(
                     text = uiState.error!!,
                     title = if (endStreamFailed) "Couldn't end stream" else "Can't join stream",
-                    onDismiss = onLeave,
+                    onDismiss = if (endStreamFailed && session != null) viewModel::dismissEndStreamError else onLeave,
                     onOpenSettings = if (needsBroadcastSettings) {
                         {
                             context.startActivity(
@@ -409,38 +566,25 @@ fun LiveStreamScreen(
                     },
                     onRetry = when {
                         needsBroadcastSettings -> { { viewModel.retryStageJoin(context) } }
-                        endStreamFailed -> { { viewModel.endStream(onComplete = onLeave) } }
+                        endStreamFailed -> { { viewModel.endStream(keepRoomForSummary = true) } }
+                        session != null && !uiState.sessionEnded -> { { viewModel.retryJoin(context) } }
                         else -> null
                     },
+                    dismissLabel = if (endStreamFailed && session != null) "Keep streaming" else "Leave",
                 )
             }
 
-        if (showHostTools && uiState.isHost) {
+        if (showHostTools && uiState.isHost && session != null) {
             LiveHostToolsSheet(
-                session = session!!,
+                session = session,
                 viewers = uiState.roomViewers.filter { it.userId != session.hostId },
                 blockedViewerIds = uiState.blockedViewerIds,
                 mindLoomShareInProgress = uiState.mindLoomShareInProgress,
                 mindLoomReplayShareInProgress = uiState.mindLoomReplayShareInProgress,
                 onDismiss = { showHostTools = false },
-                onShareLive = {
-                    viewModel.shareLiveLink { url ->
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, url)
-                        }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share Live"))
-                    }
-                },
-                onShareReplay = {
-                    viewModel.shareReplayLink { url ->
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, url)
-                        }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share Replay"))
-                    }
-                },
+                onShareLive = openLiveShareSheet,
+                onShareReplay = openReplayShareSheet,
+                onRemoveFromStage = viewModel::removeFromStage,
                 onShareMindLoom = viewModel::shareToMindLoom,
                 onShareReplayMindLoom = viewModel::shareReplayToMindLoom,
                 onToggleChat = viewModel::toggleChatEnabled,
@@ -449,9 +593,31 @@ fun LiveStreamScreen(
                 onReplayVisibility = viewModel::updateReplayVisibility
             )
         }
+
+        val activeShareSheet = shareSheet
+        if (activeShareSheet != null && session != null) {
+            LiveShareSheet(
+                title = session.title,
+                url = activeShareSheet.url,
+                isReplay = activeShareSheet.isReplay,
+                onDismiss = { shareSheet = null },
+                onPostToMindLoom = when {
+                    !uiState.isHost -> null
+                    activeShareSheet.isReplay -> viewModel::shareReplayToMindLoom
+                    else -> viewModel::shareToMindLoom
+                },
+                mindLoomInProgress = if (activeShareSheet.isReplay) {
+                    uiState.mindLoomReplayShareInProgress
+                } else {
+                    uiState.mindLoomShareInProgress
+                },
+            )
+        }
     }
     }
 }
+
+private data class LiveRoomShareSheet(val url: String, val isReplay: Boolean)
 
 @Composable
 private fun VideoRenderer(engine: RtcEngine?, publishLocally: Boolean, remoteUid: Int?) {
@@ -461,12 +627,22 @@ private fun VideoRenderer(engine: RtcEngine?, publishLocally: Boolean, remoteUid
     val surfaceView = remember {
         SurfaceView(context).apply { setZOrderMediaOverlay(true) }
     }
+    val boundRemoteUid = remember { intArrayOf(0) }
 
     AndroidView(
         factory = { surfaceView },
         modifier = Modifier.fillMaxSize(),
         update = { view ->
             engine?.let {
+                // Detach the previous broadcaster so a guest leaving cannot blank the host's view.
+                val previous = boundRemoteUid[0]
+                if (previous != 0 && (publishLocally || previous != remoteUid)) {
+                    it.setupRemoteVideo(VideoCanvas(null, VideoCanvas.RENDER_MODE_HIDDEN, previous))
+                    boundRemoteUid[0] = 0
+                }
+                if (!publishLocally && remoteUid != null) {
+                    boundRemoteUid[0] = remoteUid
+                }
                 if (publishLocally) {
                     it.setupLocalVideo(VideoCanvas(view, VideoCanvas.RENDER_MODE_HIDDEN, 0))
                 } else if (remoteUid != null) {
@@ -480,69 +656,281 @@ private fun VideoRenderer(engine: RtcEngine?, publishLocally: Boolean, remoteUid
     )
 }
 
+/** Full-bleed card shown instead of a black frame: host not connected yet, camera paused, or own camera off. */
+@Composable
+private fun LiveVideoPlaceholder(
+    session: LiveSession,
+    title: String,
+    subtitle: String,
+    showProgress: Boolean = false,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LivePalette.StageBackdrop),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
+            LiveHostAvatar(name = session.hostName, photoUrl = session.hostProfilePicUrl, size = 88.dp)
+            Text(
+                title,
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                subtitle,
+                color = Color.White.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+            )
+            if (showProgress) {
+                CircularProgressIndicator(
+                    color = Color.White,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Small picture-in-picture tiles for stage guests, YouTube-style co-stream layout. */
+@Composable
+private fun StageGuestTiles(
+    engine: RtcEngine?,
+    remoteUids: List<Int>,
+    showLocalTile: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (engine == null || (remoteUids.isEmpty() && !showLocalTile)) return
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (showLocalTile) {
+            StageVideoTile(engine = engine, uid = 0, isLocal = true, label = "You")
+        }
+        remoteUids.take(MAX_STAGE_TILES).forEach { uid ->
+            key(uid) {
+                StageVideoTile(engine = engine, uid = uid, isLocal = false, label = "Guest")
+            }
+        }
+    }
+}
+
+@Composable
+private fun StageVideoTile(engine: RtcEngine, uid: Int, isLocal: Boolean, label: String) {
+    val context = LocalContext.current
+    // TextureView composes above the full-screen SurfaceView without z-order conflicts.
+    val textureView = remember(uid, isLocal) { TextureView(context) }
+    DisposableEffect(uid, isLocal) {
+        if (isLocal) {
+            engine.setupLocalVideo(VideoCanvas(textureView, VideoCanvas.RENDER_MODE_HIDDEN, 0))
+        } else {
+            engine.setupRemoteVideo(VideoCanvas(textureView, VideoCanvas.RENDER_MODE_HIDDEN, uid))
+        }
+        onDispose {
+            if (!isLocal) {
+                engine.setupRemoteVideo(VideoCanvas(null, VideoCanvas.RENDER_MODE_HIDDEN, uid))
+            }
+        }
+    }
+    Box(
+        modifier = Modifier
+            .size(width = 96.dp, height = 136.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(LiveStudioBackground)
+    ) {
+        AndroidView(factory = { textureView }, modifier = Modifier.fillMaxSize())
+        Surface(
+            color = LiveChromeScrim,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(6.dp)
+        ) {
+            Text(
+                label,
+                color = LiveStudioInk,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
+private const val MAX_STAGE_TILES = 3
+
+/** "LIVE 12:34" style elapsed label that ticks every second. */
+@Composable
+private fun rememberLiveElapsedLabel(startedAtMs: Long?): String? {
+    if (startedAtMs == null) return null
+    val nowMs by produceState(initialValue = System.currentTimeMillis(), startedAtMs) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
+    return formatLiveDuration((nowMs - startedAtMs).coerceAtLeast(0L))
+}
+
+internal fun formatLiveDuration(durationMs: Long): String {
+    val totalSeconds = durationMs / 1_000L
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0) {
+        String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(java.util.Locale.US, "%d:%02d", minutes, seconds)
+    }
+}
+
+@Composable
+private fun LiveSummaryStat(value: String, label: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = LiveStudioInk, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(label, color = LiveStudioMuted, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
 @Composable
 private fun SessionEndedOverlay(
     session: LiveSession,
+    summary: LiveEndSummary? = null,
     isHost: Boolean,
     mindLoomReplayShareInProgress: Boolean,
     onLeave: () -> Unit,
     onWatchReplay: () -> Unit,
     onShareReplay: () -> Unit,
     onPostReplayToMindLoom: () -> Unit,
+    canWatchReplay: Boolean = true,
+    onReplayVisibility: ((LiveReplayVisibility) -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.72f)),
+            .background(Color.Black.copy(alpha = 0.82f)),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp),
+                .padding(20.dp),
             shape = RoundedCornerShape(24.dp),
             color = LiveStudioSurface,
             shadowElevation = 8.dp,
         ) {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 560.dp)
+                    .heightIn(max = 620.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                LiveHostAvatar(
+                    name = session.hostName,
+                    photoUrl = session.hostProfilePicUrl,
+                    size = 64.dp,
+                )
                 Text(
                     "Stream ended",
                     color = LiveStudioInk,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                 )
-                Text(session.title, color = LiveStudioMuted, textAlign = TextAlign.Center)
-                if (session.isArchiveReady) {
-                    Button(
-                        onClick = onWatchReplay,
+                Text(
+                    "${session.title.ifBlank { "Live session" }} · ${session.hostName.ifBlank { "Host" }}",
+                    color = LiveStudioMuted,
+                    textAlign = TextAlign.Center,
+                )
+                when {
+                    session.isArchiveReady && canWatchReplay -> Unit
+                    session.isArchiveReady -> Text(
+                        "The host has kept this replay private.",
+                        color = LiveStudioMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                    )
+                    session.isArchiveProcessing -> Unit
+                    else -> Text(
+                        "No replay was recorded for this stream.",
+                        color = LiveStudioMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                if (onReplayVisibility != null && (session.isArchiveReady || session.isArchiveProcessing)) {
+                    Text(
+                        "Who can watch the replay",
+                        color = LiveStudioInk,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LiveStudioAccent,
-                            contentColor = Color.White,
-                        ),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Watch replay", fontWeight = FontWeight.SemiBold)
+                        LiveReplayVisibility.entries.forEach { mode ->
+                            FilterChip(
+                                selected = session.replayVisibility == mode,
+                                onClick = { onReplayVisibility(mode) },
+                                label = { Text(mode.label) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = LiveStudioInk,
+                                    selectedLabelColor = Color.White,
+                                ),
+                            )
+                        }
+                    }
+                }
+                summary?.let { stats ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        LiveSummaryStat(formatLiveDuration(stats.durationMs), "Duration", Modifier.weight(1f))
+                        LiveSummaryStat(stats.peakViewers.toString(), "Peak viewers", Modifier.weight(1f))
+                        LiveSummaryStat(stats.likes.toString(), "Likes", Modifier.weight(1f))
+                        LiveSummaryStat(stats.comments.toString(), "Comments", Modifier.weight(1f))
+                    }
+                }
+                if (session.isArchiveReady) {
+                    if (canWatchReplay) {
+                        LiveAccentButton(
+                            onClick = onWatchReplay,
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(24.dp),
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Watch replay", fontWeight = FontWeight.SemiBold)
+                        }
                     }
                     if (isHost) {
                         OutlinedButton(
                             onClick = onShareReplay,
                             modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
                         ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
                             Text("Share replay link")
                         }
                         Button(
                             onClick = onPostReplayToMindLoom,
                             modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
                             enabled = !mindLoomReplayShareInProgress,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = LiveStudioLiveMark,
+                                containerColor = LiveStudioInk,
                                 contentColor = Color.White,
                             ),
                         ) {
@@ -578,7 +966,8 @@ private fun LiveHostToolsSheet(
     onToggleChat: () -> Unit,
     onBlockViewer: (String) -> Unit,
     onUnblockViewer: (String) -> Unit,
-    onReplayVisibility: (LiveReplayVisibility) -> Unit
+    onReplayVisibility: (LiveReplayVisibility) -> Unit,
+    onRemoveFromStage: ((String) -> Unit)? = null,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -594,110 +983,175 @@ private fun LiveHostToolsSheet(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Broadcast desk", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiveStudioInk)
+            Text("Live control room", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = LiveStudioInk)
             Text("Share the room, manage chat, and keep the audience safe.", style = MaterialTheme.typography.bodySmall, color = LiveStudioMuted)
-            LiveHostToolsSection(
-                title = "Share and discovery",
-                subtitle = "Invite viewers or feature this broadcast in MindLoom.",
-            ) {
-            Button(
+
+            LiveHostToolsHeading("Share")
+            LiveHostToolRow(
+                icon = Icons.Default.Share,
+                title = "Share live link",
+                subtitle = if (session.viewAccessMode == LiveViewAccessMode.PUBLIC) {
+                    "Anyone with the link can watch."
+                } else {
+                    "Invite link for this ${session.viewAccessMode.name.lowercase().replace('_', ' ')} stream."
+                },
                 onClick = { onShareLive(); onDismiss() },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = LiveStudioAccent, contentColor = Color.White),
-            ) {
-                Text("Share live link", fontWeight = FontWeight.SemiBold)
-            }
-            Button(
+            )
+            LiveHostToolRow(
+                icon = Icons.Default.AutoAwesome,
+                title = if (mindLoomShareInProgress) "Posting to MindLoom…" else "Post live to MindLoom",
+                subtitle = if (session.viewAccessMode == LiveViewAccessMode.PUBLIC) {
+                    "Feature this broadcast in the MindLoom feed."
+                } else {
+                    "Only people allowed by your audience setting can join from the post."
+                },
                 onClick = onShareMindLoom,
-                modifier = Modifier.fillMaxWidth(),
                 enabled = !mindLoomShareInProgress,
-                colors = ButtonDefaults.buttonColors(containerColor = LiveStudioLiveMark, contentColor = Color.White),
+                loading = mindLoomShareInProgress,
+            )
+
+            LiveHostToolsHeading("Chat")
+            LiveHostToolRow(
+                icon = Icons.Outlined.ChatBubbleOutline,
+                title = "Live chat",
+                subtitle = if (session.chatEnabled) "Viewers can send messages." else "Paused. Viewers can still read the conversation.",
+                onClick = onToggleChat,
+                trailing = {
+                    Switch(checked = session.chatEnabled, onCheckedChange = { onToggleChat() })
+                },
+            )
+
+            LiveHostToolsHeading("Replay")
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(if (mindLoomShareInProgress) "Sharing to MindLoom…" else "Post live to MindLoom", fontWeight = FontWeight.SemiBold)
-            }
-            }
-            LiveHostToolsSection(
-                title = "Live room",
-                subtitle = "Pause new comments without hiding the existing conversation.",
-            ) {
-            OutlinedButton(onClick = onToggleChat, modifier = Modifier.fillMaxWidth()) {
-                Text(if (session.chatEnabled) "Pause live chat" else "Resume live chat")
-            }
-            }
-            LiveHostToolsSection(
-                title = "Replay access",
-                subtitle = "Choose who can replay the broadcast after it ends.",
-            ) {
-            if (session.isEnded || session.isArchiveReady) {
-                OutlinedButton(onClick = { onShareReplay(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Share replay link")
-                }
-                if (session.isArchiveReady) {
-                    Button(
-                        onClick = onShareReplayMindLoom,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !mindLoomReplayShareInProgress,
-                        colors = ButtonDefaults.buttonColors(containerColor = LiveStudioAccent, contentColor = Color.White),
-                    ) {
-                        Text(
-                            if (mindLoomReplayShareInProgress) "Posting replay…" else "Post replay to MindLoom",
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-            }
-            Text("Replay visibility", style = MaterialTheme.typography.titleSmall, color = LiveStudioInk, fontWeight = FontWeight.SemiBold)
-            LiveReplayVisibility.entries.forEach { mode ->
-                OutlinedButton(
-                    onClick = { onReplayVisibility(mode); onDismiss() },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (session.replayVisibility == mode) LiveStudioAccentSoft else Color.Transparent,
-                        contentColor = if (session.replayVisibility == mode) LiveStudioAccent else LiveStudioInk,
-                    ),
-                ) {
-                    Text(
-                        mode.name.replace('_', ' ').lowercase().replaceFirstChar { it.titlecase() },
-                        fontWeight = if (session.replayVisibility == mode) FontWeight.SemiBold else FontWeight.Normal,
+                LiveReplayVisibility.entries.forEach { mode ->
+                    FilterChip(
+                        selected = session.replayVisibility == mode,
+                        onClick = { onReplayVisibility(mode) },
+                        label = { Text(mode.label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = LiveStudioInk,
+                            selectedLabelColor = Color.White,
+                        ),
                     )
                 }
             }
+            if (session.isEnded || session.isArchiveReady) {
+                LiveHostToolRow(
+                    icon = Icons.Default.Share,
+                    title = "Share replay link",
+                    subtitle = "Send the recording to people who missed it.",
+                    onClick = { onShareReplay(); onDismiss() },
+                )
+                if (session.isArchiveReady) {
+                    LiveHostToolRow(
+                        icon = Icons.Default.AutoAwesome,
+                        title = if (mindLoomReplayShareInProgress) "Posting replay…" else "Post replay to MindLoom",
+                        subtitle = "Replay visibility still controls who can watch.",
+                        onClick = onShareReplayMindLoom,
+                        enabled = !mindLoomReplayShareInProgress,
+                        loading = mindLoomReplayShareInProgress,
+                    )
+                }
             }
-            LiveHostToolsSection(
-                title = "Audience moderation",
-                subtitle = "Block disruptive viewers. You can reverse this at any time.",
-            ) {
+
+            LiveHostToolsHeading("Audience (${viewers.size})")
             if (viewers.isEmpty()) {
                 Text("No other viewers are active right now.", style = MaterialTheme.typography.bodySmall, color = LiveStudioMuted)
             } else {
                 viewers.forEach { viewer ->
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = LiveStudioAccentSoft.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(16.dp),
+                    val isGuestOnStage = viewer.userId in session.acceptedVolunteerIds
+                    val isBlocked = blockedViewerIds.contains(viewer.userId)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(viewer.displayName, color = LiveStudioInk, modifier = Modifier.weight(1f))
-                            if (blockedViewerIds.contains(viewer.userId)) {
-                                TextButton(onClick = { onUnblockViewer(viewer.userId) }) {
-                                    Text("Unblock")
-                                }
-                            } else {
-                                TextButton(onClick = { onBlockViewer(viewer.userId) }) {
-                                    Text("Block")
-                                }
+                        LiveHostAvatar(name = viewer.displayName, photoUrl = null, size = 32.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(viewer.displayName, color = LiveStudioInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            when {
+                                isBlocked -> Text("Blocked", color = LiveStudioDanger, style = MaterialTheme.typography.labelSmall)
+                                isGuestOnStage -> Text("On stage", color = LiveStudioLiveMark, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        if (isGuestOnStage && onRemoveFromStage != null) {
+                            TextButton(onClick = { onRemoveFromStage(viewer.userId) }) {
+                                Text("Remove")
+                            }
+                        }
+                        if (isBlocked) {
+                            TextButton(onClick = { onUnblockViewer(viewer.userId) }) {
+                                Text("Unblock")
+                            }
+                        } else {
+                            TextButton(onClick = { onBlockViewer(viewer.userId) }) {
+                                Text("Block", color = LiveStudioDanger)
                             }
                         }
                     }
                 }
             }
-            }
             Spacer(Modifier.height(12.dp))
         }
+    }
+}
+
+@Composable
+private fun LiveHostToolsHeading(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        color = LiveStudioInk,
+        modifier = Modifier.padding(top = 8.dp),
+    )
+}
+
+/** YouTube Studio-style settings row: leading icon, title + subtitle, optional trailing control. */
+@Composable
+private fun LiveHostToolRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFF1F1F1)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (loading) {
+                CircularProgressIndicator(strokeWidth = 2.dp, color = LiveStudioInk, modifier = Modifier.size(18.dp))
+            } else {
+                Icon(icon, contentDescription = null, tint = LiveStudioInk, modifier = Modifier.size(20.dp))
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = LiveStudioInk)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = LiveStudioMuted)
+        }
+        trailing?.invoke()
     }
 }
 
@@ -726,10 +1180,13 @@ private fun LiveHostToolsSection(
 @Composable
 private fun StreamHeader(
     session: LiveSession,
+    viewerCount: Long = session.viewerCount,
     incomingRequestsCount: Int = 0,
     onLeave: () -> Unit,
-    onHostTools: (() -> Unit)? = null
+    onHostTools: (() -> Unit)? = null,
+    onEndStream: (() -> Unit)? = null,
 ) {
+    val elapsedLabel = rememberLiveElapsedLabel((session.startTime ?: session.createdAt)?.time)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -748,36 +1205,32 @@ private fun StreamHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(LiveStudioAccentSoft),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = session.hostName.firstOrNull()?.uppercase() ?: "?",
-                        color = LiveStudioAccent,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                LiveHostAvatar(
+                    name = session.hostName,
+                    photoUrl = session.hostProfilePicUrl,
+                    size = 36.dp,
+                )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = session.title.ifBlank { "Live session" },
+                        text = session.hostName.ifBlank { "Host" },
                         color = LiveStudioInk,
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = "${session.hostName.ifBlank { "Host" }} - ${session.viewerCount} watching",
+                        text = session.title.ifBlank { "Live session" },
                         color = LiveStudioMuted,
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                LiveStatusPill(label = "LIVE", isLive = true)
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    LiveRedBadge(text = elapsedLabel?.let { "LIVE $it" } ?: "LIVE")
+                    LiveViewerCountLabel(count = viewerCount)
+                }
                 if (incomingRequestsCount > 0) {
                     Surface(
                         shape = CircleShape,
@@ -796,7 +1249,23 @@ private fun StreamHeader(
         }
 
         Spacer(Modifier.width(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (onEndStream != null) {
+                Button(
+                    onClick = onEndStream,
+                    shape = RoundedCornerShape(50),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    modifier = Modifier
+                        .height(40.dp)
+                        .semantics { contentDescription = "End live stream" },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LiveStudioDanger,
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    Text("End", fontWeight = FontWeight.Bold)
+                }
+            }
             if (onHostTools != null) {
                 FilledIconButton(
                     onClick = onHostTools,
@@ -822,11 +1291,99 @@ private fun StreamHeader(
 }
 
 @Composable
+private fun LiveChatPeek(
+    comments: List<LiveRoomComment>,
+    chatEnabled: Boolean,
+    totalCount: Long,
+    onOpenFullChat: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // A short preview preserves the broadcast as the focal point; the complete conversation lives
+    // in the sheet, where its composer and moderation actions have enough space.
+    val recentComments = comments.takeLast(2)
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpenFullChat)
+            .semantics { contentDescription = "Open live chat, $totalCount messages" },
+        color = LiveChromeScrim,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (chatEnabled) "Live chat" else "Live chat paused",
+                    color = if (chatEnabled) LiveStudioInk else LiveStudioMuted,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = formatCompactCount(maxOf(totalCount, comments.size.toLong())),
+                    color = LiveStudioMuted,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Icon(
+                    Icons.Default.KeyboardArrowUp,
+                    contentDescription = null,
+                    tint = LiveStudioMuted,
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .size(20.dp),
+                )
+            }
+            if (recentComments.isEmpty()) {
+                Text(
+                    text = if (chatEnabled) "Be the first to say hello." else "The host has paused live chat.",
+                    color = LiveStudioMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                recentComments.forEach { comment ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "${comment.authorName.ifBlank { "Anonymous" }}  ",
+                            color = LiveStudioInk,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(0.42f, fill = false),
+                        )
+                        Text(
+                            text = comment.text,
+                            color = LiveStudioMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ChatOverlay(
     comments: List<LiveRoomComment>,
     chatEnabled: Boolean,
     onSendMessage: (String, LiveRoomComment?) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDeleteComment: ((LiveRoomComment) -> Unit)? = null,
+    hostId: String? = null,
+    totalCount: Long = comments.size.toLong(),
+    onHideUser: ((String) -> Unit)? = null,
+    onOpenFullChat: (() -> Unit)? = null,
 ) {
     var chatInput by remember { mutableStateOf("") }
     var replyTo by remember { mutableStateOf<LiveRoomComment?>(null) }
@@ -834,32 +1391,46 @@ private fun ChatOverlay(
 
     LaunchedEffect(comments.size) {
         if (comments.isNotEmpty()) {
-            listState.animateScrollToItem(comments.size - 1)
+            // reverseLayout puts the newest comment at index 0.
+            listState.animateScrollToItem(0)
         }
     }
 
     Column(modifier = modifier) {
         Surface(
             color = LiveChromeScrim,
-            shape = RoundedCornerShape(22.dp),
+            shape = RoundedCornerShape(16.dp),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .then(if (onOpenFullChat != null) Modifier.clickable(onClick = onOpenFullChat) else Modifier),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = if (chatEnabled) "LIVE CHAT" else "CHAT PAUSED",
+                        text = if (chatEnabled) "Live chat" else "Live chat paused",
                         color = if (chatEnabled) LiveStudioInk else LiveStudioMuted,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                     )
-                    Text(
-                        text = "${comments.size} comments",
-                        color = LiveStudioMuted,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = formatCompactCount(maxOf(totalCount, comments.size.toLong())),
+                            color = LiveStudioMuted,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        if (onOpenFullChat != null) {
+                            Icon(
+                                Icons.Default.KeyboardArrowUp,
+                                contentDescription = "Open full live chat",
+                                tint = LiveStudioMuted,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 if (comments.isEmpty()) {
@@ -877,13 +1448,18 @@ private fun ChatOverlay(
                         reverseLayout = true,
                     ) {
                         items(comments.reversed(), key = { it.id }) { comment ->
-                            ChatItem(
-                                msg = comment,
+                            LiveChatMessageRow(
+                                comment = comment,
+                                isHostAuthor = !hostId.isNullOrBlank() && comment.authorId == hostId,
                                 onReply = if (chatEnabled) {
                                     { replyTo = comment }
                                 } else {
                                     null
                                 },
+                                onDelete = onDeleteComment?.let { delete -> { delete(comment) } },
+                                onHideUser = onHideUser
+                                    ?.takeIf { comment.authorId.isNotBlank() && comment.authorId != hostId }
+                                    ?.let { hide -> { hide(comment.authorId) } },
                             )
                         }
                     }
@@ -893,44 +1469,27 @@ private fun ChatOverlay(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        replyTo?.let { parent ->
-            Surface(
-                color = LiveStudioSurface.copy(alpha = 0.96f),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.padding(bottom = 6.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Replying to ${parent.authorName.ifBlank { "Anonymous" }}",
-                        color = LiveStudioInk,
-                        fontSize = 12.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = { replyTo = null },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Default.Clear, contentDescription = "Cancel reply", tint = LiveStudioInk)
+        Surface(
+            color = LiveChromeScrim,
+            shape = RoundedCornerShape(28.dp),
+        ) {
+            LiveChatComposer(
+                value = chatInput,
+                onValueChange = { chatInput = it },
+                enabled = chatEnabled,
+                disabledPlaceholder = "Host paused chat",
+                replyingTo = replyTo?.authorName?.ifBlank { "Anonymous" },
+                onCancelReply = { replyTo = null },
+                onSend = {
+                    if (chatInput.isNotBlank()) {
+                        onSendMessage(chatInput, replyTo)
+                        chatInput = ""
+                        replyTo = null
                     }
-                }
-            }
+                },
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            )
         }
-
-        ChatInputField(
-            value = chatInput,
-            onValueChange = { chatInput = it },
-            enabled = chatEnabled,
-            onSend = {
-                if (chatInput.isNotBlank()) {
-                    onSendMessage(chatInput, replyTo)
-                    chatInput = ""
-                    replyTo = null
-                }
-            }
-        )
     }
 }
 
@@ -938,6 +1497,7 @@ private fun ChatOverlay(
 private fun ChatItem(
     msg: LiveRoomComment,
     onReply: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
 ) {
     Surface(
         color = LiveStudioSurface.copy(alpha = 0.94f),
@@ -975,6 +1535,19 @@ private fun ChatItem(
                             Icons.Default.Reply,
                             contentDescription = "Reply to ${msg.authorName}",
                             tint = LiveStudioAccent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                if (onDelete != null) {
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Remove comment from ${msg.authorName}",
+                            tint = LiveStudioMuted,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -1047,39 +1620,37 @@ private fun LiveEngagementRail(
     onLikeClick: () -> Unit,
     onCommentClick: () -> Unit,
     onShareClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showShare: Boolean = true,
 ) {
-    Surface(
-        modifier = modifier,
-        color = LiveChromeScrim,
-        shape = RoundedCornerShape(24.dp),
-        shadowElevation = 6.dp,
+    Column(
+        modifier = modifier.padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            StreamControlButton(
-                icon = if (hasLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                text = if (hasLiked) "Liked ($likesCount)" else likesCount.toString(),
-                contentDescription = if (hasLiked) "Unlike stream" else "Like stream",
-                onClick = onLikeClick,
-                active = hasLiked
-            )
-            StreamControlButton(
-                icon = Icons.Default.Comment,
-                text = if (chatEnabled) commentsCount.toString() else "Paused",
-                contentDescription = if (chatEnabled) "Open comments" else "Chat paused",
-                onClick = onCommentClick,
-                active = chatEnabled
-            )
-            StreamControlButton(
+        LiveRailAction(
+            icon = if (hasLiked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+            label = if (likesCount > 0L) formatCompactCount(likesCount) else "Like",
+            contentDescription = if (hasLiked) "Remove like, $likesCount likes" else "Like stream, $likesCount likes",
+            onClick = onLikeClick,
+            active = hasLiked,
+        )
+        LiveRailAction(
+            icon = Icons.Outlined.ChatBubbleOutline,
+            label = when {
+                !chatEnabled -> "Paused"
+                commentsCount > 0L -> formatCompactCount(commentsCount)
+                else -> "Chat"
+            },
+            contentDescription = if (chatEnabled) "Open live chat, $commentsCount messages" else "Live chat paused",
+            onClick = onCommentClick,
+        )
+        if (showShare) {
+            LiveRailAction(
                 icon = Icons.Default.Share,
-                text = "Share",
+                label = "Share",
                 contentDescription = "Share live link",
                 onClick = onShareClick,
-                active = true
             )
         }
     }
@@ -1090,41 +1661,92 @@ private fun LiveCommentsBottomSheet(
     comments: List<LiveRoomComment>,
     chatEnabled: Boolean,
     onDismiss: () -> Unit,
-    onSend: (String, LiveRoomComment?) -> Unit
+    onSend: (String, LiveRoomComment?) -> Unit,
+    onDelete: ((LiveRoomComment) -> Unit)? = null,
+    hostId: String? = null,
+    totalCount: Long = comments.size.toLong(),
+    onHideUser: ((String) -> Unit)? = null,
 ) {
     var input by remember { mutableStateOf("") }
     var replyTo by remember { mutableStateOf<LiveRoomComment?>(null) }
     val listState = rememberLazyListState()
-
-    LaunchedEffect(comments.size) {
-        if (comments.isNotEmpty()) {
-            listState.animateScrollToItem(comments.lastIndex)
+    val scope = rememberCoroutineScope()
+    var showJumpToLatest by remember { mutableStateOf(false) }
+    var initialScrollDone by remember { mutableStateOf(false) }
+    val isAtLatest by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            info.totalItemsCount == 0 || lastVisible >= info.totalItemsCount - 2
         }
     }
 
+    // Follow new messages only while the reader is at the bottom, like YouTube live chat.
+    LaunchedEffect(comments.size) {
+        if (comments.isEmpty()) return@LaunchedEffect
+        if (!initialScrollDone || isAtLatest) {
+            listState.scrollToItem(comments.lastIndex)
+            initialScrollDone = true
+            showJumpToLatest = false
+        } else {
+            showJumpToLatest = true
+        }
+    }
+    LaunchedEffect(isAtLatest) {
+        if (isAtLatest) showJumpToLatest = false
+    }
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss
+        onDismissRequest = onDismiss,
+        containerColor = LiveStudioSurface,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 520.dp)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .heightIn(max = 560.dp)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
         ) {
-            Text(
-                text = "Live Comments (${comments.size})",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            if (!chatEnabled) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = "Chat is paused by the host.",
-                    color = LiveStudioMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp)
+                    text = "Live chat",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = LiveStudioInk,
                 )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = formatCompactCount(maxOf(totalCount, comments.size.toLong())),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = LiveStudioMuted,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Clear, contentDescription = "Close live chat", tint = LiveStudioInk)
+                }
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            if (!chatEnabled) {
+                Surface(
+                    color = LiveStudioHighlight,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    Text(
+                        text = "The host paused live chat. You can still read the conversation.",
+                        color = LiveStudioHighlightInk,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+            }
+            HorizontalDivider(color = LiveStudioBorder, modifier = Modifier.padding(top = 8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             if (comments.isEmpty()) {
                 Box(
@@ -1134,91 +1756,71 @@ private fun LiveCommentsBottomSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No comments yet. Start the conversation.",
-                        color = LiveStudioMuted
+                        text = if (chatEnabled) "Welcome to live chat! Say hello to get things started." else "No messages yet.",
+                        color = LiveStudioMuted,
+                        textAlign = TextAlign.Center,
                     )
                 }
             } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
                 ) {
-                    items(comments, key = { it.id }) { item ->
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                item.replyToAuthorName?.let { parentName ->
-                                    Text(
-                                        text = "↩ $parentName: ${item.replyToText.orEmpty()}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = LiveStudioMuted,
-                                        maxLines = 2,
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                }
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = item.authorName.ifBlank { "Anonymous" },
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    if (chatEnabled) {
-                                        TextButton(onClick = { replyTo = item }) {
-                                            Text("Reply")
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = item.text,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        items(comments, key = { it.id }) { item ->
+                            LiveChatMessageRow(
+                                comment = item,
+                                isHostAuthor = !hostId.isNullOrBlank() && item.authorId == hostId,
+                                onReply = if (chatEnabled) {
+                                    { replyTo = item }
+                                } else {
+                                    null
+                                },
+                                onDelete = onDelete?.let { delete -> { delete(item) } },
+                                onHideUser = onHideUser
+                                    ?.takeIf { item.authorId.isNotBlank() && item.authorId != hostId }
+                                    ?.let { hide -> { hide(item.authorId) } },
+                            )
                         }
+                    }
+                    if (showJumpToLatest) {
+                        LiveJumpToLatestChip(
+                            onClick = {
+                                scope.launch { listState.animateScrollToItem(comments.lastIndex) }
+                                showJumpToLatest = false
+                            },
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 8.dp),
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            replyTo?.let { parent ->
-                Text(
-                    text = "Replying to ${parent.authorName.ifBlank { "Anonymous" }}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = LiveStudioAccent,
-                )
-                TextButton(onClick = { replyTo = null }) { Text("Cancel reply") }
-            }
-            OutlinedTextField(
+            HorizontalDivider(color = LiveStudioBorder, modifier = Modifier.padding(vertical = 8.dp))
+            LiveChatComposer(
                 value = input,
                 onValueChange = { input = it },
-                modifier = Modifier.fillMaxWidth(),
                 enabled = chatEnabled,
-                placeholder = {
-                    Text(if (chatEnabled) "Add a comment..." else "Chat is paused")
-                },
-                trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            val message = input.trim()
-                            if (message.isNotEmpty()) {
-                                onSend(message, replyTo)
-                                input = ""
-                                replyTo = null
-                            }
-                        },
-                        enabled = chatEnabled && input.isNotBlank()
-                    ) {
-                        Icon(Icons.Default.Send, contentDescription = "Send comment")
+                replyingTo = replyTo?.authorName?.ifBlank { "Anonymous" },
+                onCancelReply = { replyTo = null },
+                onSend = {
+                    val message = input.trim()
+                    if (message.isNotEmpty()) {
+                        onSend(message, replyTo)
+                        input = ""
+                        replyTo = null
+                        scope.launch {
+                            if (comments.isNotEmpty()) listState.animateScrollToItem(comments.lastIndex)
+                        }
                     }
-                }
+                },
+                modifier = Modifier,
             )
             Spacer(modifier = Modifier.height(10.dp))
         }
@@ -1232,7 +1834,8 @@ private fun HostControlPanel(
     onToggleAudio: () -> Unit,
     onToggleVideo: () -> Unit,
     onSwitchCamera: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLeaveStage: (() -> Unit)? = null,
 ) {
     Surface(
         modifier = modifier,
@@ -1260,6 +1863,15 @@ private fun HostControlPanel(
                 text = "Flip",
                 onClick = onSwitchCamera
             )
+            if (onLeaveStage != null) {
+                StreamControlButton(
+                    icon = Icons.Default.PersonRemove,
+                    text = "Leave stage",
+                    contentDescription = "Leave the stage and keep watching",
+                    onClick = onLeaveStage,
+                    active = false,
+                )
+            }
         }
     }
 }
@@ -1310,15 +1922,16 @@ private fun StreamControlButton(
 private fun LoadingOverlay(text: String) {
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = LiveChromeScrim
+        color = LivePalette.Ink
     ) {
         Column(
+            modifier = Modifier.fillMaxSize().background(LivePalette.StageBackdrop),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            CircularProgressIndicator(color = LiveStudioAccent)
+            CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
             Spacer(Modifier.height(16.dp))
-            Text(text, color = LiveStudioInk)
+            Text(text, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -1331,6 +1944,7 @@ private fun ErrorOverlay(
     onDismiss: () -> Unit,
     onOpenSettings: (() -> Unit)? = null,
     onRetry: (() -> Unit)? = null,
+    dismissLabel: String = "Leave",
 ) {
     Box(
         modifier = Modifier
@@ -1387,7 +2001,7 @@ private fun ErrorOverlay(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    Text("Leave")
+                    Text(dismissLabel)
                 }
             }
         }
@@ -1405,7 +2019,7 @@ private fun IncomingRequestsPanel(
 ) {
     Surface(
         modifier = modifier.clip(RoundedCornerShape(16.dp)),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+        color = LiveStudioSurface.copy(alpha = 0.97f),
         shape = RoundedCornerShape(16.dp),
         shadowElevation = 8.dp
     ) {
@@ -1428,14 +2042,15 @@ private fun IncomingRequestsPanel(
                     Icon(
                         Icons.Default.People,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = LivePalette.Indigo,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Join Requests (${requests.size})",
+                        "Requests to join the stage (${requests.size})",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 14.sp,
+                        color = LiveStudioInk,
                     )
                 }
 
@@ -1473,9 +2088,8 @@ private fun RequestCard(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+        color = Color(0xFFF1F1F1),
         shape = RoundedCornerShape(12.dp),
-        shadowElevation = 2.dp
     ) {
         Row(
             modifier = Modifier
@@ -1490,39 +2104,29 @@ private fun RequestCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Volunteer avatar
-                Surface(
-                    modifier = Modifier.size(36.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                ) {
-                    if (request.volunteerProfilePicUrl != null) {
-                        AsyncImage(
-                            model = request.volunteerProfilePicUrl,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Person,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .padding(6.dp)
-                                .fillMaxSize(),
-                            tint = MaterialTheme.colorScheme.primary
+                LiveHostAvatar(
+                    name = request.volunteerName,
+                    photoUrl = request.volunteerProfilePicUrl,
+                    size = 36.dp,
+                )
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = request.volunteerName.ifBlank { "Viewer" },
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = LiveStudioInk,
+                    )
+                    formatRelativeAgo(request.requestedAt?.time)?.let { ago ->
+                        Text(
+                            text = "Asked $ago",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = LiveStudioMuted,
                         )
                     }
                 }
-
-                // Name
-                Text(
-                    text = request.volunteerName,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f)
-                )
             }
 
             // Action buttons — icon + label (not color-only) for color-vision accessibility
@@ -1533,6 +2137,7 @@ private fun RequestCard(
                 OutlinedButton(
                     onClick = onReject,
                     enabled = enabled,
+                    shape = RoundedCornerShape(50),
                 ) {
                     Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
@@ -1541,6 +2146,8 @@ private fun RequestCard(
                 Button(
                     onClick = onAccept,
                     enabled = enabled,
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(containerColor = LiveStudioInk, contentColor = Color.White),
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))

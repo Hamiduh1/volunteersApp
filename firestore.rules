@@ -375,6 +375,28 @@ service cloud.firestore {
           (previousStatus in ['LIVE', 'live', 'active'] && nextStatus == 'ENDED'));
     }
 
+    // A blocked viewer may not see or create room engagement. New engagement also stops when
+    // the broadcast ends, while existing comments remain readable for permitted replay viewers.
+    function isBlockedFromLiveSession(sessionId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/live_sessions/$(sessionId)/blocked_users/$(request.auth.uid));
+    }
+
+    function canReadLiveInteraction(sessionId) {
+      return isSignedIn() && !isBlockedFromLiveSession(sessionId);
+    }
+
+    function canWriteLiveInteraction(sessionId) {
+      let session = get(/databases/$(database)/documents/live_sessions/$(sessionId)).data;
+      return canReadLiveInteraction(sessionId) &&
+        session.status in ['LIVE', 'live', 'ACTIVE', 'active', 'STARTED', 'started'];
+    }
+
+    function canPostLiveComment(sessionId) {
+      let session = get(/databases/$(database)/documents/live_sessions/$(sessionId)).data;
+      return canWriteLiveInteraction(sessionId) && session.get('chatEnabled', true) == true;
+    }
+
     function liveJoinRequestCreateAllowed(sessionId, requestId) {
       let session = get(/databases/$(database)/documents/live_sessions/$(sessionId)).data;
       return isSignedIn() &&
@@ -1078,21 +1100,20 @@ service cloud.firestore {
       allow delete: if false;
 
       match /likes/{userId} {
-        allow read: if isSignedIn();
-        allow create, update: if isSignedIn()
+        allow read: if canReadLiveInteraction(sessionId);
+        allow create, update: if canWriteLiveInteraction(sessionId)
           && request.auth.uid == userId
           && request.resource.data.userId == request.auth.uid;
         allow delete: if isSignedIn() && request.auth.uid == userId;
       }
 
       match /comments/{commentId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn()
+        allow read: if canReadLiveInteraction(sessionId);
+        allow create: if canPostLiveComment(sessionId)
           && request.resource.data.authorId == request.auth.uid
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 500
-          && get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.get('chatEnabled', true) == true
           && (
             !('replyToCommentId' in request.resource.data) ||
             (
@@ -1105,8 +1126,8 @@ service cloud.firestore {
       }
 
       match /viewers/{viewerId} {
-        allow read: if isSignedIn();
-        allow create, update: if isSignedIn()
+        allow read: if canReadLiveInteraction(sessionId);
+        allow create, update: if canWriteLiveInteraction(sessionId)
           && request.auth.uid == viewerId
           && request.resource.data.userId == request.auth.uid;
         allow delete: if isSignedIn() && request.auth.uid == viewerId;

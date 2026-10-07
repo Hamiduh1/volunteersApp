@@ -220,6 +220,7 @@ private fun canReviewTransfer(
     isProcessing: Boolean,
     uiState: TransactUiState,
     quoteAligned: Boolean,
+    fundingLocaleMessage: String? = null,
 ): Boolean = reviewBlockingMessage(
     lane = lane,
     amountValue = amountValue,
@@ -231,6 +232,7 @@ private fun canReviewTransfer(
     isProcessing = isProcessing,
     uiState = uiState,
     quoteAligned = quoteAligned,
+    fundingLocaleMessage = fundingLocaleMessage,
 ) == null
 
 private fun reviewBlockingMessage(
@@ -244,6 +246,7 @@ private fun reviewBlockingMessage(
     isProcessing: Boolean,
     uiState: TransactUiState,
     quoteAligned: Boolean,
+    fundingLocaleMessage: String? = null,
 ): String? {
     if (isProcessing) return "Transfer in progress. Please wait."
     if (lane == null) return "Choose a send route to continue."
@@ -261,6 +264,7 @@ private fun reviewBlockingMessage(
         return "Select a receive route to continue."
     }
     if (amountValue <= 0) return "Enter an amount to continue."
+    fundingLocaleMessage?.takeIf { it.isNotBlank() }?.let { return it }
     if (uiState.isQuoteLoading) return "Fetching live quote..."
     if (selectedRecipient is User && selectedSource == null) {
         return if (selectedRecipientMethod is PaymentMethod.MobileMoney) {
@@ -324,6 +328,71 @@ private fun listEligibleFundingMethods(methods: List<PaymentMethod>): List<Payme
     val mobile = eligible.filterIsInstance<PaymentMethod.MobileMoney>()
     val banks = eligible.filterIsInstance<PaymentMethod.BankAccount>()
     return cards + mobile + banks
+}
+
+/**
+ * Funding is only unlocked when the chosen local currency agrees with the
+ * sender's profile country and profile phone dial code. Methods must also be
+ * in that home country/currency; cards carry no country so they follow the gate.
+ */
+private data class FundingLocaleGate(
+    val localCurrency: String,
+    val homeCurrency: String,
+    val homeCountryName: String,
+    val homeCountryIsos: Set<String>,
+    val blockingMessage: String?,
+)
+
+private fun resolveFundingLocaleGate(
+    senderCountry: String,
+    senderPhoneNumber: String,
+    localCurrency: String,
+): FundingLocaleGate {
+    val local = localCurrency.trim().uppercase(Locale.US)
+    val profileIso = normalizeGlobalCountryIso(senderCountry)
+    val profileCurrency = globalCountryCurrency(senderCountry).trim().uppercase(Locale.US)
+    val profileName = senderCountry.trim().ifBlank { "your profile country" }
+    val phoneIsos = countryIsosForPhoneNumber(senderPhoneNumber)
+    val phoneCurrencies = phoneIsos
+        .map { globalCountryCurrency(it).trim().uppercase(Locale.US) }
+        .toSet()
+    val homeIsos = if (profileIso.isNotBlank()) setOf(profileIso) else phoneIsos
+    val message = when {
+        local != profileCurrency ->
+            "Funding is locked: your local currency ($local) doesn't match your profile country ($profileName, $profileCurrency). Switch the local currency to $profileCurrency to use your payment methods."
+        phoneCurrencies.isNotEmpty() && local !in phoneCurrencies ->
+            "Funding is locked: your local currency ($local) doesn't match the country of your profile phone number (${phoneCurrencies.joinToString("/")}). Update your profile phone number or country so they match."
+        else -> null
+    }
+    return FundingLocaleGate(
+        localCurrency = local,
+        homeCurrency = profileCurrency,
+        homeCountryName = profileName,
+        homeCountryIsos = homeIsos,
+        blockingMessage = message,
+    )
+}
+
+private fun fundingMethodMatchesLocale(method: PaymentMethod, gate: FundingLocaleGate): Boolean {
+    if (gate.blockingMessage != null) return false
+    return when (method) {
+        is PaymentMethod.CreditCard -> true
+        is PaymentMethod.MobileMoney -> {
+            val iso = normalizeGlobalCountryIso(canonicalMobileMoneyCountry(method.country) ?: method.country)
+            val currency = if (method.country.isNotBlank()) {
+                resolvedMobileMoneyTargetCurrency(method.country)
+            } else {
+                method.currency.trim().uppercase(Locale.US)
+            }
+            iso in gate.homeCountryIsos && currency == gate.localCurrency
+        }
+        is PaymentMethod.BankAccount -> {
+            val iso = normalizeGlobalCountryIso(method.country)
+            iso in gate.homeCountryIsos &&
+                globalCountryCurrency(iso).trim().uppercase(Locale.US) == gate.localCurrency
+        }
+        else -> false
+    }
 }
 
 private enum class FlowBannerTone {
@@ -434,11 +503,16 @@ fun TransactScreen(
     }
     val amountValue = amount.toDoubleOrNull() ?: 0.0
     val localReferenceAmountValue = localReferenceAmount.toDoubleOrNull() ?: 0.0
-    val localReferenceCurrency = globalCountryCurrency(uiState.senderCountry)
+    val defaultLocalReferenceCurrency = globalCountryCurrency(uiState.senderCountry)
         .trim()
         .uppercase(Locale.US)
         .takeIf { Regex("^[A-Z]{3}$").matches(it) }
         ?: SEND_MONEY_CHARGE_CURRENCY
+    var localReferenceCurrencyChoice by rememberSaveable { mutableStateOf<String?>(null) }
+    val localReferenceCurrency = localReferenceCurrencyChoice ?: defaultLocalReferenceCurrency
+    val localReferenceCurrencyOptions = remember(defaultLocalReferenceCurrency) {
+        localSpendReferenceCurrencyOptions(defaultLocalReferenceCurrency)
+    }
     fun updateUsdAmountManually(value: String) {
         updateAmountDraft(value)
         if (localReferenceAmount.isNotBlank()) {
@@ -561,11 +635,36 @@ fun TransactScreen(
             !cardOrAchFundingRequired || method is PaymentMethod.CreditCard || method is PaymentMethod.BankAccount
         }
     }
-    LaunchedEffect(eligibleFundingMethods, selectedSource?.id) {
+    val fundingLocaleGate = remember(uiState.senderCountry, uiState.senderPhoneNumber, localReferenceCurrency) {
+        resolveFundingLocaleGate(
+            senderCountry = uiState.senderCountry,
+            senderPhoneNumber = uiState.senderPhoneNumber,
+            localCurrency = localReferenceCurrency,
+        )
+    }
+    val localeMatchedFundingMethods = remember(eligibleFundingMethods, fundingLocaleGate) {
+        eligibleFundingMethods.filter { fundingMethodMatchesLocale(it, fundingLocaleGate) }
+    }
+    val localeLockedFundingMethods = remember(eligibleFundingMethods, localeMatchedFundingMethods) {
+        val matchedIds = localeMatchedFundingMethods.map { it.id }.toSet()
+        eligibleFundingMethods.filterNot { it.id in matchedIds }
+    }
+    val fundingLocaleMessage: String? = fundingLocaleGate.blockingMessage
+        ?: if (eligibleFundingMethods.isNotEmpty() && localeMatchedFundingMethods.isEmpty()) {
+            "Funding is locked: none of your payment methods match your local currency (${fundingLocaleGate.localCurrency}) and profile country (${fundingLocaleGate.homeCountryName}). Add a card or a ${fundingLocaleGate.localCurrency} payment method in Payment Methods."
+        } else {
+            null
+        }
+    LaunchedEffect(localeMatchedFundingMethods, selectedSource?.id) {
         val selected = selectedSource
-        if (selected != null && eligibleFundingMethods.none { it.id == selected.id }) {
-            // Prefer the next corridor-compatible method over leaving funding empty.
-            viewModel.selectPaymentMethod(eligibleFundingMethods.firstOrNull())
+        if (selected != null && localeMatchedFundingMethods.none { it.id == selected.id }) {
+            // Prefer the next corridor- and locale-compatible method over leaving funding empty.
+            viewModel.selectPaymentMethod(localeMatchedFundingMethods.firstOrNull())
+        }
+    }
+    LaunchedEffect(fundingLocaleMessage == null) {
+        if (fundingLocaleMessage == null && selectedSource == null) {
+            localeMatchedFundingMethods.firstOrNull()?.let { viewModel.selectPaymentMethod(it) }
         }
     }
     val isSelectedLaneProcessing = uiState.isTransferLaneProcessing(selectedLane?.name)
@@ -584,6 +683,7 @@ fun TransactScreen(
         isProcessing = isSelectedLaneProcessing,
         uiState = uiState,
         quoteAligned = quoteAligned,
+        fundingLocaleMessage = fundingLocaleMessage,
     )
     val reviewReady = canReviewTransfer(
         lane = selectedLane,
@@ -596,6 +696,7 @@ fun TransactScreen(
         isProcessing = isSelectedLaneProcessing,
         uiState = uiState,
         quoteAligned = quoteAligned,
+        fundingLocaleMessage = fundingLocaleMessage,
     )
     val appUserRecipientPool = remember(appUserRecentRecipients, uiState.searchResults) {
         (appUserRecentRecipients + uiState.searchResults)
@@ -627,7 +728,9 @@ fun TransactScreen(
     } else {
         "Enter the amount to send"
     }
-    val fundingStepSummary = if (selectedSource == null) {
+    val fundingStepSummary = if (fundingLocaleMessage != null) {
+        "Locked: local currency doesn't match your profile"
+    } else if (selectedSource == null) {
         "Choose a verified funding method"
     } else {
         "Funding method selected"
@@ -1044,6 +1147,34 @@ fun TransactScreen(
             }
 
             if (laneSelected) {
+                LocalSpendReferenceEntry(
+                    localAmount = localReferenceAmount,
+                    localCurrency = localReferenceCurrency,
+                    currencyOptions = localReferenceCurrencyOptions,
+                    onCurrencyChange = { localReferenceCurrencyChoice = it },
+                    reference = uiState.localSpendReference,
+                    isLoading = uiState.isLocalSpendReferenceLoading,
+                    statusMessage = uiState.localSpendReferenceStatusMessage,
+                    quote = uiState.transferQuote,
+                    selectedLane = selectedLane,
+                    fundingSource = selectedSource,
+                    onLocalAmountChange = { next ->
+                        if (next.matches(Regex("^\\d*\\.?\\d{0,2}$"))) {
+                            updateLocalReferenceAmountDraft(next)
+                        }
+                    },
+                    onRetry = {
+                        if (localReferenceAmountValue > 0) {
+                            viewModel.scheduleLocalSpendReference(
+                                localAmount = localReferenceAmountValue,
+                                localCurrency = localReferenceCurrency,
+                                lane = selectedLane?.name,
+                            )
+                        }
+                    },
+                )
+                Spacer(Modifier.height(16.dp))
+
                 SendMoneyStepAccordion(
                     stepNumber = 1,
                     title = "Recipient",
@@ -1160,37 +1291,13 @@ fun TransactScreen(
 
                 SendMoneyStepAccordion(
                     stepNumber = 2,
-                    title = "Amount",
+                    title = "USD amount",
                     summary = amountStepSummary,
                     isComplete = amountValue > 0,
                     expanded = expandedSendMoneySection == SendMoneyFormSection.AMOUNT,
                     accentColor = laneAccentColor(selectedLane),
                     onExpand = { expandedSendMoneySection = SendMoneyFormSection.AMOUNT },
                 ) {
-                LocalSpendReferenceEntry(
-                    localAmount = localReferenceAmount,
-                    localCurrency = localReferenceCurrency,
-                    reference = uiState.localSpendReference,
-                    isLoading = uiState.isLocalSpendReferenceLoading,
-                    statusMessage = uiState.localSpendReferenceStatusMessage,
-                    quote = uiState.transferQuote,
-                    selectedLane = selectedLane,
-                    fundingSource = selectedSource,
-                    onLocalAmountChange = { next ->
-                        if (next.matches(Regex("^\\d*\\.?\\d{0,2}$"))) {
-                            updateLocalReferenceAmountDraft(next)
-                        }
-                    },
-                    onRetry = {
-                        if (localReferenceAmountValue > 0) {
-                            viewModel.scheduleLocalSpendReference(
-                                localAmount = localReferenceAmountValue,
-                                localCurrency = localReferenceCurrency,
-                                lane = selectedLane?.name,
-                            )
-                        }
-                    },
-                )
                 if (isMobileMoneyMode) {
                     MobileMoneyAmountStep(
                         amount = amount,
@@ -1300,14 +1407,21 @@ fun TransactScreen(
                     stepNumber = 3,
                     title = "Funding",
                     summary = fundingStepSummary,
-                    isComplete = selectedSource != null,
+                    isComplete = selectedSource != null && fundingLocaleMessage == null,
                     expanded = expandedSendMoneySection == SendMoneyFormSection.FUNDING,
                     accentColor = laneAccentColor(selectedLane),
                     onExpand = { expandedSendMoneySection = SendMoneyFormSection.FUNDING },
+                    dimmed = fundingLocaleMessage != null,
                 ) {
                 if (isMobileMoneyMode || isBankMode || isAppUserMode) {
                     MobileMoneyFundingStep(
-                        eligibleMethods = eligibleFundingMethods,
+                        eligibleMethods = localeMatchedFundingMethods,
+                        lockedMethods = localeLockedFundingMethods,
+                        localeLockMessage = fundingLocaleMessage,
+                        localeHomeCurrency = fundingLocaleGate.homeCurrency.takeIf {
+                            fundingLocaleGate.blockingMessage != null && it != localReferenceCurrency
+                        },
+                        onUseHomeCurrency = { localReferenceCurrencyChoice = null },
                         fundingHint = if (cardOrAchFundingRequired) {
                             if (isAppUserMode) {
                                 "This member receives through a verified bank or SWIFT route. Use a card or verified US ACH bank account. Mobile money cannot fund this receive route."
@@ -1431,7 +1545,7 @@ fun TransactScreen(
     if (showSourcePicker) {
         SendMoneyBottomSheet(onDismissRequest = { showSourcePicker = false }) {
             PaymentSourceSheet(
-                methods = eligibleFundingMethods,
+                methods = localeMatchedFundingMethods,
                 allowExternalFunding = allowExternalFunding,
                 allowWallet = !isAppUserMode,
                 selectedMethodId = selectedSource?.id,
@@ -1925,14 +2039,35 @@ private fun BeneficiaryPickerSheet(
             modifier = Modifier.fillMaxWidth(),
             label = { Text(searchPlaceholder) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear search")
+                    }
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            singleLine = true,
             colors = sendMoneyOutlinedFieldColors(),
         )
 
         if (filteredBeneficiaries.isEmpty()) {
             Text("No saved recipients yet.", style = MaterialTheme.typography.bodyMedium, color = SendMoneyTextSecondary)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onAddNew) { Text("Add new recipient") }
-                OutlinedButton(onClick = onDismiss) { Text("Close") }
+                Button(
+                    onClick = onAddNew,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add new recipient", fontWeight = FontWeight.SemiBold)
+                }
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) { Text("Close") }
             }
             return
         }
@@ -1953,10 +2088,20 @@ private fun BeneficiaryPickerSheet(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onAddNew, modifier = Modifier.weight(1f)) {
-                Text("Add new")
+            OutlinedButton(
+                onClick = onAddNew,
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Add new", fontWeight = FontWeight.SemiBold)
             }
-            Button(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) {
                 Text("Close")
             }
         }
@@ -5026,7 +5171,9 @@ private fun TransferReviewSheet(
             ReviewDetailRow("Note", transferNote.trim())
         }
         if (activeQuote != null) {
+            ReviewDetailRow("You send", senderMoney.format(activeQuote.sendAmountBeforeFee(amountValue)))
             ReviewDetailRow("Transfer fee", senderMoney.format(totalFee ?: 0.0))
+            beneficiaryFxRateLabel(activeQuote)?.let { ReviewDetailRow("Exchange rate", it) }
         }
         if (selectedSource is PaymentMethod.MobileMoney &&
             activeQuote?.fundingCollectionAmount != null &&
@@ -5112,17 +5259,19 @@ private fun SendMoneyStepAccordion(
     expanded: Boolean,
     accentColor: Color,
     onExpand: () -> Unit,
+    dimmed: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val stepAccent = if (dimmed) SendMoneyLockedGray else accentColor
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.outlinedCardColors(
-            containerColor = if (expanded) accentColor.copy(alpha = 0.08f) else SendMoneySurface,
+            containerColor = if (dimmed) SendMoneyLockedSurface else if (expanded) stepAccent.copy(alpha = 0.08f) else SendMoneySurface,
         ),
         border = BorderStroke(
             width = if (expanded) 1.5.dp else 1.dp,
-            color = if (expanded) accentColor.copy(alpha = 0.72f) else SendMoneyCardBorder,
+            color = if (expanded) stepAccent.copy(alpha = 0.72f) else SendMoneyCardBorder,
         ),
     ) {
         Row(
@@ -5136,11 +5285,13 @@ private fun SendMoneyStepAccordion(
             Surface(
                 modifier = Modifier.size(30.dp),
                 shape = CircleShape,
-                color = if (isComplete) accentColor else accentColor.copy(alpha = 0.14f),
-                contentColor = if (isComplete) Color.White else accentColor,
+                color = if (isComplete) stepAccent else stepAccent.copy(alpha = 0.14f),
+                contentColor = if (isComplete) Color.White else stepAccent,
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    if (isComplete) {
+                    if (dimmed) {
+                        Icon(Icons.Default.Lock, contentDescription = "Locked", modifier = Modifier.size(16.dp))
+                    } else if (isComplete) {
                         Icon(Icons.Default.Check, contentDescription = "Completed", modifier = Modifier.size(17.dp))
                     } else {
                         Text(stepNumber.toString(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
@@ -5148,7 +5299,7 @@ private fun SendMoneyStepAccordion(
                 }
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = SendMoneyTextPrimary)
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = if (dimmed) SendMoneyLockedGray else SendMoneyTextPrimary)
                 Text(
                     summary,
                     style = MaterialTheme.typography.bodySmall,
@@ -5160,7 +5311,7 @@ private fun SendMoneyStepAccordion(
             Icon(
                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                 contentDescription = if (expanded) "Collapse $title" else "Expand $title",
-                tint = accentColor,
+                tint = stepAccent,
             )
         }
         AnimatedVisibility(
@@ -5169,7 +5320,7 @@ private fun SendMoneyStepAccordion(
             exit = shrinkVertically() + fadeOut(),
         ) {
             Column {
-                HorizontalDivider(color = accentColor.copy(alpha = 0.22f))
+                HorizontalDivider(color = stepAccent.copy(alpha = 0.22f))
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -5556,26 +5707,55 @@ private fun sendMoneyLaneRadioColors() = RadioButtonDefaults.colors(
 private fun RecipientActionButtons(
     onPickRecipient: () -> Unit,
     onAddRecipient: () -> Unit,
+    accent: Color = SendMoneyAccent,
+    accentContainer: Color = SendMoneyAccentContainer,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Button(
             onClick = onPickRecipient,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = accent,
+                contentColor = Color.White,
+            ),
         ) {
-            Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Browse saved recipients")
+            Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("Browse saved recipients", fontWeight = FontWeight.SemiBold)
         }
         OutlinedButton(
             onClick = onAddRecipient,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp),
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.5.dp, accent),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = accentContainer,
+                contentColor = accent,
+            ),
         ) {
-            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Add a new recipient")
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .background(accent, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.PersonAdd,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Text("Add a new recipient", fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -5920,7 +6100,14 @@ private fun BankRecipientStep(
         modifier = Modifier.fillMaxWidth(),
         label = { Text("Search bank recipients") },
         placeholder = { Text("Name, bank, account, or country") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = BankAccent) },
+        trailingIcon = {
+            if (searchQuery.isNotEmpty()) {
+                IconButton(onClick = { searchQuery = "" }) {
+                    Icon(Icons.Default.Close, contentDescription = "Clear search")
+                }
+            }
+        },
         shape = RoundedCornerShape(16.dp),
         colors = bankOutlinedFieldColors(),
         singleLine = true
@@ -5947,6 +6134,8 @@ private fun BankRecipientStep(
     RecipientActionButtons(
         onPickRecipient = onPickRecipient,
         onAddRecipient = onAddRecipient,
+        accent = BankAccent,
+        accentContainer = BankAccentContainer,
     )
     TextButton(onClick = onSendAgain, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -6131,10 +6320,13 @@ private fun TransferAmountInput(
  * USD Send Money collection contract. The resulting local figures are only a
  * reference; the live transfer quote remains the source of truth.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LocalSpendReferenceEntry(
     localAmount: String,
     localCurrency: String,
+    currencyOptions: List<String>,
+    onCurrencyChange: (String) -> Unit,
     reference: LocalSpendReference?,
     isLoading: Boolean,
     statusMessage: String?,
@@ -6145,7 +6337,8 @@ private fun LocalSpendReferenceEntry(
     onRetry: () -> Unit,
 ) {
     val normalizedCurrency = localCurrency.trim().uppercase(Locale.US)
-    if (normalizedCurrency == SEND_MONEY_CHARGE_CURRENCY) return
+    val isUsdReference = normalizedCurrency == SEND_MONEY_CHARGE_CURRENCY
+    var currencyMenuExpanded by remember { mutableStateOf(false) }
 
     val localAmountValue = localAmount.toDoubleOrNull() ?: 0.0
     val activeReference = reference?.takeIf {
@@ -6181,10 +6374,46 @@ private fun LocalSpendReferenceEntry(
                 color = SendMoneyTextPrimary,
             )
             Text(
-                text = "Enter a $normalizedCurrency reference and we will convert it to the USD transfer amount automatically.",
+                text = if (isUsdReference) {
+                    "USD is selected. Pick your local currency to enter an amount you recognize, or continue in USD."
+                } else {
+                    "Enter a $normalizedCurrency reference and we will convert it to the USD transfer amount automatically."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = SendMoneyTextSecondary,
             )
+            ExposedDropdownMenuBox(
+                expanded = currencyMenuExpanded,
+                onExpandedChange = { currencyMenuExpanded = !currencyMenuExpanded },
+            ) {
+                OutlinedTextField(
+                    value = localSpendReferenceCurrencyLabel(normalizedCurrency),
+                    onValueChange = {},
+                    readOnly = true,
+                    singleLine = true,
+                    label = { Text("Local currency") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyMenuExpanded) },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = sendMoneyOutlinedFieldColors(),
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth(),
+                )
+                ExposedDropdownMenu(
+                    expanded = currencyMenuExpanded,
+                    onDismissRequest = { currencyMenuExpanded = false },
+                ) {
+                    currencyOptions.forEach { code ->
+                        DropdownMenuItem(
+                            text = { Text(localSpendReferenceCurrencyLabel(code)) },
+                            onClick = {
+                                currencyMenuExpanded = false
+                                onCurrencyChange(code)
+                            },
+                        )
+                    }
+                }
+            }
             OutlinedTextField(
                 value = localAmount,
                 onValueChange = onLocalAmountChange,
@@ -6269,6 +6498,21 @@ private fun LocalSpendReferenceEntry(
             )
         }
     }
+}
+
+/** Sender's own currency first, then USD, then every catalog currency. */
+private fun localSpendReferenceCurrencyOptions(defaultCurrency: String): List<String> {
+    val isoCode = Regex("^[A-Z]{3}$")
+    val catalog = globalCountryCurrencyMap().values
+        .map { it.trim().uppercase(Locale.US) }
+        .filter { isoCode.matches(it) }
+        .toSortedSet()
+    return (listOf(defaultCurrency, SEND_MONEY_CHARGE_CURRENCY) + catalog).distinct()
+}
+
+private fun localSpendReferenceCurrencyLabel(code: String): String {
+    val name = runCatching { Currency.getInstance(code).getDisplayName(Locale.US) }.getOrNull()
+    return if (name.isNullOrBlank() || name == code) code else "$code - $name"
 }
 
 @Composable
@@ -6569,8 +6813,9 @@ private fun BankQuotePreviewCard(
                 Text("Funding: $funding", style = MaterialTheme.typography.bodySmall, color = SendMoneyTextSecondary)
             }
             HorizontalDivider(color = SendMoneyCardBorder)
-            QuoteAmountRow("You pay", senderMoney.format(totalDebit), emphasized = true)
+            QuoteAmountRow("You pay", senderMoney.format(quote.sendAmountBeforeFee(amount)), emphasized = true)
             QuoteAmountRow("Transfer fee", senderMoney.format(quote.customerTotalFee()))
+            beneficiaryFxRateLabel(quote)?.let { QuoteAmountRow("Exchange rate", it) }
             if (selectedSource is PaymentMethod.MobileMoney &&
                 quote.fundingCollectionAmount != null &&
                 !quote.fundingCollectionCurrency.isNullOrBlank()
@@ -6595,9 +6840,9 @@ private fun BankQuotePreviewCard(
             }
             Text(
                 if (selectedSource is PaymentMethod.MobileMoney) {
-                    "Approve the exact local amount on your phone; the USD total includes the transfer fee."
+                    "Approve the exact local amount on your phone; it already includes the transfer fee."
                 } else {
-                    "One USD total includes the transfer fee before you confirm."
+                    "The transfer fee is charged on top of the amount you pay. Review shows the total of ${senderMoney.format(totalDebit)} before you confirm."
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = SendMoneyTextSecondary
@@ -6656,8 +6901,9 @@ private fun MobileMoneyQuotePreviewCard(
                 Text("Funding: $funding", style = MaterialTheme.typography.bodySmall, color = SendMoneyTextSecondary)
             }
             HorizontalDivider(color = SendMoneyCardBorder)
-            QuoteAmountRow("You pay", senderMoney.format(totalDebit), emphasized = true)
+            QuoteAmountRow("You pay", senderMoney.format(quote.sendAmountBeforeFee(amount)), emphasized = true)
             QuoteAmountRow("Transfer fee", senderMoney.format(quote.customerTotalFee()))
+            beneficiaryFxRateLabel(quote)?.let { QuoteAmountRow("Exchange rate", it) }
             if (selectedSource is PaymentMethod.MobileMoney &&
                 quote.fundingCollectionAmount != null &&
                 !quote.fundingCollectionCurrency.isNullOrBlank()
@@ -6682,9 +6928,9 @@ private fun MobileMoneyQuotePreviewCard(
             }
             Text(
                 if (selectedSource is PaymentMethod.MobileMoney) {
-                    "Approve the exact local amount on your phone; the USD total includes the transfer fee."
+                    "Approve the exact local amount on your phone; it already includes the transfer fee."
                 } else {
-                    "One USD total includes the transfer fee before you confirm."
+                    "The transfer fee is charged on top of the amount you pay. Review shows the total of ${senderMoney.format(totalDebit)} before you confirm."
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = SendMoneyTextSecondary
@@ -6797,7 +7043,15 @@ private fun MobileMoneyRecipientStep(
         modifier = Modifier.fillMaxWidth(),
         label = { Text("Search saved recipients") },
         placeholder = { Text("Name, phone, provider, or country") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MobileMoneyAccent) },
+        trailingIcon = {
+            if (searchQuery.isNotEmpty()) {
+                IconButton(onClick = { searchQuery = "" }) {
+                    Icon(Icons.Default.Close, contentDescription = "Clear search")
+                }
+            }
+        },
+        shape = RoundedCornerShape(16.dp),
         colors = mobileMoneyOutlinedFieldColors(),
         singleLine = true
     )
@@ -6823,6 +7077,8 @@ private fun MobileMoneyRecipientStep(
     RecipientActionButtons(
         onPickRecipient = onPickRecipient,
         onAddRecipient = onAddRecipient,
+        accent = MobileMoneyAccent,
+        accentContainer = MobileMoneyAccentContainer,
     )
     TextButton(onClick = onSendAgain, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -7079,6 +7335,10 @@ private fun MobileMoneyFundingStep(
     providerConfirmationRequired: Boolean,
     accentColor: Color = MobileMoneyAccent,
     accentContainerColor: Color = MobileMoneyAccentContainer,
+    lockedMethods: List<PaymentMethod> = emptyList(),
+    localeLockMessage: String? = null,
+    localeHomeCurrency: String? = null,
+    onUseHomeCurrency: () -> Unit = {},
 ) {
     val noteFieldColors = when (accentColor) {
         BankAccent -> bankOutlinedFieldColors()
@@ -7091,7 +7351,59 @@ private fun MobileMoneyFundingStep(
         style = MaterialTheme.typography.bodySmall,
         color = SendMoneyTextSecondary
     )
-    if (eligibleMethods.isEmpty()) {
+    if (localeLockMessage != null) {
+        OutlinedCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.outlinedCardColors(containerColor = SendMoneyLockedWarningContainer),
+            border = BorderStroke(1.dp, SendMoneyLockedWarning.copy(alpha = 0.45f)),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = SendMoneyLockedWarning,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Payment methods unavailable",
+                        fontWeight = FontWeight.Bold,
+                        color = SendMoneyTextPrimary
+                    )
+                }
+                Text(
+                    localeLockMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SendMoneyTextSecondary
+                )
+                if (localeHomeCurrency != null) {
+                    Button(
+                        onClick = onUseHomeCurrency,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = accentColor,
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Text("Use $localeHomeCurrency as local currency")
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onOpenPaymentMethods,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, accentColor),
+                    ) {
+                        Text("Manage payment methods", color = accentColor)
+                    }
+                }
+            }
+        }
+    }
+    if (eligibleMethods.isEmpty() && localeLockMessage == null) {
         OutlinedCard(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.outlinedCardColors(containerColor = SendMoneySurface),
@@ -7186,6 +7498,56 @@ private fun MobileMoneyFundingStep(
                     border = BorderStroke(1.dp, accentColor),
                 ) {
                     Text("View all payment methods")
+                }
+            }
+            lockedMethods.take(6).forEach { method ->
+                OutlinedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.outlinedCardColors(containerColor = SendMoneyLockedSurface),
+                    border = BorderStroke(1.dp, SendMoneyCardBorder),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(SendMoneyCardBorder, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = when (method) {
+                                        is PaymentMethod.CreditCard -> Icons.Default.CreditCard
+                                        is PaymentMethod.BankAccount -> Icons.Default.AccountBalance
+                                        is PaymentMethod.MobileMoney -> Icons.Default.Smartphone
+                                        else -> Icons.Default.Payment
+                                    },
+                                    contentDescription = null,
+                                    tint = SendMoneyLockedGray,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(fundingMethodShortLabel(method), fontWeight = FontWeight.SemiBold, color = SendMoneyLockedGray)
+                                Text(
+                                    "Doesn't match your local currency and profile",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = SendMoneyLockedGray
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Unavailable",
+                            tint = SendMoneyLockedGray,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
@@ -7577,8 +7939,9 @@ fun TransferQuotePreviewCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = SendMoneyTextSecondary,
             )
-            QuoteAmountRow("You pay", senderMoney.format(totalDebit), emphasized = true)
+            QuoteAmountRow("You pay", senderMoney.format(quote.sendAmountBeforeFee(amount)), emphasized = true)
             QuoteAmountRow("Transfer fee", senderMoney.format(quote.customerTotalFee()))
+            beneficiaryFxRateLabel(quote)?.let { QuoteAmountRow("Exchange rate", it) }
             if (selectedSource is PaymentMethod.MobileMoney &&
                 quote.fundingCollectionAmount != null &&
                 !quote.fundingCollectionCurrency.isNullOrBlank()
@@ -7605,9 +7968,9 @@ fun TransferQuotePreviewCard(
             }
             Text(
                 if (selectedSource is PaymentMethod.MobileMoney) {
-                    "Approve the exact local amount on your phone; the USD total includes the transfer fee."
+                    "Approve the exact local amount on your phone; it already includes the transfer fee."
                 } else {
-                    "One USD total includes the transfer fee before you confirm."
+                    "The transfer fee is charged on top of the amount you pay. Review shows the total of ${senderMoney.format(totalDebit)} before you confirm."
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = SendMoneyTextSecondary,

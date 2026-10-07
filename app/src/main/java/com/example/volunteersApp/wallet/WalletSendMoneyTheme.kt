@@ -43,6 +43,10 @@ internal val BankAccent = Color(0xFFA16207)
 internal val BankAccentContainer = Color(0xFFFFF8EC)
 internal val BankStrongContainer = Color(0xFFFEEDED)
 internal val BankText = Color(0xFF713F12)
+internal val SendMoneyLockedGray = Color(0xFF98A2B3)
+internal val SendMoneyLockedSurface = Color(0xFFF2F4F7)
+internal val SendMoneyLockedWarning = Color(0xFFB54708)
+internal val SendMoneyLockedWarningContainer = Color(0xFFFFFAEB)
 
 internal val SendMoneyColorScheme = lightColorScheme(
     primary = WalletAccent,

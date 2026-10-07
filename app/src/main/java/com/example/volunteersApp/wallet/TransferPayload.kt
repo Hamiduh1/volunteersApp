@@ -159,6 +159,30 @@ data class WalletTransferQuoteRequest(
     }
 }
 
+/**
+ * Callable results normally arrive as a flat map. Older deployed revisions and
+ * some Functions SDK paths wrap that map in data, result, or quote instead.
+ * Unwrapping only the response shape keeps quoteId mandatory for a send.
+ */
+fun normalizeWalletTransferQuoteResponse(
+    response: Map<String, Any?>?,
+): Map<String, Any?>? {
+    var current = response ?: return null
+    repeat(3) {
+        if (current.containsKey("quoteId")) return current
+        val nested = listOf("quote", "data", "result")
+            .firstNotNullOfOrNull { key ->
+                (current[key] as? Map<*, *>)
+                    ?.entries
+                    ?.associate { (nestedKey, value) -> nestedKey.toString() to value }
+                    ?.takeIf { it.isNotEmpty() }
+            }
+            ?: return current
+        current = nested
+    }
+    return current
+}
+
 data class WalletTransferQuote(
     val quoteId: String?,
     val fxRate: Double?,
@@ -180,10 +204,10 @@ data class WalletTransferQuote(
     val expiresAtMs: Long? = null,
 ) {
     companion object {
-        fun fromMap(map: Map<String, Any?>?): WalletTransferQuote? {
-            if (map.isNullOrEmpty()) return null
+        fun fromMap(rawMap: Map<String, Any?>?): WalletTransferQuote? {
+            val map = normalizeWalletTransferQuoteResponse(rawMap) ?: return null
             return WalletTransferQuote(
-                quoteId = map["quoteId"] as? String ?: map["id"] as? String,
+                quoteId = (map["quoteId"] ?: map["id"])?.toString()?.trim()?.takeIf { it.isNotEmpty() },
                 fxRate = (map["fxRate"] as? Number)?.toDouble()
                     ?: (map["rate"] as? Number)?.toDouble()
                     ?: (map["exchangeRate"] as? Number)?.toDouble(),
@@ -294,4 +318,31 @@ fun WalletTransferQuote.customerTotalFee(): Double = customerTransferFee() + cus
 
 fun WalletTransferQuote.resolvedTotalDebit(sendAmount: Double): Double {
     return totalDebit ?: (sendAmount + customerTotalFee())
+}
+
+/** The quoted send amount without the transfer fee, so the fee is shown only once. */
+fun WalletTransferQuote.sendAmountBeforeFee(sendAmount: Double): Double =
+    sourceAmount?.takeIf { it.isFinite() && it > 0 } ?: sendAmount
+
+/** Customer-facing beneficiary FX, e.g. "1 USD = 3,712.45 UGX"; null when there is no conversion. */
+fun beneficiaryFxRateLabel(quote: WalletTransferQuote?): String? {
+    if (quote == null) return null
+    val target = (quote.recipientCurrency ?: quote.targetCurrency)
+        ?.trim()?.uppercase(java.util.Locale.US)?.takeIf { it.isNotEmpty() } ?: return null
+    val source = (quote.sourceCurrency ?: quote.debitCurrency)
+        ?.trim()?.uppercase(java.util.Locale.US)?.takeIf { it.isNotEmpty() } ?: "USD"
+    if (source == target) return null
+    val quotedSource = quote.sourceAmount
+    val quotedRecipient = quote.recipientAmount
+    val derivedRate = if (quotedSource != null && quotedRecipient != null && quotedSource > 0 && quotedRecipient > 0) {
+        quotedRecipient / quotedSource
+    } else {
+        null
+    }
+    val rate = quote.fxRate?.takeIf { it.isFinite() && it > 0 } ?: derivedRate ?: return null
+    val formatter = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).apply {
+        minimumFractionDigits = 2
+        maximumFractionDigits = if (rate >= 100) 2 else 4
+    }
+    return "1 $source = ${formatter.format(rate)} $target"
 }

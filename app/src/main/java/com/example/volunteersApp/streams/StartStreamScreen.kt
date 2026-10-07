@@ -21,12 +21,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,6 +66,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -71,6 +83,7 @@ fun StartStreamScreen(
     onBack: () -> Unit,
     onStreamStarted: (sessionId: String) -> Unit,
     offerShareChooserOnStart: Boolean = false,
+    onResumeSession: ((sessionId: String) -> Unit)? = null,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
@@ -155,6 +168,16 @@ fun StartStreamScreen(
         }
     }
 
+    // Go live releases the preview camera; bring it back only when the room was not created
+    // (on success the room's own engine is starting and the preview must stay off).
+    LaunchedEffect(uiState.isLoading, uiState.error, uiState.activeSessionId) {
+        val failed = uiState.error != null || uiState.activeSessionId != null
+        if (!uiState.isLoading && failed && !previewEnabled) {
+            precheckResult = LiveBroadcastPrecheck.evaluate(context)
+            previewEnabled = precheckResult.cameraGranted && precheckResult.microphoneGranted
+        }
+    }
+
     LaunchedEffect(uiState.error) {
         if (uiState.error != null) {
             scope.launch {
@@ -168,6 +191,41 @@ fun StartStreamScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         containerColor = LiveStudioBackground,
+        bottomBar = {
+            Surface(color = LiveStudioSurface, shadowElevation = 8.dp) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(
+                        text = when {
+                            uiState.isLoading -> "Setting up your room…"
+                            precheckResult.isReady -> "Everything looks good. You're ready to go live."
+                            else -> "Finish the device check to go live."
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (precheckResult.isReady || uiState.isLoading) LiveStudioMuted else LiveStudioDanger,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    LiveAccentButton(
+                        onClick = startLiveIfReady,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(50),
+                        enabled = !uiState.isLoading,
+                    ) {
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = Color.White)
+                        } else {
+                            Icon(Icons.Default.FiberManualRecord, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Go live", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -189,15 +247,92 @@ fun StartStreamScreen(
                 modifier = Modifier.padding(horizontal = 0.dp),
             )
 
-            LiveGoLiveHeroCard(modifier = Modifier.fillMaxWidth())
-
-            Spacer(Modifier.height(16.dp))
-
             if (previewEnabled) {
                 LiveCameraPreview(
                     controller = previewController,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            } else {
+                Surface(
+                    onClick = { showPrecheck = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(218.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color(0xFF101A1E),
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(Icons.Default.VideocamOff, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("Camera preview is off", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Tap to allow camera and microphone",
+                            color = Color.White.copy(alpha = 0.72f),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+
+            LivePrecheckChipsRow(
+                result = precheckResult,
+                onClick = { showPrecheck = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(16.dp))
+
+            val activeSessionId = uiState.activeSessionId
+            if (activeSessionId != null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = LiveStudioLiveMark.copy(alpha = 0.08f),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            LiveRedBadge()
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "You're still live",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = LiveStudioInk,
+                            )
+                        }
+                        Text(
+                            "\"${uiState.activeSessionTitle.orEmpty()}\" is still broadcasting. Return to it, or end it to start a new stream.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LiveStudioMuted,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    previewController.stop()
+                                    previewEnabled = false
+                                    viewModel.dismissActiveSession()
+                                    (onResumeSession ?: onStreamStarted)(activeSessionId)
+                                },
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(containerColor = LiveStudioInk, contentColor = Color.White),
+                                enabled = !uiState.isLoading,
+                            ) {
+                                Text("Resume stream")
+                            }
+                            OutlinedButton(
+                                onClick = viewModel::endActiveSession,
+                                shape = RoundedCornerShape(50),
+                                enabled = !uiState.isLoading,
+                            ) {
+                                Text("End it", color = LiveStudioDanger)
+                            }
+                        }
+                    }
+                }
                 Spacer(Modifier.height(16.dp))
             }
 
@@ -297,6 +432,14 @@ fun StartStreamScreen(
                         Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                             LiveToggleRow("Notify followers", uiState.notifyFollowersOnStart, viewModel::onNotifyFollowersChange, uiState.isLoading)
                             LiveToggleRow("Post to MindLoom", uiState.postToMindLoomOnStart, viewModel::onPostToMindLoomChange, uiState.isLoading)
+                            if (uiState.postToMindLoomOnStart && uiState.viewAccessMode != LiveViewAccessMode.PUBLIC) {
+                                Text(
+                                    "The MindLoom post won't include an invite. Only people allowed by \"${uiState.viewAccessMode.label}\" can join.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = LiveStudioMuted,
+                                    modifier = Modifier.padding(bottom = 6.dp),
+                                )
+                            }
                             LiveToggleRow("Enable chat", uiState.chatEnabled, viewModel::onChatEnabledChange, uiState.isLoading)
                         }
                     }
@@ -304,18 +447,6 @@ fun StartStreamScreen(
             }
 
             Spacer(Modifier.height(20.dp))
-            Button(
-                onClick = startLiveIfReady,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(14.dp),
-                enabled = !uiState.isLoading
-            ) {
-                if (uiState.isLoading) {
-                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                } else {
-                    Text("Go live", fontWeight = FontWeight.Bold)
-                }
-            }
         }
     }
 
@@ -350,9 +481,63 @@ fun StartStreamScreen(
                     )
                 },
                 onGoLive = startLiveIfReady,
+                onRecheck = { precheckResult = LiveBroadcastPrecheck.evaluate(context) },
             )
         }
     }
+    }
+}
+
+/** Inline pre-live checklist (camera, mic, network) shown under the preview, YouTube "Go live" style. */
+@Composable
+private fun LivePrecheckChipsRow(
+    result: LiveBroadcastPrecheck.Result,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LivePrecheckChip("Camera", Icons.Default.Videocam, result.cameraGranted, onClick, Modifier.weight(1f))
+        LivePrecheckChip("Mic", Icons.Default.Mic, result.microphoneGranted, onClick, Modifier.weight(1f))
+        LivePrecheckChip("Network", Icons.Default.Wifi, result.networkAvailable, onClick, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun LivePrecheckChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    passed: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = if (passed) Color(0xFFF1F1F1) else LiveStudioDanger.copy(alpha = 0.08f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(icon, contentDescription = null, tint = LiveStudioInk, modifier = Modifier.size(18.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                color = LiveStudioInk,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (passed) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                contentDescription = if (passed) "$label ready" else "$label needs attention",
+                tint = if (passed) LiveStudioSuccess else LiveStudioDanger,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
@@ -423,7 +608,7 @@ private val LiveStageAccessMode.label: String
         LiveStageAccessMode.OPEN_TO_ACCEPTED_VOLUNTEERS -> "Open to accepted volunteers"
     }
 
-private val LiveReplayVisibility.label: String
+internal val LiveReplayVisibility.label: String
     get() = when (this) {
         LiveReplayVisibility.OWNER_ONLY -> "Owner only"
         LiveReplayVisibility.SHARED_LINK -> "Anyone with link"

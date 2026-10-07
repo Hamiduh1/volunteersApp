@@ -181,6 +181,9 @@ private fun CallHistoryRow(
     val context = LocalContext.current
     val call = item.call
     val palette = item.callActivityPalette()
+    val isMissedCall = item.direction == CallDirection.MISSED ||
+        call.status.equals("missed", ignoreCase = true)
+    val directionTint = if (isMissedCall) WaRed else WaGreenDark
     val typeIcon = if (item.isVideo) Icons.Default.Videocam else Icons.Default.Call
     val directionIcon = when (item.direction) {
         CallDirection.DIALED -> Icons.AutoMirrored.Filled.CallMade
@@ -218,11 +221,10 @@ val timestampLabel = remember(call.startedAt) {
                     Modifier
                 }
             ),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         color = SocialInboxSurface,
         tonalElevation = 0.dp,
-        shadowElevation = 1.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, palette.primary.copy(alpha = 0.14f)),
+        shadowElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier
@@ -248,8 +250,9 @@ val timestampLabel = remember(call.startedAt) {
                 ) {
                     Text(
                         text = item.otherUserName.ifBlank { "Unknown" },
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
+                        color = if (isMissedCall) WaRed else WaInk,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -259,7 +262,7 @@ val timestampLabel = remember(call.startedAt) {
                         Text(
                             text = timestampLabel,
                             style = MaterialTheme.typography.labelSmall,
-                            color = SocialInboxMutedInk,
+                            color = WaMeta,
                             maxLines = 1,
                         )
                     }
@@ -272,20 +275,20 @@ val timestampLabel = remember(call.startedAt) {
                     Icon(
                         imageVector = directionIcon,
                         contentDescription = null,
-                        tint = palette.primary,
-                        modifier = Modifier.size(14.dp),
+                        tint = directionTint,
+                        modifier = Modifier.size(16.dp),
                     )
                     Text(
-                        text = "$directionLabel | $statusShort | ${if (item.isVideo) "Video" else "Voice"}",
+                        text = "$directionLabel · $statusShort · ${if (item.isVideo) "Video" else "Voice"}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = palette.primary,
+                        color = WaMeta,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
 
-            FilledTonalIconButton(
+            IconButton(
                 onClick = {
                     val callType = if (item.isVideo) CallType.VIDEO else CallType.AUDIO
                     context.startActivity(
@@ -302,8 +305,8 @@ val timestampLabel = remember(call.startedAt) {
                 Icon(
                     imageVector = typeIcon,
                     contentDescription = "Call back ${item.otherUserName.ifBlank { "contact" }}",
-                    tint = palette.primary,
-                    modifier = Modifier.size(20.dp),
+                    tint = WaGreenDark,
+                    modifier = Modifier.size(22.dp),
                 )
             }
         }
@@ -354,7 +357,7 @@ private fun EmptyCallHistory(modifier: Modifier = Modifier.fillMaxSize()) {
     ) {
         Surface(
             modifier = Modifier.size(120.dp),
-            color = InboxRed.copy(alpha = 0.12f),
+            color = WaGreen.copy(alpha = 0.12f),
             shape = CircleShape
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -362,7 +365,7 @@ private fun EmptyCallHistory(modifier: Modifier = Modifier.fillMaxSize()) {
                     imageVector = Icons.Default.Call,
                     contentDescription = null,
                     modifier = Modifier.size(60.dp),
-                    tint = InboxRed
+                    tint = WaGreenDark
                 )
             }
         }

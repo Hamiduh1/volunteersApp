@@ -9,7 +9,48 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
+/** A live RTC token plus the Agora uid it was minted for; the channel must be joined with [uid]. */
+data class LiveRtcCredentials(val token: String, val uid: Int)
+
 object LiveRepository {
+
+    /**
+     * Shared iOS/Android contract: the token endpoint is authoritative for the Agora uid, so callers
+     * join with the returned uid. [uid] is only a request hint and the fallback for older backends.
+     */
+    suspend fun fetchAgoraRtcCredentials(
+        sessionId: String,
+        channelName: String,
+        role: LiveRtcJoinRole,
+        uid: Int,
+        shareAccessToken: String? = null,
+    ): LiveRtcCredentials {
+        val data = hashMapOf<String, Any>(
+            "sessionId" to sessionId,
+            "channelName" to channelName,
+            "role" to role.agoraRole,
+            "requestedRole" to role.agoraRole,
+            "uid" to uid,
+            "liveSession" to true,
+        )
+        shareAccessToken?.trim()?.takeIf { it.isNotBlank() }?.let {
+            data["shareAccessToken"] = it
+        }
+        val resultMap = FunctionsClient.callMap(CallableFunction.GET_AGORA_RTC_TOKEN, data)
+            ?: throw IllegalStateException("No token response from server.")
+        val token = resultMap["token"] as? String
+        val tokenRequired = resultMap["tokenRequired"] as? Boolean ?: true
+        if (tokenRequired && token.isNullOrBlank()) {
+            throw IllegalStateException("Failed to parse Agora token from response.")
+        }
+        // Agora uids are unsigned 32-bit; values above Int.MAX_VALUE wrap to the same bits in an Int.
+        val serverUid = when (val raw = resultMap["uid"] ?: resultMap["agoraUid"]) {
+            is Number -> raw.toLong()
+            is String -> raw.trim().toLongOrNull()
+            else -> null
+        }?.takeIf { it in 1L..0xFFFF_FFFFL }?.toInt()
+        return LiveRtcCredentials(token = token.orEmpty(), uid = serverUid ?: uid)
+    }
 
     suspend fun fetchAgoraRtcToken(
         sessionId: String,
@@ -64,8 +105,8 @@ object LiveRepository {
                     status = json?.optString("status").orEmpty(),
                     title = json?.optString("title").orEmpty(),
                     replayReady = json?.optBoolean("replayReady", false) == true,
-                    purpose = json?.optString("purpose")
-                        ?: json?.optString("accessType").orEmpty(),
+                    purpose = json?.optString("purpose").orEmpty()
+                        .ifBlank { json?.optString("accessType").orEmpty() },
                 )
             } finally {
                 connection.disconnect()

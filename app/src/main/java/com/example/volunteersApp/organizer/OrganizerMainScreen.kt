@@ -54,8 +54,8 @@ import com.example.volunteersApp.marketplace.MarketplaceScreen
 import com.example.volunteersApp.models.EventModel
 import com.example.volunteersApp.models.EventWithVolunteerCount
 import com.example.volunteersApp.navigation.AppDestinations
-import com.example.volunteersApp.streams.LiveStreamScreen
-import com.example.volunteersApp.streams.LiveStreamViewModel
+import com.example.volunteersApp.streams.LiveLaunchIntent
+import com.example.volunteersApp.streams.LiveLaunchTarget
 import com.example.volunteersApp.streams.LiveStreamsScreen
 import com.example.volunteersApp.streams.LiveStreamsViewModel
 import com.example.volunteersApp.streams.StartStreamActivity
@@ -351,23 +351,24 @@ fun OrganizerMainScreen(
                         viewModel = viewModel<LiveStreamsViewModel>(),
                         onBack = { navController.popBackStack() },
                         onStreamClick = { session ->
-                            navController.navigate("live_stream/${session.sessionId}")
+                            context.startActivity(
+                                LiveLaunchIntent.liveRoomIntent(context, LiveLaunchTarget(sessionId = session.sessionId))
+                            )
                         }
                     )
                 }
 
+                // Rooms run full screen in LiveStreamActivity, which owns the host end-stream prompt.
                 composable(
                     "live_stream/{sessionId}",
                     arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
                 ) { backStackEntry ->
                     val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
-                    val liveViewModel = viewModel<LiveStreamViewModel>()
-                    LiveStreamScreen(
-                        viewModel = liveViewModel,
-                        onLeave = { navController.popBackStack() }
-                    )
                     LaunchedEffect(sessionId) {
-                        liveViewModel.joinStream(sessionId, context)
+                        context.startActivity(
+                            LiveLaunchIntent.liveRoomIntent(context, LiveLaunchTarget(sessionId = sessionId))
+                        )
+                        navController.popBackStack()
                     }
                 }
 

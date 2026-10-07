@@ -3,6 +3,7 @@ package com.example.volunteersApp.streams
 import android.content.Context
 import com.example.volunteersApp.firebase.FirestoreCollection
 import com.google.firebase.Firebase
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.tasks.await
 
@@ -13,6 +14,9 @@ object LiveShareRouter {
         if (sessionId.isBlank()) {
             throw IllegalStateException("Live session id is missing.")
         }
+        if (!LiveLaunchIntent.isValidLiveDocId(sessionId)) {
+            throw IllegalStateException("This live link is invalid.")
+        }
 
         val shareToken = target.shareAccessToken?.trim()?.ifBlank { null }
         if (!shareToken.isNullOrBlank()) {
@@ -20,7 +24,7 @@ object LiveShareRouter {
             if (!resolved.valid) {
                 throw IllegalStateException("This live invite link is invalid or expired.")
             }
-            val resolvedSessionId = resolved.sessionId.ifBlank { sessionId }
+            val resolvedSessionId = resolved.sessionId.takeIf { LiveLaunchIntent.isValidLiveDocId(it) } ?: sessionId
             val resolvedHostId = resolved.hostId.ifBlank { target.hostId.orEmpty() }
             if (target.hostId != null && resolvedHostId.isNotBlank() && target.hostId != resolvedHostId) {
                 throw IllegalStateException("This live invite link does not match the host.")
@@ -31,6 +35,7 @@ object LiveShareRouter {
                         context = context,
                         sessionId = resolvedSessionId,
                         title = resolved.title.ifBlank { "Live Replay" },
+                        shareAccessToken = shareToken,
                     )
                 )
                 return
@@ -48,12 +53,19 @@ object LiveShareRouter {
             return
         }
 
-        val session = Firebase.firestore
-            .collection(FirestoreCollection.LIVE_SESSIONS)
-            .document(sessionId)
-            .get()
-            .await()
-            .toLiveSession()
+        // A denied read (followers-only, ended private replay) must not surface Firestore's raw error;
+        // the room explains access in its own words.
+        val session = try {
+            Firebase.firestore
+                .collection(FirestoreCollection.LIVE_SESSIONS)
+                .document(sessionId)
+                .get()
+                .await()
+                .toLiveSession()
+        } catch (e: FirebaseFirestoreException) {
+            if (e.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) throw e
+            null
+        }
 
         if (session != null) {
             target.hostId?.takeIf { it.isNotBlank() }?.let { expectedHost ->

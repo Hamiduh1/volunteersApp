@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -352,29 +353,26 @@ fun ChatScreen(
                             model = otherUserProfileUrl,
                             contentDescription = null,
                             modifier = Modifier
-                                .size(42.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.surfaceVariant),
                             contentScale = ContentScale.Crop,
                             error = painterResource(id = R.drawable.default_profile_image)
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = otherUserName,
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.SemiBold,
+                                color = WaInk,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = otherUserSubtitle,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = when {
-                                    isGroupChat -> InboxIndigo
-                                    otherUserSubtitle == "Online" -> InboxGreen
-                                    else -> InboxBlue
-                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = WaMeta,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -388,16 +386,16 @@ fun ChatScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { launchCall(CallType.AUDIO) },
-                        enabled = uiState.canPlaceCall,
-                    ) {
-                        Icon(Icons.Default.Call, contentDescription = "Voice call")
-                    }
-                    IconButton(
                         onClick = { launchCall(CallType.VIDEO) },
                         enabled = uiState.canPlaceCall,
                     ) {
                         Icon(Icons.Default.Videocam, contentDescription = "Video call")
+                    }
+                    IconButton(
+                        onClick = { launchCall(CallType.AUDIO) },
+                        enabled = uiState.canPlaceCall,
+                    ) {
+                        Icon(Icons.Default.Call, contentDescription = "Voice call")
                     }
                     Box {
                         IconButton(onClick = { showHeaderMenu = true }) {
@@ -438,14 +436,18 @@ fun ChatScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = SocialInboxSurface,
                     scrolledContainerColor = SocialInboxSurface,
+                    navigationIconContentColor = WaIcon,
+                    actionIconContentColor = WaIcon,
                 )
             )
-        }
+        },
+        containerColor = WaWallpaper,
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .background(WaWallpaper)
         ) {
             activeCallForThisChat?.let { session ->
                 ActiveCallBanner(
@@ -479,9 +481,9 @@ fun ChatScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .background(SocialInboxBackground),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .background(WaWallpaper),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         itemsIndexed(
                             items = uiState.messages,
@@ -676,33 +678,28 @@ private fun ActiveCallBanner(
         "accepted" -> if (isVideo) "Video call in progress" else "Voice call in progress"
         else -> "Call active"
     }
+    // WhatsApp-style green "return to call" strip.
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = InboxBlue.copy(alpha = 0.10f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, InboxBlue.copy(alpha = 0.24f))
+        shape = RoundedCornerShape(12.dp),
+        color = WaGreenDark,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Surface(
-                shape = CircleShape,
-                color = InboxBlue.copy(alpha = 0.14f)
-            ) {
-                Icon(
-                    imageVector = if (isVideo) Icons.Default.Videocam else Icons.Default.Call,
-                    contentDescription = null,
-                    tint = InboxBlue,
-                    modifier = Modifier.padding(10.dp)
-                )
-            }
+            Icon(
+                imageVector = if (isVideo) Icons.Default.Videocam else Icons.Default.Call,
+                contentDescription = null,
+                tint = Color.White,
+            )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = statusLabel,
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
                 )
                 Text(
                     text = if (session.isGroupCall()) {
@@ -711,10 +708,17 @@ private fun ActiveCallBanner(
                         session.callerName.ifBlank { "Open active call" }
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = SocialInboxMutedInk
+                    color = Color.White.copy(alpha = 0.85f)
                 )
             }
-            Button(onClick = onOpen, shape = RoundedCornerShape(999.dp)) {
+            Button(
+                onClick = onOpen,
+                shape = RoundedCornerShape(999.dp),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = WaGreenDark,
+                )
+            ) {
                 Text(if (session.status.equals("accepted", ignoreCase = true)) "Open" else "Join")
             }
         }
@@ -731,16 +735,17 @@ private fun ChatMessageBubble(
     onOpenMedia: () -> Unit,
     onLongPress: () -> Unit
 ) {
+    // WhatsApp bubbles: small radius with a sharp "tail" corner at the top on the sender's side.
     val bubbleShape = if (isMine) {
-        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp)
+        RoundedCornerShape(topStart = 8.dp, topEnd = 0.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
     } else {
-        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp)
+        RoundedCornerShape(topStart = 0.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
     }
     val bubbleAlignment = if (isMine) Alignment.CenterEnd else Alignment.CenterStart
-    val bubbleColor = if (isMine) InboxBlue else SocialInboxSurface
-    val textColor = if (isMine) Color.White else SocialInboxInk
-    val metaColor = if (isMine) Color.White.copy(alpha = 0.78f) else SocialInboxMutedInk
-    val bubbleBorder = if (isMine) InboxBlue.copy(alpha = 0.42f) else InboxBlue.copy(alpha = 0.14f)
+    val bubbleColor = if (isMine) WaOutgoingBubble else WaIncomingBubble
+    val textColor = WaInk
+    val metaColor = WaMeta
+    val bubbleBorder = Color.Black.copy(alpha = 0.06f)
 
     val isRead = if (currentUserId.isNullOrBlank()) {
         message.isRead
@@ -772,58 +777,49 @@ private fun ChatMessageBubble(
                     onLongClick = onLongPress
                 )
         ) {
-            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)) {
                 if (isGroupChat && !isMine) {
                     Text(
                         text = message.senderDisplayName.ifBlank { "Group member" },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SocialInboxMutedInk,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = WaGreenDark,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(2.dp))
                 }
 
                 if (!message.replyToText.isNullOrBlank()) {
+                    // WhatsApp quoted reply: tinted block with a green bar on the leading edge.
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        color = if (isMine) {
-                            Color.White.copy(alpha = 0.14f)
-                        } else {
-                            SocialInboxSurfaceSoft
-                        },
-                        shape = RoundedCornerShape(12.dp)
+                        color = if (isMine) WaQuoteMine else WaQuoteTheirs,
+                        shape = RoundedCornerShape(6.dp)
                     ) {
-                        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                        Row(modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(3.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(
-                                        if (isMine) {
-                                            Color.White.copy(alpha = 0.92f)
-                                        } else {
-                                            InboxBlue
-                                        }
-                                    )
+                                    .width(4.dp)
+                                    .fillMaxHeight()
+                                    .background(WaQuoteBar)
                             )
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = message.replyToSenderName.orEmpty().ifBlank { "Reply" },
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = textColor.copy(alpha = 0.85f)
-                            )
-                            Text(
-                                text = message.replyToText.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = textColor.copy(alpha = 0.78f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                                Text(
+                                    text = message.replyToSenderName.orEmpty().ifBlank { "Reply" },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = WaGreenDark
+                                )
+                                Text(
+                                    text = message.replyToText.orEmpty(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = WaMeta,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
                 }
 
                 if (message.isDeleted) {
@@ -843,7 +839,7 @@ private fun ChatMessageBubble(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .heightIn(max = 240.dp)
-                                        .clip(RoundedCornerShape(16.dp)),
+                                        .clip(RoundedCornerShape(6.dp)),
                                     contentScale = ContentScale.Crop,
                                     error = painterResource(id = R.drawable.default_profile_image)
                                 )
@@ -867,7 +863,7 @@ private fun ChatMessageBubble(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .heightIn(max = 220.dp)
-                                        .clip(RoundedCornerShape(16.dp)),
+                                        .clip(RoundedCornerShape(6.dp)),
                                     useController = false,
                                     repeatOne = true,
                                     mute = true
@@ -895,22 +891,22 @@ private fun ChatMessageBubble(
                     }
                 }
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(2.dp))
 
                 Row(
                     modifier = Modifier.align(Alignment.End),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     Text(
                         text = message.timestamp?.let {
                             SimpleDateFormat("h:mm a", Locale.getDefault()).format(it)
                         }.orEmpty(),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isMine) Color.White.copy(alpha = 0.76f) else metaColor
+                        color = metaColor
                     )
                     if (isMine) {
-                        ReceiptIcon(read = isRead, delivered = isDelivered, tint = Color.White)
+                        ReceiptIcon(read = isRead, delivered = isDelivered, tint = WaMeta)
                     }
                 }
             }
@@ -952,25 +948,26 @@ private fun ConversationComposer(
 ) {
     val sendEnabled = !isSending && (value.isNotBlank() || pendingAttachment != null)
 
+    // WhatsApp composer floats on the wallpaper: white pill input plus a round green send button.
     Surface(
         modifier = modifier,
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
-        color = SocialInboxSurface,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        color = WaWallpaper,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .imePadding()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (replyTarget != null) {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+                    shape = RoundedCornerShape(12.dp),
+                    color = SocialInboxSurface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, WaQuoteBar.copy(alpha = 0.5f))
                 ) {
                     Row(
                         modifier = Modifier
@@ -1001,8 +998,8 @@ private fun ConversationComposer(
 
             if (pendingAttachment != null) {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                    shape = RoundedCornerShape(12.dp),
+                    color = SocialInboxSurface
                 ) {
                     Row(
                         modifier = Modifier
@@ -1047,38 +1044,39 @@ private fun ConversationComposer(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    IconButton(onClick = onPickImage, modifier = Modifier.size(40.dp)) {
-                        Icon(
-                            Icons.Default.Image,
-                            contentDescription = "Add photo",
-                            tint = InboxBlue,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    IconButton(onClick = onPickVideo, modifier = Modifier.size(40.dp)) {
-                        Icon(
-                            Icons.Default.Videocam,
-                            contentDescription = "Add video",
-                            tint = InboxIndigo,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-
                 OutlinedTextField(
                     value = value,
                     onValueChange = onValueChange,
                     modifier = Modifier
                         .weight(1f)
-                        .defaultMinSize(minHeight = 44.dp)
-                        .heightIn(max = 120.dp),
+                        .defaultMinSize(minHeight = 48.dp)
+                        .heightIn(max = 140.dp),
                     placeholder = {
-                        Text("Message", style = MaterialTheme.typography.bodyLarge)
+                        Text("Message", style = MaterialTheme.typography.bodyLarge, color = WaMeta)
                     },
-                    textStyle = MaterialTheme.typography.bodyLarge,
+                    trailingIcon = {
+                        Row {
+                            IconButton(onClick = onPickVideo, modifier = Modifier.size(40.dp)) {
+                                Icon(
+                                    Icons.Default.Videocam,
+                                    contentDescription = "Add video",
+                                    tint = WaIcon,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            IconButton(onClick = onPickImage, modifier = Modifier.size(40.dp)) {
+                                Icon(
+                                    Icons.Default.Image,
+                                    contentDescription = "Add photo",
+                                    tint = WaIcon,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = WaInk),
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,
                         imeAction = ImeAction.Send
@@ -1091,24 +1089,29 @@ private fun ConversationComposer(
                         }
                     ),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = SocialInboxBackground,
-                        unfocusedContainerColor = SocialInboxBackground,
-                        focusedBorderColor = InboxBlue.copy(alpha = 0.35f),
-                        unfocusedBorderColor = SocialInboxSurfaceSoftAlt,
+                        focusedContainerColor = SocialInboxSurface,
+                        unfocusedContainerColor = SocialInboxSurface,
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        cursorColor = WaGreen,
                     ),
                     minLines = 1,
-                    maxLines = 4,
+                    maxLines = 5,
                     shape = RoundedCornerShape(24.dp)
                 )
 
                 if (isSending) {
                     Box(
-                        modifier = Modifier.size(44.dp),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(WaGreen),
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.dp
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White
                         )
                     }
                 } else {
@@ -1119,12 +1122,13 @@ private fun ConversationComposer(
                             }
                         },
                         enabled = sendEnabled,
-                        modifier = Modifier.size(44.dp),
+                        modifier = Modifier.size(48.dp),
+                        shape = CircleShape,
                         colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(
-                            containerColor = if (sendEnabled) InboxBlue else SocialInboxSurfaceSoftAlt,
-                            disabledContainerColor = SocialInboxSurfaceSoftAlt,
+                            containerColor = WaGreen,
+                            disabledContainerColor = WaGreen.copy(alpha = 0.45f),
                             contentColor = Color.White,
-                            disabledContentColor = SocialInboxMutedInk,
+                            disabledContentColor = Color.White.copy(alpha = 0.9f),
                         )
                     ) {
                         Icon(
@@ -1150,7 +1154,7 @@ private fun ReceiptIcon(
             imageVector = Icons.Default.DoneAll,
             contentDescription = "Read",
             modifier = Modifier.size(16.dp),
-            tint = InboxCyan
+            tint = WaReadTick
         )
         delivered -> Icon(
             imageVector = Icons.Default.DoneAll,
@@ -1244,20 +1248,18 @@ private fun MediaPreviewDialog(
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
-            color = scheme.surfaceContainerLowest
+            color = Color.Black
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp, vertical = 56.dp),
+                        .padding(vertical = 56.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
-                        shape = RoundedCornerShape(20.dp),
-                        color = scheme.surface,
-                        tonalElevation = 1.dp,
+                        color = Color.Black,
                     ) {
                         when (message.messageType.uppercase(Locale.getDefault())) {
                             CHAT_MESSAGE_TYPE_VIDEO -> {
@@ -1290,15 +1292,15 @@ private fun MediaPreviewDialog(
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
                         .zIndex(1f)
-                        .background(scheme.surface.copy(alpha = 0.92f))
+                        .background(Color.Black.copy(alpha = 0.6f))
                         .padding(horizontal = 4.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onDismiss) {
                         Icon(
-                            imageVector = Icons.Default.Close,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Close",
-                            tint = scheme.onSurface
+                            tint = Color.White
                         )
                     }
                     Spacer(Modifier.weight(1f))
@@ -1307,7 +1309,7 @@ private fun MediaPreviewDialog(
                             Icon(
                                 imageVector = Icons.Default.Delete,
                                 contentDescription = "Delete media",
-                                tint = scheme.onSurface
+                                tint = Color.White
                             )
                         }
                     }
@@ -1329,14 +1331,14 @@ private fun EmptyConversationState(modifier: Modifier = Modifier) {
         Surface(
             modifier = Modifier.size(88.dp),
             shape = CircleShape,
-            color = InboxBlue.copy(alpha = 0.12f),
+            color = WaGreen.copy(alpha = 0.14f),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
                     contentDescription = null,
                     modifier = Modifier.size(36.dp),
-                    tint = InboxBlue,
+                    tint = WaGreenDark,
                 )
             }
         }
@@ -1364,22 +1366,33 @@ private fun DayDivider(label: String) {
         horizontalArrangement = Arrangement.Center
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(999.dp)
+            modifier = Modifier.padding(vertical = 6.dp),
+            color = SocialInboxSurface,
+            shape = RoundedCornerShape(8.dp),
+            shadowElevation = 0.5.dp
         ) {
             Text(
                 text = label,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = WaIcon
             )
         }
     }
 }
 
 private fun formatMessageDay(date: Date): String {
-    val formatter = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
-    return formatter.format(date)
+    val target = java.util.Calendar.getInstance().apply { time = date }
+    val today = java.util.Calendar.getInstance()
+    val yesterday = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+    fun java.util.Calendar.sameDayAs(other: java.util.Calendar) =
+        get(java.util.Calendar.YEAR) == other.get(java.util.Calendar.YEAR) &&
+            get(java.util.Calendar.DAY_OF_YEAR) == other.get(java.util.Calendar.DAY_OF_YEAR)
+    return when {
+        target.sameDayAs(today) -> "Today"
+        target.sameDayAs(yesterday) -> "Yesterday"
+        else -> SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(date)
+    }
 }
 
 private fun resolveDisplayName(name: String, username: String, email: String): String {

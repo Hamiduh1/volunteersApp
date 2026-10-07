@@ -8,6 +8,7 @@ import com.example.volunteersApp.jokes.JokeType
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.tasks.await
 
@@ -22,6 +23,10 @@ object MindLoomLivePostWriter {
         shareUrl: String,
     ): Result<Unit> {
         val user = auth.currentUser ?: return Result.failure(IllegalStateException("Sign in to post to MindLoom."))
+        // Shared rules accept only the canonical web link as sourceLiveShareUrl; a signed invite
+        // link would also hand its token to every MindLoom reader.
+        @Suppress("NAME_SHADOWING")
+        val shareUrl = canonicalReplayReference(session)
         return runCatching {
             val authorName = user.displayName
                 ?.trim()
@@ -51,12 +56,7 @@ object MindLoomLivePostWriter {
             user.photoUrl?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { url ->
                 payload["authorProfileUrl"] = url
             }
-            db.collection(FirestoreCollection.USERS)
-                .document(user.uid)
-                .collection(FirestoreSubcollection.JOKES)
-                .document(jokeId)
-                .set(payload)
-                .await()
+            writeLivePost(user.uid, jokeId, payload)
             Unit
         }.onFailure { error ->
             Log.e(TAG, "Failed to post live session to MindLoom", error)
@@ -111,12 +111,7 @@ object MindLoomLivePostWriter {
             user.photoUrl?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { url ->
                 payload["authorProfileUrl"] = url
             }
-            db.collection(FirestoreCollection.USERS)
-                .document(user.uid)
-                .collection(FirestoreSubcollection.JOKES)
-                .document(jokeId)
-                .set(payload)
-                .await()
+            writeLivePost(user.uid, jokeId, payload)
             Unit
         }.onFailure { error ->
             Log.e(TAG, "Failed to post live replay to MindLoom", error)
@@ -136,6 +131,23 @@ object MindLoomLivePostWriter {
             } else {
                 throw error
             }
+        }
+    }
+
+    /**
+     * Re-posting updates the existing card: commentsCount is server-maintained and likes belong to
+     * readers, so an overwrite with 0 / [] would be denied once anyone has engaged.
+     */
+    private suspend fun writeLivePost(uid: String, jokeId: String, payload: Map<String, Any>) {
+        val ref = db.collection(FirestoreCollection.USERS)
+            .document(uid)
+            .collection(FirestoreSubcollection.JOKES)
+            .document(jokeId)
+        val exists = runCatching { ref.get().await().exists() }.getOrDefault(false)
+        if (exists) {
+            ref.set(payload - "commentsCount" - "likes", SetOptions.merge()).await()
+        } else {
+            ref.set(payload).await()
         }
     }
 

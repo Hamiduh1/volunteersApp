@@ -51,6 +51,16 @@ class StartStreamActivity : ComponentActivity() {
                     onBack = { finish() },
                     onStreamStarted = { },
                     offerShareChooserOnStart = false,
+                    onResumeSession = { sessionId ->
+                        startActivity(
+                            LiveLaunchIntent.liveRoomIntent(
+                                context = this@StartStreamActivity,
+                                target = LiveLaunchTarget(sessionId = sessionId),
+                                isHost = true,
+                            )
+                        )
+                        finish()
+                    },
                 )
             }
         }

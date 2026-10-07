@@ -1,24 +1,30 @@
 package com.example.volunteersApp.wallet
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -83,11 +89,36 @@ data class OwnerUserReportItem(
     val createdAt: Timestamp? = null
 )
 
+enum class OwnerUserReportsFilter(val title: String, val collection: String?) {
+    ALL("All", null),
+    USER_REPORTS("user_reports", FirestoreCollection.USER_REPORTS),
+    USER_REPORTS_LEGACY("userReports", FirestoreCollection.USER_REPORTS_LEGACY)
+}
+
 data class OwnerUserReportsUiState(
     val isLoading: Boolean = true,
     val reports: List<OwnerUserReportItem> = emptyList(),
+    val query: String = "",
+    val activeFilter: OwnerUserReportsFilter = OwnerUserReportsFilter.ALL,
     val error: String? = null
-)
+) {
+    val filteredReports: List<OwnerUserReportItem>
+        get() {
+            val cleanQuery = query.trim().lowercase(Locale.getDefault())
+            return reports.filter { report ->
+                val matchesFilter = activeFilter.collection == null ||
+                    report.sourceCollection == activeFilter.collection
+                val matchesQuery = cleanQuery.isEmpty() || listOfNotNull(
+                    report.reportedUserName,
+                    report.reason,
+                    report.reportedUserEmail,
+                    report.eventName,
+                    report.reportingUserDisplayName
+                ).any { it.lowercase(Locale.getDefault()).contains(cleanQuery) }
+                matchesFilter && matchesQuery
+            }
+        }
+}
 
 class OwnerUserReportsViewModel : ViewModel() {
     private val db = Firebase.firestore
@@ -100,6 +131,14 @@ class OwnerUserReportsViewModel : ViewModel() {
     init {
         listenToCollection(FirestoreCollection.USER_REPORTS)
         listenToCollection(FirestoreCollection.USER_REPORTS_LEGACY)
+    }
+
+    fun onQueryChange(value: String) {
+        _uiState.update { it.copy(query = value) }
+    }
+
+    fun onFilterChange(filter: OwnerUserReportsFilter) {
+        _uiState.update { it.copy(activeFilter = filter) }
     }
 
     private fun reportQueries(collectionName: String): List<Query> =
@@ -242,11 +281,34 @@ fun OwnerUserReportsScreen(
                 }
             }
 
-            if (uiState.reports.isEmpty() && !uiState.isLoading) {
+            OutlinedTextField(
+                value = uiState.query,
+                onValueChange = viewModel::onQueryChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Search reports") }
+            )
+            OwnerFilterButtonRow(
+                options = OwnerUserReportsFilter.values().toList(),
+                selected = uiState.activeFilter,
+                label = { it.title },
+                onSelect = viewModel::onFilterChange
+            )
+
+            if (uiState.isLoading && uiState.reports.isEmpty()) {
+                OwnerCenteredLoading()
+            } else if (uiState.reports.isEmpty()) {
                 Text("No user reports yet.")
+            } else if (uiState.filteredReports.isEmpty()) {
+                Text("No reports match your search.")
             } else {
+                Text(
+                    "Showing ${uiState.filteredReports.size} of ${uiState.reports.size} report(s)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(uiState.reports, key = { "${it.sourceCollection}:${it.id}" }) { item ->
+                    items(uiState.filteredReports, key = { "${it.sourceCollection}:${it.id}" }) { item ->
                         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                             Column(
                                 modifier = Modifier.padding(12.dp),
@@ -256,6 +318,11 @@ fun OwnerUserReportsScreen(
                                 Text("Reason: ${item.reason}", style = MaterialTheme.typography.bodyMedium)
                                 Text("Context: ${item.eventName ?: "-"}", style = MaterialTheme.typography.bodySmall)
                                 Text("Reported by: ${item.reportingUserDisplayName ?: "Unknown"}", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    "Source: ${item.sourceCollection}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                                 item.reportedUserEmail?.takeIf { it.isNotBlank() }?.let {
                                     Text("Email: $it", style = MaterialTheme.typography.bodySmall)
                                 }
@@ -282,11 +349,37 @@ data class OwnerKycItem(
     val updatedAt: Timestamp?
 )
 
+enum class OwnerKycRoleFilter(val title: String) {
+    ALL("All"),
+    OWNER("Owner"),
+    ADMIN("Admin"),
+    ORGANIZER("Organizer"),
+    EMPLOYER("Employer"),
+    VOLUNTEER("Volunteer")
+}
+
 data class OwnerKycUiState(
     val isLoading: Boolean = true,
     val items: List<OwnerKycItem> = emptyList(),
+    val query: String = "",
+    val roleFilter: OwnerKycRoleFilter = OwnerKycRoleFilter.ALL,
+    val unverifiedOnly: Boolean = false,
     val error: String? = null
-)
+) {
+    val filteredItems: List<OwnerKycItem>
+        get() {
+            val cleanQuery = query.trim().lowercase(Locale.getDefault())
+            return items.filter { item ->
+                val matchesRole = roleFilter == OwnerKycRoleFilter.ALL ||
+                    item.role.trim().equals(roleFilter.title, ignoreCase = true)
+                val matchesVerified = !unverifiedOnly || !item.emailVerified
+                val matchesQuery = cleanQuery.isEmpty() ||
+                    listOf(item.name, item.email, item.role)
+                        .any { it.lowercase(Locale.getDefault()).contains(cleanQuery) }
+                matchesRole && matchesVerified && matchesQuery
+            }
+        }
+}
 
 class OwnerKycReviewViewModel : ViewModel() {
     private val db = Firebase.firestore
@@ -295,6 +388,18 @@ class OwnerKycReviewViewModel : ViewModel() {
 
     init {
         refresh()
+    }
+
+    fun onQueryChange(value: String) {
+        _uiState.update { it.copy(query = value) }
+    }
+
+    fun onRoleChange(value: OwnerKycRoleFilter) {
+        _uiState.update { it.copy(roleFilter = value) }
+    }
+
+    fun onUnverifiedOnlyChange(value: Boolean) {
+        _uiState.update { it.copy(unverifiedOnly = value) }
     }
 
     fun refresh() {
@@ -371,11 +476,43 @@ fun OwnerKycReviewScreen(
                 )
             )
 
+            OutlinedTextField(
+                value = uiState.query,
+                onValueChange = viewModel::onQueryChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Search name, email, role") }
+            )
+            OwnerFilterButtonRow(
+                options = OwnerKycRoleFilter.values().toList(),
+                selected = uiState.roleFilter,
+                label = { it.title },
+                onSelect = viewModel::onRoleChange
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Show unverified only", modifier = Modifier.weight(1f))
+                Switch(checked = uiState.unverifiedOnly, onCheckedChange = viewModel::onUnverifiedOnlyChange)
+            }
+
             uiState.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
             }
+            if (uiState.isLoading && uiState.items.isEmpty()) {
+                OwnerCenteredLoading()
+            } else if (uiState.filteredItems.isEmpty()) {
+                Text("No KYC records match these filters.")
+            } else {
+                Text(
+                    "Showing ${uiState.filteredItems.size} of ${uiState.items.size} record(s)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(uiState.items, key = { it.uid }) { item ->
+                items(uiState.filteredItems, key = { it.uid }) { item ->
                     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                         Column(
                             modifier = Modifier.padding(12.dp),
@@ -482,6 +619,28 @@ class OwnerFeeSettingsViewModel : ViewModel() {
                 "defaultTransferOwnerFeeUsd" -> it.copy(defaultTransferOwnerFeeUsd = value, error = null, message = null)
                 else -> it
             }
+        }
+    }
+
+    /** Fills the form only; nothing is written until the owner saves. */
+    fun applyDefaults() {
+        val defaults = OwnerFeeSettingsUiState()
+        _uiState.update {
+            it.copy(
+                blindDateFeeUsd = defaults.blindDateFeeUsd,
+                agentAuthorizationFeeUsd = defaults.agentAuthorizationFeeUsd,
+                adPostFeeUsd = defaults.adPostFeeUsd,
+                forexProfitMargin = defaults.forexProfitMargin,
+                stripeForexDepositProfitMargin = defaults.stripeForexDepositProfitMargin,
+                mobileMoneyHiddenFeeRate = defaults.mobileMoneyHiddenFeeRate,
+                eventTicketOwnerFeeRate = defaults.eventTicketOwnerFeeRate,
+                marketplacePlatinumFeeRate = defaults.marketplacePlatinumFeeRate,
+                garageSaleFeeRate = defaults.garageSaleFeeRate,
+                defaultTransferOwnerFeeUsd = defaults.defaultTransferOwnerFeeUsd,
+                corridorFees = TransferCorridorFeeCatalog.adminEditableCorridors(),
+                error = null,
+                message = "Recommended defaults applied. Review and save to publish them."
+            )
         }
     }
 
@@ -792,6 +951,15 @@ fun OwnerFeeSettingsScreen(
                     Text(if (uiState.isSaving) "Saving..." else "Save Fee Settings")
                 }
             }
+            item {
+                OutlinedButton(
+                    onClick = { viewModel.applyDefaults() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !uiState.isSaving
+                ) {
+                    Text("Apply Recommended Defaults")
+                }
+            }
         }
     }
 }
@@ -932,6 +1100,22 @@ class OwnerSystemConfigViewModel : ViewModel() {
         _uiState.update { it.copy(maxUploadMb = value, message = null, error = null) }
     }
 
+    /** Fills the form only; nothing is written until the owner saves. */
+    fun applyDefaults() {
+        val defaults = OwnerSystemConfigUiState()
+        _uiState.update {
+            it.copy(
+                maintenanceMode = defaults.maintenanceMode,
+                allowNewSignups = defaults.allowNewSignups,
+                enableBlindDate = defaults.enableBlindDate,
+                enableLiveStreams = defaults.enableLiveStreams,
+                maxUploadMb = defaults.maxUploadMb,
+                error = null,
+                message = "Recommended defaults applied. Review and save to publish them."
+            )
+        }
+    }
+
     fun save() {
         viewModelScope.launch {
             val maxUpload = _uiState.value.maxUploadMb.toIntOrNull()
@@ -1007,6 +1191,7 @@ fun OwnerSystemConfigScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -1044,7 +1229,44 @@ fun OwnerSystemConfigScreen(
             ) {
                 Text(if (uiState.isSaving) "Saving..." else "Save System Config")
             }
+            OutlinedButton(
+                onClick = { viewModel.applyDefaults() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !uiState.isSaving
+            ) {
+                Text("Apply Recommended Defaults")
+            }
         }
+    }
+}
+
+@Composable
+private fun <T> OwnerFilterButtonRow(
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onSelect: (T) -> Unit
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(options) { option ->
+            if (option == selected) {
+                Button(onClick = { onSelect(option) }) { Text(label(option)) }
+            } else {
+                OutlinedButton(onClick = { onSelect(option) }) { Text(label(option)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OwnerCenteredLoading() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator()
     }
 }
 

@@ -28,6 +28,15 @@ import androidx.compose.foundation.layout.size
 
 import androidx.compose.foundation.layout.width
 
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+
 import androidx.compose.foundation.lazy.LazyColumn
 
 import androidx.compose.foundation.lazy.items
@@ -324,6 +333,20 @@ private fun LiveStreamsContent(
 
             }
 
+            item(key = "studio_go_live") {
+
+                LiveGoLiveBanner(
+                    onGoLive = {
+                        context.startActivity(
+                            android.content.Intent(context, StartStreamActivity::class.java).apply {
+                                putExtra(StartStreamActivity.EXTRA_SOURCE_TYPE, "standalone")
+                            }
+                        )
+                    },
+                )
+
+            }
+
         }
 
 
@@ -349,7 +372,7 @@ private fun LiveStreamsContent(
 
 
 
-        if (filteredSessions.isNotEmpty() || !uiState.isSearching) {
+        if (filteredSessions.isNotEmpty() || !uiState.isSearching || uiState.searchQuery.isNotBlank()) {
 
             item(key = "studio_filters") {
 
@@ -371,11 +394,27 @@ private fun LiveStreamsContent(
 
 
 
+        if (uiState.isLoadingOlderReplays) {
+
+            item(key = "studio_loading_replays") {
+
+                OlderReplaysLoadingRow()
+
+            }
+
+        }
+
+
+
         if (filteredSessions.isEmpty()) {
 
-            item(key = "studio_empty") {
+            if (!uiState.isLoadingOlderReplays) {
 
-                EmptyStreamsPlaceholder(isSearching = uiState.isSearching)
+                item(key = "studio_empty") {
+
+                    EmptyStreamsPlaceholder(isSearching = uiState.isSearching)
+
+                }
 
             }
 
@@ -487,14 +526,11 @@ fun ModernStreamCard(
 
 ) {
 
-    val cardGradient = when {
-
-        session.isLive -> listOf(Color(0xFFB42318), Color(0xFFE53935))
-
-        session.isArchiveReady -> listOf(Color(0xFF1D4ED8), Color(0xFF3B82F6))
-
-        else -> listOf(Color(0xFF475569), Color(0xFF64748B))
-
+    val currentUserId = remember { Firebase.auth.currentUser?.uid }
+    var menuOpen by remember { mutableStateOf(false) }
+    var shareSheetUrl by remember { mutableStateOf<String?>(null) }
+    val shareUrl = remember(session.sessionId, session.status, session.archiveStatus, session.replayVisibility) {
+        feedShareUrl(session)
     }
 
 
@@ -505,7 +541,7 @@ fun ModernStreamCard(
 
             when {
 
-                session.isLive && !isRequestPending && canOpenLive -> onOpenFullScreen()
+                session.isLive && canOpenLive -> onOpenFullScreen()
 
                 session.isArchiveReady && canWatchReplay -> onWatchReplay?.invoke()
 
@@ -515,11 +551,11 @@ fun ModernStreamCard(
 
         modifier = Modifier.fillMaxWidth(),
 
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
 
         color = LiveStudioSurface,
 
-        shadowElevation = 1.dp,
+        shadowElevation = 0.dp,
 
         tonalElevation = 0.dp,
 
@@ -527,187 +563,64 @@ fun ModernStreamCard(
 
         Column {
 
-            Box(
+            LiveFeedThumbnail(session = session)
 
+            Row(
                 modifier = Modifier
-
                     .fillMaxWidth()
-
-                    .height(6.dp)
-
-                    .background(Brush.horizontalGradient(cardGradient))
-
-            )
-
-            Column(modifier = Modifier.padding(14.dp)) {
-
-                Row(
-
-                    modifier = Modifier.fillMaxWidth(),
-
-                    horizontalArrangement = Arrangement.SpaceBetween,
-
-                    verticalAlignment = Alignment.CenterVertically,
-
-                ) {
-
-                    LiveStatusPill(
-
-                        label = when {
-
-                            session.isLive -> "LIVE"
-
-                            session.isArchiveReady -> "REPLAY"
-
-                            else -> "ENDED"
-
-                        },
-
-                        isLive = session.isLive,
-
-                    )
-
-                    LiveStatusPill(
-
-                        label = session.viewAccessMode.labelShort,
-
-                        isLive = false,
-
-                    )
-
-                }
-
-
-
-                Spacer(Modifier.height(12.dp))
-
-
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-
-                    Box(
-
-                        modifier = Modifier
-
-                            .size(42.dp)
-
-                            .clip(CircleShape)
-
-                            .background(LiveStudioAccentSoft),
-
-                        contentAlignment = Alignment.Center,
-
-                    ) {
-
-                        Text(
-
-                            text = session.hostName.firstOrNull()?.uppercase() ?: "?",
-
-                            style = MaterialTheme.typography.titleMedium,
-
-                            fontWeight = FontWeight.Bold,
-
-                            color = LiveStudioAccent,
-
-                        )
-
-                    }
-
-                    Spacer(Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-
-                        Text(
-
-                            text = session.title.ifBlank { "Live Session" },
-
-                            style = MaterialTheme.typography.titleMedium,
-
-                            fontWeight = FontWeight.SemiBold,
-
-                            maxLines = 1,
-
-                            overflow = TextOverflow.Ellipsis,
-
-                        )
-
-                        Text(
-
-                            text = session.hostName.ifBlank { "Host" },
-
-                            style = MaterialTheme.typography.bodySmall,
-
-                            color = LiveStudioMuted,
-
-                            maxLines = 1,
-
-                            overflow = TextOverflow.Ellipsis,
-
-                        )
-
-                    }
-
-                    if (session.isLive) {
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-
-                            Icon(
-
-                                Icons.Default.Visibility,
-
-                                contentDescription = null,
-
-                                modifier = Modifier.size(14.dp),
-
-                                tint = LiveStudioMuted,
-
-                            )
-
-                            Spacer(Modifier.width(4.dp))
-
-                            Text(
-
-                                text = "${session.viewerCount}",
-
-                                style = MaterialTheme.typography.labelMedium,
-
-                                color = LiveStudioMuted,
-
-                                fontWeight = FontWeight.Medium,
-
-                            )
-
-                        }
-
-                    }
-
-                }
-
-
-
-                if (session.description.isNotBlank()) {
-
-                    Spacer(Modifier.height(8.dp))
-
+                    .padding(start = 12.dp, top = 12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                LiveHostAvatar(
+                    name = session.hostName,
+                    photoUrl = session.hostProfilePicUrl,
+                    size = 36.dp,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-
-                        text = session.description,
-
-                        style = MaterialTheme.typography.bodySmall,
-
-                        color = LiveStudioMuted,
-
+                        text = session.title.ifBlank { "Live Session" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = LiveStudioInk,
                         maxLines = 2,
-
                         overflow = TextOverflow.Ellipsis,
-
                     )
-
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = liveFeedMetaLine(session, isOwnStream = currentUserId == session.hostId),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LiveStudioMuted,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = LiveStudioInk)
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (shareUrl != null) {
+                            DropdownMenuItem(
+                                text = { Text("Share") },
+                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    shareSheetUrl = shareUrl
+                                },
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Sharing is limited by the host") },
+                                enabled = false,
+                                onClick = {},
+                            )
+                        }
+                    }
+                }
+            }
 
-
-
-                Spacer(Modifier.height(14.dp))
+            Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp)) {
 
 
 
@@ -739,6 +652,125 @@ fun ModernStreamCard(
 
     }
 
+    shareSheetUrl?.let { url ->
+        LiveShareSheet(
+            title = session.title,
+            url = url,
+            isReplay = !session.isLive,
+            onDismiss = { shareSheetUrl = null },
+        )
+    }
+
+}
+
+/** 16:9 YouTube-style thumbnail: host art, LIVE/REPLAY badge, viewers and duration overlays. */
+@Composable
+private fun LiveFeedThumbnail(session: LiveSession) {
+    val background = LivePalette.thumbnailPair(session.sessionId.ifBlank { session.hostId })
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(16f / 9f)
+            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+            .background(Brush.linearGradient(background)),
+    ) {
+        LiveHostAvatar(
+            name = session.hostName,
+            photoUrl = session.hostProfilePicUrl,
+            size = 76.dp,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            when {
+                session.isLive -> LiveRedBadge()
+                session.isArchiveReady -> LiveThumbnailChip("REPLAY")
+                session.isArchiveProcessing -> LiveThumbnailChip("PROCESSING")
+                session.isScheduled -> LiveThumbnailChip("UPCOMING")
+                else -> LiveThumbnailChip("ENDED")
+            }
+            if (session.viewAccessMode != LiveViewAccessMode.PUBLIC) {
+                LiveThumbnailChip(session.viewAccessMode.labelShort)
+            }
+        }
+        if (session.isLive) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(10.dp),
+                shape = RoundedCornerShape(999.dp),
+                color = LivePalette.Ink.copy(alpha = 0.78f),
+            ) {
+                LiveViewerCountLabel(
+                    count = session.viewerCount,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+        val durationMs = session.broadcastDurationMs
+        if (!session.isLive && durationMs != null) {
+            LiveThumbnailChip(
+                text = formatLiveDuration(durationMs),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveThumbnailChip(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(999.dp),
+        color = LivePalette.Ink.copy(alpha = 0.78f),
+    ) {
+        Text(
+            text = text,
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+private fun liveFeedMetaLine(session: LiveSession, isOwnStream: Boolean): String {
+    val host = if (isOwnStream) "Your stream" else session.hostName.ifBlank { "Host" }
+    return when {
+        session.isLive -> buildList {
+            add(host)
+            add("${formatCompactCount(session.viewerCount)} watching")
+            formatRelativeAgo((session.startTime ?: session.createdAt)?.time)?.let { add("Started $it") }
+        }.joinToString(" · ")
+        session.isScheduled -> "$host · Upcoming"
+        else -> buildList {
+            add(host)
+            if (session.peakViewerCount > 0L) add("${formatCompactCount(session.peakViewerCount)} peak viewers")
+            formatRelativeAgo((session.endedAt ?: session.endTime ?: session.startTime)?.time)?.let { add("Streamed $it") }
+        }.joinToString(" · ")
+    }
+}
+
+/**
+ * Links anyone may share without a host-signed token: public live rooms and public replays.
+ * Private rooms need the host's signed invite from inside the room.
+ */
+private fun feedShareUrl(session: LiveSession): String? {
+    return when {
+        session.isLive && session.viewAccessMode == LiveViewAccessMode.PUBLIC ->
+            LiveShareConstants.appDeepLink(sessionId = session.sessionId, hostId = session.hostId)
+        session.isArchiveReady && session.replayVisibility == LiveReplayVisibility.PUBLIC ->
+            "${LiveShareConstants.WEB_SHARE_HOST}${LiveShareConstants.WEB_LIVE_PATH}" +
+                "?sessionId=${android.net.Uri.encode(session.sessionId)}&hostId=${android.net.Uri.encode(session.hostId)}"
+        else -> null
+    }
 }
 
 
@@ -768,6 +800,22 @@ private fun StreamActionButton(
 ) {
 
     if (onRequestJoin != null) {
+
+        // Like YouTube, watching never depends on the stage request.
+        if (session.isLive && canOpenLive) {
+            ElevatedButton(
+                onClick = onOpenFullScreen,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.elevatedButtonColors(
+                    containerColor = LiveStudioAccent,
+                    contentColor = Color.White,
+                ),
+            ) {
+                Text("Watch live", fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(8.dp))
+        }
 
         ElevatedButton(
 
@@ -811,6 +859,9 @@ private fun StreamActionButton(
 
 
 
+    val watchEnabled = (session.isLive && canOpenLive) ||
+        (session.isArchiveReady && !isReplayLoading && canWatchReplay)
+
     ElevatedButton(
 
         onClick = {
@@ -825,17 +876,23 @@ private fun StreamActionButton(
 
         },
 
-        enabled = (session.isLive && canOpenLive) ||
+        enabled = watchEnabled,
 
-            (session.isArchiveReady && !isReplayLoading && canWatchReplay),
-
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (watchEnabled) {
+                    Modifier.clip(RoundedCornerShape(12.dp)).background(LivePalette.AccentGradient, RoundedCornerShape(12.dp))
+                } else {
+                    Modifier
+                }
+            ),
 
         shape = RoundedCornerShape(12.dp),
 
         colors = ButtonDefaults.elevatedButtonColors(
 
-            containerColor = LiveStudioAccent,
+            containerColor = Color.Transparent,
 
             contentColor = Color.White,
 
@@ -955,6 +1012,52 @@ private fun LoadingView() {
 
 @Composable
 
+private fun OlderReplaysLoadingRow() {
+
+    Row(
+
+        modifier = Modifier
+
+            .fillMaxWidth()
+
+            .padding(vertical = 4.dp),
+
+        horizontalArrangement = Arrangement.Center,
+
+        verticalAlignment = Alignment.CenterVertically,
+
+    ) {
+
+        CircularProgressIndicator(
+
+            modifier = Modifier.size(16.dp),
+
+            strokeWidth = 2.dp,
+
+            color = LivePalette.Indigo,
+
+        )
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Text(
+
+            text = "Searching older replays…",
+
+            style = MaterialTheme.typography.bodySmall,
+
+            color = LiveStudioMuted,
+
+        )
+
+    }
+
+}
+
+
+
+@Composable
+
 private fun EmptyStreamsPlaceholder(isSearching: Boolean) {
 
     val title = if (isSearching) "No results found" else "Quiet on the set"
@@ -997,7 +1100,7 @@ private fun EmptyStreamsPlaceholder(isSearching: Boolean) {
 
                     .clip(CircleShape)
 
-                    .background(LiveStudioAccentSoft),
+                    .background(LivePalette.Indigo.copy(alpha = 0.14f)),
 
                 contentAlignment = Alignment.Center,
 

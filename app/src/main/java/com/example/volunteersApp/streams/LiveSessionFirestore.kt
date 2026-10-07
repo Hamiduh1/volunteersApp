@@ -122,5 +122,8 @@ fun DocumentSnapshot.toLiveSession(): LiveSession? {
         archivePlaybackUrl = string("archivePlaybackUrl", "playbackUrl", "replayUrl"),
         archivePrimaryFile = string("archivePrimaryFile", "archiveFile", "replayFile"),
         archiveObjectPrefix = string("archiveObjectPrefix", "archivePrefix"),
+        hostHeartbeatAt = date("hostHeartbeatAt"),
+        peakViewerCount = long("peakViewerCount") ?: 0L,
+        hostAgoraUid = long("hostAgoraUid")?.takeIf { it in 1L..0xFFFF_FFFFL }?.toInt(),
     )
 }

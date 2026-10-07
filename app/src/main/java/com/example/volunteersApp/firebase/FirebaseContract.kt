@@ -107,6 +107,7 @@ object CallableFunction {
     const val ACCEPT_BLIND_DATE_INVITATION = "acceptBlindDateInvitation"
     const val DECLINE_BLIND_DATE_INVITATION = "declineBlindDateInvitation"
     const val REJOIN_BLIND_DATE = "rejoinBlindDate"
+    const val GET_PLATFORM_FEE_MOBILE_MONEY_OPTIONS = "getPlatformFeeMobileMoneyOptions"
     const val GET_SECURE_EXCHANGE_RATE = "getSecureExchangeRate"
     const val CREATE_BENEFICIARY_VERIFICATION = "createBeneficiaryVerification"
     const val APPLY_APPROVED_BENEFICIARY_VERIFICATION = "applyApprovedBeneficiaryVerification"

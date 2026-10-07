@@ -58,6 +58,9 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
     private var callSessionsForChatListener: ListenerRegistration? = null
     private var currentUserDisplayName: String? = null
     private var markSeenJob: Job? = null
+    // A rejected receipt reverts locally and re-fires the listener; without this the batch retries
+    // every snapshot and keeps resetting the Firestore write stream for the whole app.
+    private val receiptDeniedMessageIds = mutableSetOf<String>()
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState = _uiState.asStateFlow()
@@ -458,6 +461,7 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
         val targets = messages.filter { message ->
             message.senderId != userId &&
                 !message.isDeleted &&
+                message.id !in receiptDeniedMessageIds &&
                 (userId !in message.readBy || userId !in message.deliveredTo)
         }
         if (targets.isEmpty()) return
@@ -492,6 +496,7 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
             }.await()
         } catch (e: FirebaseFirestoreException) {
             if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                receiptDeniedMessageIds += targets.map { it.id }
                 Log.w(
                     TAG,
                     "markMessagesSeen: PERMISSION_DENIED — rules must allow chat participants to batch-update " +

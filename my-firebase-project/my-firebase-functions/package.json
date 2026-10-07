@@ -11,7 +11,7 @@
     "logs": "firebase functions:log"
   },
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "lib/index.js",
   "dependencies": {
@@ -30,6 +30,7 @@
     "@types/caseless": "^0.12.5",
     "@types/istanbul-lib-report": "^3.0.3",
     "@types/ms": "^2.1.0",
+    "@types/node": "^22.20.5",
     "@types/qs": "^6.14.0",
     "@types/range-parser": "^1.2.7",
     "@types/send": "^0.17.4",

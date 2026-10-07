@@ -75,6 +75,7 @@ import androidx.compose.material.icons.filled.Favorite
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.example.volunteersApp.streams.LiveLaunchTarget
+import com.example.volunteersApp.streams.LivePalette
 import com.example.volunteersApp.streams.LiveRepository
 import com.example.volunteersApp.streams.LiveShareRouter
 import kotlinx.coroutines.launch
@@ -963,9 +964,9 @@ fun MindLoomLiveSessionPromoCard(
             horizontalAlignment = Alignment.Start
         ) {
             Surface(
-                color = Color.Black,
-                shape = RoundedCornerShape(4.dp),
-                border = BorderStroke(1.5.dp, Color.White)
+                modifier = Modifier.background(LivePalette.OnAirGradient, RoundedCornerShape(999.dp)),
+                color = Color.Transparent,
+                shape = RoundedCornerShape(999.dp),
             ) {
                 Text(
                     text = "LIVE",

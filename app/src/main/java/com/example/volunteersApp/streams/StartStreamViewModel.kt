@@ -33,7 +33,10 @@ data class StartStreamUiState(
     val launchSourceType: String = "standalone",
     val linkedEventId: String? = null,
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    /** A broadcast this host never ended that is still heartbeating; offer Resume / End instead of a dead end. */
+    val activeSessionId: String? = null,
+    val activeSessionTitle: String? = null,
 )
 
 sealed class StartStreamEvent {
@@ -57,8 +60,24 @@ class StartStreamViewModel : ViewModel() {
 
     fun onTitleChange(newTitle: String) = _uiState.update { it.copy(title = newTitle.take(120)) }
     fun onDescriptionChange(newDescription: String) = _uiState.update { it.copy(description = newDescription.take(2_000)) }
-    fun onViewAccessModeChange(mode: LiveViewAccessMode) = _uiState.update { it.copy(viewAccessMode = mode) }
-    fun onStageAccessModeChange(mode: LiveStageAccessMode) = _uiState.update { it.copy(stageAccessMode = mode) }
+    // Shared rules: an invite-only room admits viewers through stage requests, so its stage mode
+    // must be "Request to join" or "Approved volunteers".
+    fun onViewAccessModeChange(mode: LiveViewAccessMode) = _uiState.update {
+        val stage = if (mode == LiveViewAccessMode.INVITE_ONLY && it.stageAccessMode !in INVITE_ONLY_STAGE_MODES) {
+            LiveStageAccessMode.REQUEST_TO_JOIN
+        } else {
+            it.stageAccessMode
+        }
+        it.copy(viewAccessMode = mode, stageAccessMode = stage)
+    }
+    fun onStageAccessModeChange(mode: LiveStageAccessMode) = _uiState.update {
+        val view = if (it.viewAccessMode == LiveViewAccessMode.INVITE_ONLY && mode !in INVITE_ONLY_STAGE_MODES) {
+            LiveViewAccessMode.FOLLOWERS_ONLY
+        } else {
+            it.viewAccessMode
+        }
+        it.copy(stageAccessMode = mode, viewAccessMode = view)
+    }
     fun onReplayVisibilityChange(mode: LiveReplayVisibility) = _uiState.update { it.copy(replayVisibility = mode) }
     fun onNotifyFollowersChange(enabled: Boolean) = _uiState.update { it.copy(notifyFollowersOnStart = enabled) }
     fun onPostToMindLoomChange(enabled: Boolean) = _uiState.update { it.copy(postToMindLoomOnStart = enabled) }
@@ -71,7 +90,7 @@ class StartStreamViewModel : ViewModel() {
         val eventId = linkedEventId?.trim()?.takeIf { it.isNotBlank() }
         _uiState.update {
             it.copy(
-                launchSourceType = if (eventId != null) "event" else sourceType.ifBlank { "standalone" },
+                launchSourceType = if (eventId != null) SOURCE_ORGANIZER_EVENT else sourceType.ifBlank { "standalone" },
                 linkedEventId = eventId,
             )
         }
@@ -85,9 +104,19 @@ class StartStreamViewModel : ViewModel() {
             _uiState.update { it.copy(error = "User not logged in") }
             return
         }
+        // A double tap must not create two rooms.
+        if (state.isLoading) return
+        val eventOnlyAudience = state.viewAccessMode == LiveViewAccessMode.ACCEPTED_EVENT_VOLUNTEERS ||
+            state.stageAccessMode == LiveStageAccessMode.OPEN_TO_ACCEPTED_VOLUNTEERS
+        if (eventOnlyAudience && state.linkedEventId.isNullOrBlank()) {
+            _uiState.update {
+                it.copy(error = "Event-volunteer audiences need a linked event. Start this stream from Hosted events → Go live for this event.")
+            }
+            return
+        }
+        _uiState.update { it.copy(isLoading = true, error = null, activeSessionId = null, activeSessionTitle = null) }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
             try {
                 // Auth + App Check must succeed before the create write. Firestore often surfaces
                 // App Check / auth failures as PERMISSION_DENIED on live_sessions.
@@ -104,19 +133,41 @@ class StartStreamViewModel : ViewModel() {
                     Log.w(TAG, "Active-session precheck skipped", error)
                 }.getOrNull()
 
-                if (activeSession != null && !activeSession.isEmpty) {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "You already have an active live session. End it before starting another."
-                        )
+                val existing = activeSession?.documents?.firstOrNull()
+                if (existing != null) {
+                    val nowMs = System.currentTimeMillis()
+                    val heartbeatMs = existing.getTimestamp("hostHeartbeatAt")?.toDate()?.time
+                    val updatedMs = existing.getTimestamp("updatedAt")?.toDate()?.time
+                    // iOS hosts don't heartbeat, so without one only a long-idle room counts as abandoned.
+                    val stale = if (heartbeatMs != null) {
+                        nowMs - heartbeatMs > LIVE_HOST_STALE_AFTER_MS
+                    } else {
+                        updatedMs != null && nowMs - updatedMs > ABANDONED_WITHOUT_HEARTBEAT_MS
                     }
-                    return@launch
+                    if (stale) {
+                        // The previous broadcast died with the app; close it so viewers aren't left in a ghost room.
+                        runCatching { markSessionEnded(existing.id) }
+                            .onFailure { Log.w(TAG, "Could not close stale live session ${existing.id}", it) }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                activeSessionId = existing.id,
+                                activeSessionTitle = existing.getString("title")?.ifBlank { null } ?: "Live session",
+                            )
+                        }
+                        return@launch
+                    }
                 }
 
                 val sessionId = UUID.randomUUID().toString()
                 val channelName = "live-${currentUser.uid}-${System.currentTimeMillis()}".take(64)
-                val hostName = currentUser.displayName.takeIf { !it.isNullOrBlank() } ?: "Anonymous Host"
+                // Shared rules require hostName to match the host's own profile/auth identity
+                // (liveIdentityMatches); "Anonymous Host" is only accepted for identity-less accounts.
+                val hostName = LiveIdentity.displayName(db, currentUser)
+                    .takeIf { it.isNotBlank() && it != "Viewer" }
+                    ?: currentUser.displayName.takeIf { !it.isNullOrBlank() }
+                    ?: "Anonymous Host"
                 val safeTitle = state.title.trim().ifBlank { "Live Session" }.take(120)
                 val normalizedUsername = currentUser.displayName
                     ?.trim()
@@ -125,46 +176,48 @@ class StartStreamViewModel : ViewModel() {
                 val sharePath = "${LiveShareConstants.WEB_LIVE_PATH}?sessionId=$sessionId&hostId=${currentUser.uid}"
                 val shareUrl = "${LiveShareConstants.WEB_SHARE_HOST}$sharePath"
 
-                // Match iOS LiveRepository.startLiveSession core fields (status LIVE uppercase).
-                // Avoid writing explicit nulls — some rule variants reject unknown null keys.
+                // Shared (iOS-owned) rules allow only these keys on create (liveSessionAllowedKeys);
+                // description, counters, stage lists and avatar URLs are rejected, and chat must start on.
+                val sourceType = when {
+                    !state.linkedEventId.isNullOrBlank() -> SOURCE_ORGANIZER_EVENT
+                    state.launchSourceType in setOf("standalone", "mindloom") -> state.launchSourceType
+                    else -> "standalone"
+                }
                 val liveSessionData = hashMapOf<String, Any>(
                     "agoraChannelName" to channelName,
                     "channelName" to channelName,
                     "title" to safeTitle,
-                    "description" to state.description.trim().take(2_000),
                     "hostId" to currentUser.uid,
                     "hostUid" to currentUser.uid,
-                    "hostName" to hostName,
+                    "hostName" to hostName.take(120),
                     "status" to "LIVE",
-                    "sourceType" to state.launchSourceType.ifBlank { "standalone" },
+                    "sourceType" to sourceType,
                     "sharePath" to sharePath,
                     "shareUrl" to shareUrl,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "startTime" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp(),
-                    "viewerCount" to 0L,
                     "viewAccessMode" to state.viewAccessMode.raw,
                     "stageAccessMode" to state.stageAccessMode.raw,
                     "replayVisibility" to state.replayVisibility.raw,
                     "notifyFollowers" to state.notifyFollowersOnStart,
-                    "notifyFollowersOnStart" to state.notifyFollowersOnStart,
-                    "chatEnabled" to state.chatEnabled,
-                    "acceptedVolunteerIds" to emptyList<String>(),
-                    "blockedViewerIds" to emptyList<String>()
+                    "chatEnabled" to true,
                 )
                 if (!normalizedUsername.isNullOrBlank()) {
-                    liveSessionData["hostUsername"] = normalizedUsername
+                    liveSessionData["hostUsername"] = normalizedUsername.take(120)
                 }
                 state.linkedEventId?.let { eventId ->
-                    liveSessionData["sourceType"] = "event"
                     liveSessionData["sourceId"] = eventId
-                    liveSessionData["linkedEventId"] = eventId
-                }
-                currentUser.photoUrl?.toString()?.takeIf { it.isNotBlank() }?.let { url ->
-                    liveSessionData["hostProfilePicUrl"] = url
                 }
 
                 db.collection(FirestoreCollection.LIVE_SESSIONS).document(sessionId).set(liveSessionData).await()
+                if (!state.chatEnabled) {
+                    runCatching {
+                        db.collection(FirestoreCollection.LIVE_SESSIONS).document(sessionId)
+                            .update(mapOf("chatEnabled" to false, "updatedAt" to FieldValue.serverTimestamp()))
+                            .await()
+                    }.onFailure { Log.w(TAG, "Could not turn chat off after start", it) }
+                }
 
                 val shareLink = try {
                     LiveRepository.createLiveShareAccessLink(sessionId)
@@ -213,6 +266,38 @@ class StartStreamViewModel : ViewModel() {
         }
     }
 
+    /** Ends the host's other running broadcast so they can start a new one. */
+    fun endActiveSession() {
+        val sessionId = _uiState.value.activeSessionId ?: return
+        if (_uiState.value.isLoading) return
+        _uiState.update { it.copy(isLoading = true) }
+        viewModelScope.launch {
+            try {
+                markSessionEnded(sessionId)
+                _uiState.update { it.copy(isLoading = false, activeSessionId = null, activeSessionTitle = null) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to end previous live session", e)
+                _uiState.update {
+                    it.copy(isLoading = false, error = "We couldn't end your other stream. Check your connection and try again.")
+                }
+            }
+        }
+    }
+
+    fun dismissActiveSession() = _uiState.update { it.copy(activeSessionId = null, activeSessionTitle = null) }
+
+    private suspend fun markSessionEnded(sessionId: String) {
+        db.collection(FirestoreCollection.LIVE_SESSIONS).document(sessionId)
+            .update(
+                mapOf(
+                    "status" to "ENDED",
+                    "endedAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                )
+            )
+            .await()
+    }
+
     private suspend fun ensureLiveCreatePreflight(uid: String) {
         try {
             auth.currentUser?.getIdToken(true)?.await()
@@ -247,5 +332,11 @@ class StartStreamViewModel : ViewModel() {
                 "project, then try again."
         }
         return "We couldn't start the broadcast. Check your connection and try again."
+    }
+
+    private companion object {
+        const val ABANDONED_WITHOUT_HEARTBEAT_MS = 30 * 60_000L
+        const val SOURCE_ORGANIZER_EVENT = "organizer_event"
+        val INVITE_ONLY_STAGE_MODES = setOf(LiveStageAccessMode.REQUEST_TO_JOIN, LiveStageAccessMode.APPROVED_VOLUNTEERS)
     }
 }

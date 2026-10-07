@@ -53,7 +53,8 @@ enum class LiveRtcJoinRole(val agoraRole: String) {
 enum class LiveJoinRequestStatus(val raw: String) {
     PENDING("pending"),
     ACCEPTED("accepted"),
-    REJECTED("rejected");
+    REJECTED("rejected"),
+    LEFT("left");
 
     companion object {
         fun fromRaw(raw: String?): LiveJoinRequestStatus =

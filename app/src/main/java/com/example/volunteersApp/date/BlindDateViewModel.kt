@@ -7,7 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.volunteersApp.firebase.CallableFunction
 import com.example.volunteersApp.firebase.FunctionsClient
 import com.example.volunteersApp.firebase.StorageFolder
+import com.example.volunteersApp.wallet.PlatformFeePaymentChoice
+import com.example.volunteersApp.wallet.awaitPlatformFeeMobileMoneyOutcome
 import com.example.volunteersApp.wallet.isPendingCommercePaymentStatus
+import com.example.volunteersApp.wallet.platformFeeMobileMoneyOrderId
 import com.example.volunteersApp.wallet.normalizeCommercePaymentStatus
 import com.example.volunteersApp.wallet.parseProviderCollectionOutcome
 import com.google.firebase.Firebase
@@ -110,6 +113,7 @@ class BlindDateViewModel : ViewModel() {
         bio: String,
         gender: Gender,
         lookingFor: LookingFor,
+        payment: PlatformFeePaymentChoice = PlatformFeePaymentChoice.Stripe,
     ) {
         if (currentUserId == null) {
             viewModelScope.launch { _events.value = BlindDateEvent.ShowToast("You must be logged in.", DateHubBannerTone.Error) }
@@ -145,12 +149,13 @@ class BlindDateViewModel : ViewModel() {
                     uploadedMediaUrls.add(downloadUrl)
                 }
 
-                val data = hashMapOf(
+                val data = hashMapOf<String, Any>(
                     "mediaUrls" to uploadedMediaUrls,
                     "bio" to bio,
                     "gender" to gender.name,
                     "lookingFor" to lookingFor.name,
                 )
+                data.putAll(payment.toPayload())
 
                 val result = FunctionsClient.callMap(CallableFunction.JOIN_BLIND_DATE, data)
                 val charged = result?.get("charged") as? Boolean ?: false
@@ -195,6 +200,7 @@ class BlindDateViewModel : ViewModel() {
                     } else {
                         BlindDateEvent.ShowToast(message, DateHubBannerTone.Info)
                     }
+                    platformFeeMobileMoneyOrderId(result)?.let(::followMobileMoneyFeeOutcome)
                 }
             } catch (e: Exception) {
                 Log.e("BlindDateVM", "Failed during joinBlindDate Cloud Function call.", e)
@@ -766,7 +772,18 @@ class BlindDateViewModel : ViewModel() {
         }
     }
 
-    fun rejoinLoop() {
+    private fun followMobileMoneyFeeOutcome(orderId: String) {
+        viewModelScope.launch {
+            val outcome = awaitPlatformFeeMobileMoneyOutcome(orderId) ?: return@launch
+            checkUserStatus()
+            _events.value = BlindDateEvent.ShowToast(
+                outcome.message,
+                if (outcome.accessUnlocked) DateHubBannerTone.Success else DateHubBannerTone.Error
+            )
+        }
+    }
+
+    fun rejoinLoop(payment: PlatformFeePaymentChoice = PlatformFeePaymentChoice.Stripe) {
         if (currentUserId == null) return
         if (!_uiState.value.enableBlindDate) {
             viewModelScope.launch {
@@ -778,7 +795,7 @@ class BlindDateViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                val result = FunctionsClient.callMap(CallableFunction.REJOIN_BLIND_DATE)
+                val result = FunctionsClient.callMap(CallableFunction.REJOIN_BLIND_DATE, payment.toPayload())
                 val charged = result?.get("charged") as? Boolean ?: false
                 val outcome = parseProviderCollectionOutcome(result)
 
@@ -821,6 +838,7 @@ class BlindDateViewModel : ViewModel() {
                     } else {
                         BlindDateEvent.ShowToast(message, DateHubBannerTone.Info)
                     }
+                    platformFeeMobileMoneyOrderId(result)?.let(::followMobileMoneyFeeOutcome)
                 }
             } catch (e: Exception) {
                 Log.e("BlindDateVM", "Failed to rejoin loop via Cloud Function.", e)

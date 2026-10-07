@@ -572,7 +572,7 @@ private fun ProfileGridCell(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.LiveTv, null, tint = Color(0xFFB42318), modifier = Modifier.size(28.dp))
+                        Icon(Icons.Default.LiveTv, null, tint = com.example.volunteersApp.streams.LivePalette.OnAir, modifier = Modifier.size(28.dp))
                         Spacer(Modifier.height(4.dp))
                         Text("LIVE", color = MindLoomTextPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }

@@ -136,6 +136,9 @@ import com.example.volunteersApp.ui.main.MainViewModel
 import com.example.volunteersApp.ui.main.SocialInboxNav
 import com.example.volunteersApp.ui.shared.AiResponseDialog
 import com.example.volunteersApp.ui.shared.SearchableGlobalCountryDropdown
+import com.example.volunteersApp.wallet.PlatformFeeKind
+import com.example.volunteersApp.wallet.PlatformFeePaymentChoice
+import com.example.volunteersApp.wallet.PlatformFeePaymentSelector
 import com.example.volunteersApp.wallet.globalCountries
 import com.google.firebase.appcheck.FirebaseAppCheck
 import kotlinx.coroutines.launch
@@ -2348,6 +2351,8 @@ private fun BlindDateScreen(
     var joinDraft by remember { mutableStateOf<BlindDateJoinDraft?>(null) }
     var showJoinConfirm by remember { mutableStateOf(false) }
     var showRejoinConfirm by remember { mutableStateOf(false) }
+    var joinPayment by remember { mutableStateOf(PlatformFeePaymentChoice.Stripe) }
+    var rejoinPayment by remember { mutableStateOf(PlatformFeePaymentChoice.Stripe) }
 
     val joinFee = if (uiState.isStaffExempt) 0.0 else uiState.entryFeeUsd
     // Stripe Checkout is configured and authorized server-side. The callable
@@ -2359,13 +2364,13 @@ private fun BlindDateScreen(
         uiState.isLoading -> "Joining..."
         uiState.isPaymentCollectionPending -> "Payment Pending"
         uiState.isStaffExempt -> "Confirm & Join"
-        else -> "Continue to Stripe ${formatCurrency(uiState.entryFeeUsd, "USD")}"
+        else -> "Continue to Payment ${formatCurrency(uiState.entryFeeUsd, "USD")}"
     }
     val rejoinCtaLabel = when {
         uiState.isLoading -> "Rejoining..."
         uiState.isPaymentCollectionPending -> "Payment Pending"
         uiState.isStaffExempt -> "Rejoin Blind Date"
-        else -> "Continue to Stripe ${formatCurrency(uiState.entryFeeUsd, "USD")} to Rejoin"
+        else -> "Pay ${formatCurrency(uiState.entryFeeUsd, "USD")} to Rejoin"
     }
 
     LaunchedEffect(event) {
@@ -2411,13 +2416,23 @@ private fun BlindDateScreen(
             onDismissRequest = { showJoinConfirm = false },
             title = { Text("Confirm Blind Date Join") },
             text = {
-                Text(
-                    if (uiState.isStaffExempt) {
-                        "Staff exemption detected. No fee will be charged for this join."
-                    } else {
-                        "A provider-side collection will start for this join. Dating access unlocks after payment confirmation. Continue?"
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (uiState.isStaffExempt) {
+                            "Staff exemption detected. No fee will be charged for this join."
+                        } else {
+                            "Dating access unlocks after the payment is confirmed. Continue?"
+                        }
+                    )
+                    if (!uiState.isStaffExempt) {
+                        PlatformFeePaymentSelector(
+                            kind = PlatformFeeKind.BLIND_DATE_JOIN,
+                            choice = joinPayment,
+                            onChoiceChange = { joinPayment = it },
+                            enabled = !uiState.isLoading,
+                        )
                     }
-                )
+                }
             },
             confirmButton = {
                 Button(
@@ -2429,6 +2444,7 @@ private fun BlindDateScreen(
                             bio = draft.bio,
                             gender = draft.gender,
                             lookingFor = draft.lookingFor,
+                            payment = if (uiState.isStaffExempt) PlatformFeePaymentChoice.Stripe else joinPayment,
                         )
                     },
                     enabled = !uiState.isLoading
@@ -2447,19 +2463,31 @@ private fun BlindDateScreen(
             onDismissRequest = { showRejoinConfirm = false },
             title = { Text("Confirm Blind Date Rejoin") },
             text = {
-                Text(
-                    if (uiState.isStaffExempt) {
-                        "No fee will be charged for this rejoin."
-                    } else {
-                        "A provider-side collection will start before you re-enter Blind Date. Continue?"
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (uiState.isStaffExempt) {
+                            "No fee will be charged for this rejoin."
+                        } else {
+                            "You re-enter Blind Date after the payment is confirmed. Continue?"
+                        }
+                    )
+                    if (!uiState.isStaffExempt) {
+                        PlatformFeePaymentSelector(
+                            kind = PlatformFeeKind.BLIND_DATE_REJOIN,
+                            choice = rejoinPayment,
+                            onChoiceChange = { rejoinPayment = it },
+                            enabled = !uiState.isLoading,
+                        )
                     }
-                )
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         showRejoinConfirm = false
-                        viewModel.rejoinLoop()
+                        viewModel.rejoinLoop(
+                            if (uiState.isStaffExempt) PlatformFeePaymentChoice.Stripe else rejoinPayment
+                        )
                     },
                     enabled = !uiState.isLoading
                 ) {

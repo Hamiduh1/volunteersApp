@@ -16,18 +16,38 @@ object LiveLaunchIntent {
     const val EXTRA_LIVE_HOST_ID = "live_host_id"
     const val EXTRA_LIVE_SHARE_TOKEN = "live_share_token"
 
+    // Ids from links/pushes become Firestore document paths; '/' or '..' would crash the reference builder.
+    private val LIVE_DOC_ID = Regex("^[A-Za-z0-9_-]{1,128}$")
+
+    fun isValidLiveDocId(value: String?): Boolean = value != null && LIVE_DOC_ID.matches(value)
+
     fun parse(intent: Intent?): LiveLaunchTarget? {
         if (intent == null) return null
 
         val extraSessionId = intent.getStringExtra(EXTRA_LIVE_SESSION_ID)?.trim().orEmpty()
         val extraHostId = intent.getStringExtra(EXTRA_LIVE_HOST_ID)?.trim().orEmpty()
         val extraToken = intent.getStringExtra(EXTRA_LIVE_SHARE_TOKEN)?.trim().orEmpty()
-        if (extraSessionId.isNotBlank()) {
+        if (isValidLiveDocId(extraSessionId)) {
             return LiveLaunchTarget(
                 sessionId = extraSessionId,
-                hostId = extraHostId.ifBlank { null },
+                hostId = extraHostId.takeIf { isValidLiveDocId(it) },
                 shareAccessToken = extraToken.ifBlank { null },
             )
+        }
+
+        // FCM taps deliver the data payload ({type, actorId, referenceId}) as plain extras.
+        if (intent.getStringExtra("type")?.trim().equals("liveStream", ignoreCase = true)) {
+            val pushSessionId = sequenceOf(
+                intent.getStringExtra("sessionId"),
+                intent.getStringExtra("referenceId"),
+            ).map { it?.trim().orEmpty() }.firstOrNull { isValidLiveDocId(it) }
+            if (pushSessionId != null) {
+                val pushHostId = sequenceOf(
+                    intent.getStringExtra("hostId"),
+                    intent.getStringExtra("actorId"),
+                ).map { it?.trim().orEmpty() }.firstOrNull { isValidLiveDocId(it) }
+                return LiveLaunchTarget(sessionId = pushSessionId, hostId = pushHostId)
+            }
         }
 
         val data = intent.data ?: return null
@@ -40,14 +60,14 @@ object LiveLaunchIntent {
             uri.getQueryParameter("referenceId"),
             uri.lastPathSegment?.takeIf { uri.path?.startsWith("/stream/") == true },
         ).map { it?.trim().orEmpty() }
-            .firstOrNull { it.isNotBlank() }
+            .firstOrNull { isValidLiveDocId(it) }
             ?: return null
 
         val hostId = sequenceOf(
             uri.getQueryParameter("hostId"),
             uri.getQueryParameter("actorId"),
         ).map { it?.trim().orEmpty() }
-            .firstOrNull { it.isNotBlank() }
+            .firstOrNull { isValidLiveDocId(it) }
 
         val token = uri.getQueryParameter("token")?.trim().orEmpty().ifBlank { null }
 

@@ -291,14 +291,22 @@ const canUserWatchLiveSession = async (
   case "accepted_event_volunteers": {
     const sourceId = String(session.sourceId || session.linkedEventId || "").trim();
     if (!sourceId) return false;
+    // The linked event's organizer always has access to its stream.
+    const eventSnap = await getDb().collection("events").doc(sourceId).get();
+    const eventData = eventSnap.data() || {};
+    if (eventData.organizerId === userId || eventData.organizerUid === userId) {
+      return true;
+    }
+    // Applications have a collection-group index on volunteerId but not eventId,
+    // so match the event in memory rather than with a two-field collection-group query.
     const applicationSnap = await getDb().collectionGroup("applications")
-      .where("eventId", "==", sourceId)
       .where("volunteerId", "==", userId)
-      .limit(5)
       .get();
     return applicationSnap.docs.some((doc) => {
-      const status = String(doc.data()?.status || "").trim().toLowerCase();
-      return status === "accepted" || status === "approved";
+      const data = doc.data() || {};
+      const status = String(data.status || "").trim().toLowerCase();
+      return String(data.eventId || "").trim() === sourceId &&
+        (status === "accepted" || status === "approved");
     });
   }
   default:
@@ -515,6 +523,14 @@ const finalizeLiveArchiveRecording = async (sessionId: string, session: admin.fi
   const runtimeSnap = await runtimeRef.get();
   const runtime = runtimeSnap.data() || {};
   if (runtime.finalizedAt) {
+    return;
+  }
+  // With recording disabled no replay was ever captured, so this is "unavailable", not a failure.
+  if (!recordingConfig.enabled && !runtime.resourceId) {
+    await getDb().collection("live_sessions").doc(sessionId).set({
+      archiveStatus: "unavailable",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
     return;
   }
   if (!runtime.resourceId || !runtime.recordingSid) {
@@ -819,8 +835,27 @@ export const onLiveSessionEndedFinalizeArchive = functions.firestore
   });
 
 export const reconcileStaleLiveSessions = functions.pubsub
-  .schedule("every 15 minutes")
+  .schedule("every 5 minutes")
   .onRun(async () => {
+    // Current host apps heartbeat every 60s; end rooms whose host vanished without ending.
+    const heartbeatCutoffMs = Date.now() - 5 * 60 * 1000;
+    const liveSnap = await getDb().collection("live_sessions")
+      .where("status", "in", ["live", "active", "LIVE", "ACTIVE"])
+      .limit(200)
+      .get();
+    for (const doc of liveSnap.docs) {
+      const heartbeat = doc.get("hostHeartbeatAt") as admin.firestore.Timestamp | undefined;
+      if (!heartbeat || typeof heartbeat.toMillis !== "function") continue;
+      if (heartbeat.toMillis() >= heartbeatCutoffMs) continue;
+      await doc.ref.set({
+        status: "ended",
+        endedAt: admin.firestore.FieldValue.serverTimestamp(),
+        endTime: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        endedReason: "host_heartbeat_lost",
+      }, {merge: true});
+    }
+
     const staleThresholdMs = 30 * 60 * 1000;
     const cutoff = admin.firestore.Timestamp.fromDate(new Date(Date.now() - staleThresholdMs));
     const staleSnap = await getDb().collection("live_sessions")

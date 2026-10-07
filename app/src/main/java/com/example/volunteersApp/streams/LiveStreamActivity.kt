@@ -44,7 +44,7 @@ class LiveStreamActivity : ComponentActivity() {
             override fun handleOnBackPressed() {
                 // Host exit ends the broadcast so the session is not left LIVE without a host.
                 if (viewModel.uiState.value.isHost && !viewModel.uiState.value.sessionEnded) {
-                    viewModel.endStream { finish() }
+                    viewModel.endStream(onComplete = { finish() })
                 } else {
                     viewModel.leaveStream()
                     finish()
@@ -67,6 +67,10 @@ class LiveStreamActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        viewModel.leaveStream()
+        // Recreation (dark mode, split-screen resize) keeps the ViewModel; dropping the channel there
+        // would cut the broadcast. onCleared() still cleans up when the room really closes.
+        if (isFinishing) {
+            viewModel.leaveStream()
+        }
     }
 }

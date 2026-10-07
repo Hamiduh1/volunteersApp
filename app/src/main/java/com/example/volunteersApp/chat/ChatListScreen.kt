@@ -69,6 +69,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -260,8 +262,9 @@ fun ModernConversationItem(
                 ) {
                     Text(
                         text = conversation.otherParticipantName.ifBlank { "Conversation" },
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = if (conversation.isUnread) FontWeight.Bold else FontWeight.SemiBold,
+                        color = WaInk,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -271,7 +274,7 @@ fun ModernConversationItem(
                         Text(
                             text = dateLabel,
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (conversation.isUnread) InboxBlue else SocialInboxMutedInk,
+                            color = if (conversation.isUnread) WaGreenDark else WaMeta,
                             fontWeight = if (conversation.isUnread) FontWeight.SemiBold else FontWeight.Normal,
                             maxLines = 1,
                         )
@@ -291,7 +294,7 @@ fun ModernConversationItem(
                     Text(
                         text = preview,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (conversation.isUnread) SocialInboxInk else SocialInboxMutedInk,
+                        color = if (conversation.isUnread) WaInk else WaMeta,
                         fontWeight = if (conversation.isUnread) FontWeight.Medium else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -300,9 +303,10 @@ fun ModernConversationItem(
                     if (conversation.isUnread) {
                         Box(
                             modifier = Modifier
-                                .size(10.dp)
+                                .size(12.dp)
                                 .clip(CircleShape)
-                                .background(InboxBlue),
+                                .background(WaGreen)
+                                .semantics { contentDescription = "Unread" },
                         )
                     }
                 }
@@ -310,19 +314,19 @@ fun ModernConversationItem(
 
             if (!conversation.isGroup) {
                 Spacer(Modifier.width(4.dp))
-                IconButton(onClick = onAudioCall, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Call,
-                        contentDescription = "Voice call",
-                        tint = InboxTeal,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
                 IconButton(onClick = onVideoCall, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.Videocam,
                         contentDescription = "Video call",
-                        tint = InboxIndigo,
+                        tint = WaIcon,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                IconButton(onClick = onAudioCall, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Call,
+                        contentDescription = "Voice call",
+                        tint = WaIcon,
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -367,7 +371,7 @@ private fun ConversationReceiptIcon(
                 imageVector = Icons.Default.DoneAll,
                 contentDescription = "Read",
                 modifier = Modifier.size(16.dp),
-                tint = InboxBlue
+                tint = WaReadTick
             )
         }
         delivered -> {
@@ -375,7 +379,7 @@ private fun ConversationReceiptIcon(
                 imageVector = Icons.Default.DoneAll,
                 contentDescription = "Delivered",
                 modifier = Modifier.size(16.dp),
-                tint = SocialInboxMutedInk
+                tint = WaMeta
             )
         }
         else -> {
@@ -383,7 +387,7 @@ private fun ConversationReceiptIcon(
                 imageVector = Icons.Default.Done,
                 contentDescription = "Sent",
                 modifier = Modifier.size(16.dp),
-                tint = SocialInboxMutedInk
+                tint = WaMeta
             )
         }
     }
@@ -398,7 +402,7 @@ private fun GroupQuickActionsCard(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = InboxBlue.copy(alpha = 0.08f),
+        color = WaGreen.copy(alpha = 0.10f),
         tonalElevation = 0.dp,
     ) {
         Row(
@@ -410,7 +414,7 @@ private fun GroupQuickActionsCard(
             Icon(
                 imageVector = Icons.Default.Groups,
                 contentDescription = null,
-                tint = InboxBlue,
+                tint = WaGreenDark,
                 modifier = Modifier.size(28.dp),
             )
             Spacer(Modifier.width(12.dp))
@@ -429,6 +433,10 @@ private fun GroupQuickActionsCard(
             FilledTonalButton(
                 onClick = onCreateGroup,
                 shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = WaGreenDark,
+                    contentColor = Color.White,
+                ),
             ) {
                 Icon(
                     imageVector = Icons.Default.GroupAdd,
@@ -597,7 +605,7 @@ private fun EmptyChatsPlaceholder(modifier: Modifier = Modifier.fillMaxSize()) {
     ) {
         Surface(
             modifier = Modifier.size(120.dp),
-            color = InboxBlue.copy(alpha = 0.12f),
+            color = WaGreen.copy(alpha = 0.12f),
             shape = CircleShape
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -605,7 +613,7 @@ private fun EmptyChatsPlaceholder(modifier: Modifier = Modifier.fillMaxSize()) {
                     imageVector = Icons.Default.ModeComment,
                     contentDescription = null,
                     modifier = Modifier.size(60.dp),
-                    tint = InboxBlue
+                    tint = WaGreenDark
                 )
             }
         }

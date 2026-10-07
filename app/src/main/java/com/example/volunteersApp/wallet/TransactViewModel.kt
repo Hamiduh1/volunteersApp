@@ -1005,6 +1005,10 @@ class TransactViewModel : ViewModel() {
         val profileCountry = snapshot.getString("country")
             ?: java.util.Locale.getDefault().displayCountry
             ?: "United States"
+        val profilePhoneNumber = listOf("phoneNumber", "phone", "mobileNumber")
+            .firstNotNullOfOrNull { field -> snapshot.getString(field)?.trim()?.takeIf { it.isNotBlank() } }
+            ?: auth.currentUser?.phoneNumber?.trim()?.takeIf { it.isNotBlank() }
+            ?: ""
 
         _uiState.update {
             it.copy(
@@ -1020,7 +1024,8 @@ class TransactViewModel : ViewModel() {
                 isProviderWalletReady = walletSnapshot.activation.isReady && walletSnapshot.isMirrorBacked,
                 hasProviderWalletMirror = walletSnapshot.isMirrorBacked,
                 usesLegacyWalletFallback = walletSnapshot.usedLegacyFallback,
-                senderCountry = profileCountry
+                senderCountry = profileCountry,
+                senderPhoneNumber = profilePhoneNumber
             )
         }
     }
@@ -2771,13 +2776,21 @@ class TransactViewModel : ViewModel() {
                     request.toMap()
                 )
                 if (!isCurrentQuoteScope(quoteScope, requestVersion)) return@launch
-                val parsedQuote = WalletTransferQuote.fromMap(resultMap)
+                val quoteResponse = normalizeWalletTransferQuoteResponse(resultMap)
+                val parsedQuote = WalletTransferQuote.fromMap(quoteResponse)
                 if (parsedQuote?.quoteId.isNullOrBlank()) {
-                    val message = (resultMap?.get("message") as? String)
-                        ?.trim()
-                        ?.takeIf { it.isNotBlank() }
+                    val message = listOf("message", "reason", "error")
+                        .firstNotNullOfOrNull { key ->
+                            (quoteResponse?.get(key) as? String)?.trim()?.takeIf { it.isNotBlank() }
+                                ?: (resultMap?.get(key) as? String)?.trim()?.takeIf { it.isNotBlank() }
+                        }
                         ?: "Live pricing did not return a valid quote. Check your funding method and try again."
-                    Log.w("TransactVM", "getWalletTransferQuote returned no quoteId")
+                    Log.w(
+                        "TransactVM",
+                        "getWalletTransferQuote returned no quoteId; responseKeys=${resultMap?.keys?.sorted()} " +
+                            "normalizedKeys=${quoteResponse?.keys?.sorted()} " +
+                            "route=$destinationRoute funding=$fundingSourceType",
+                    )
                     _uiState.update {
                         it.copy(
                             isQuoteLoading = false,
@@ -3479,9 +3492,19 @@ class TransactViewModel : ViewModel() {
                         recipientPayload,
                     )
                 }
+                // The current server returns isVerified. A rolling deployment can
+                // return only verificationStatus from the older apply callable;
+                // both values are server-issued and must say VERIFIED before the
+                // UI treats a recipient as saved.
+                val serverMarkedVerified = (result?.get("isVerified") as? Boolean)
+                    ?: result?.get("verificationStatus")
+                        ?.toString()
+                        ?.trim()
+                        ?.equals("VERIFIED", ignoreCase = true)
+                    ?: false
                 if (
                     (isApprovedMobileRegistration || isBankRecipientRegistration) &&
-                    result?.get("isVerified") != true
+                    !serverMarkedVerified
                 ) {
                     throw IllegalStateException("The recipient was not marked verified. Verify the recipient again.")
                 }
@@ -3541,7 +3564,11 @@ class TransactViewModel : ViewModel() {
                     accountNameVerified = accountNameVerified,
                     accountRouteVerified = result?.get("accountRouteVerified") as? Boolean
                         ?: beneficiary.accountRouteVerified,
-                    isVerified = result?.get("isVerified") as? Boolean ?: beneficiary.isVerified,
+                    isVerified = if (isApprovedMobileRegistration || isBankRecipientRegistration) {
+                        serverMarkedVerified
+                    } else {
+                        result?.get("isVerified") as? Boolean ?: beneficiary.isVerified
+                    },
                     providerVerifiedAtMs = providerVerifiedAtMs,
                     recipientIdentityKey = (result?.get("recipientIdentityKey") as? String)
                         ?.takeIf { it.isNotBlank() }

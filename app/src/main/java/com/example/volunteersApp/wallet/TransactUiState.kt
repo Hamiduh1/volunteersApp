@@ -27,6 +27,8 @@ data class TransactUiState(
     val hasProviderWalletMirror: Boolean = false,
     val usesLegacyWalletFallback: Boolean = false,
     val senderCountry: String = "United States",
+    /** Profile phone (E.164 when available); its dial code gates local-currency funding. */
+    val senderPhoneNumber: String = "",
     val paymentMethods: List<PaymentMethod> = emptyList(),
     val selectedPaymentMethod: PaymentMethod? = null,
     val searchResults: List<User> = emptyList(),

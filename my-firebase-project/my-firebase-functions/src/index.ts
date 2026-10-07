@@ -867,17 +867,21 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
         "uid must be an integer between 0 and 4294967295."
       );
     }
+    // Live rooms: the server owns the Agora uid and returns it; clients must join with the returned uid.
+    // A client may omit uid (0); a uid that belongs to another account is still rejected.
+    let tokenUid = requestedUid;
     if (liveSessionRequested) {
       if (!liveSessionData) {
         throw new functions.https.HttpsError("not-found", "Live session not found.");
       }
       const expectedUid = stableLiveAgoraUid(context.auth.uid);
-      if (requestedUid !== expectedUid) {
+      if (requestedUid !== 0 && requestedUid !== expectedUid) {
         throw new functions.https.HttpsError(
           "permission-denied",
           "Live token UID does not match the signed-in account."
         );
       }
+      tokenUid = expectedUid;
     }
 
     const {appId, appCertificate, ttlSeconds} = getAgoraConfig();
@@ -901,7 +905,7 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       appId,
       appCertificate,
       channelName,
-      requestedUid,
+      tokenUid,
       rtcRole,
       ttlSeconds,
       ttlSeconds
@@ -912,7 +916,8 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       tokenRequired: true,
       expiresInSeconds: ttlSeconds,
       role: requestedRole,
-      uid: requestedUid,
+      uid: tokenUid,
+      agoraUid: tokenUid,
     };
   });
 
@@ -1589,6 +1594,44 @@ type StripeCommerceCheckoutResult = {
 };
 
 const stripeCommerceOrders = db.collection("stripe_commerce_orders");
+type FirstPartyPlatformFeeKind = "SPONSORED_AD" | "BLIND_DATE_JOIN" | "BLIND_DATE_REJOIN";
+
+type FirstPartyMobileMoneyFeeDraft = {
+  title: string;
+  description?: string;
+  amountUsd: number;
+  platformFeeUsd: number;
+  buyerId: string;
+  resourceId: string;
+  fulfillment: Record<string, unknown>;
+};
+
+type FirstPartyMobileMoneyFeeMethod = {
+  id: string;
+  name: string;
+  phone: string;
+  country: string;
+  network: string;
+  currency: string;
+  sourceAmount: number;
+  sourceToUsdRate: number;
+};
+
+type FirstPartyMobileMoneyCollectionResult = {
+  success: boolean;
+  orderId: string;
+  payoutRequestId: string;
+  status: string;
+  paymentStatus: "pending" | "paid";
+  pending: boolean;
+  accessUnlocked: boolean;
+  charged: boolean;
+  message: string;
+};
+
+// This collection is intentionally separate from Stripe orders and wallet
+// requests: these are first-party service fees, never user-held funds.
+const firstPartyMobileMoneyFeeOrders = db.collection("platform_fee_mobile_money_orders");
 const STRIPE_COMMERCE_DEFAULT_SUCCESS_URL =
   "https://volunteersapp-968b2.web.app/stripe-checkout/complete?session_id={CHECKOUT_SESSION_ID}";
 const STRIPE_COMMERCE_DEFAULT_CANCEL_URL =
@@ -1620,6 +1663,327 @@ const resolveStripeCommerceCheckoutUrls = (): {successUrl: string; cancelUrl: st
 const stripeCommerceOrderId = (kind: StripeCommerceOrderKind, buyerId: string, resourceId: string): string => {
   // One open checkout per buyer/resource prevents duplicate purchase sessions.
   return createHash("sha256").update(`${kind}:${buyerId}:${resourceId}`).digest("hex");
+};
+
+const firstPartyMobileMoneyFeeOrderId = (
+  kind: FirstPartyPlatformFeeKind,
+  buyerId: string,
+  resourceId: string
+): string => createHash("sha256").update(`MOBILE_MONEY:${kind}:${buyerId}:${resourceId}`).digest("hex");
+
+const isPendingFirstPartyMobileMoneyFeeOrder = (status: unknown): boolean => {
+  const normalized = String(status || "").trim().toUpperCase();
+  return ["COLLECTION_PENDING", "PENDING_PROVIDER", "PROCESSING_PROVIDER"].includes(normalized);
+};
+
+// Collected-but-unfulfilled fees stay locked until support resolves them, so a
+// second rail can never charge the buyer again for the same service.
+const isBlockingFirstPartyMobileMoneyFeeOrder = (status: unknown): boolean =>
+  isPendingFirstPartyMobileMoneyFeeOrder(status) ||
+  String(status || "").trim().toUpperCase() === "RECONCILIATION_REQUIRED";
+
+const isPendingStripeCommerceOrder = (order: Record<string, unknown>): boolean => {
+  const status = String(order.status || "").trim().toUpperCase();
+  return ["CHECKOUT_CREATING", "CHECKOUT_READY", "PENDING_CHECKOUT"].includes(status);
+};
+
+const isFirstPartyMobileMoneyFeeCollection = (
+  payoutData: FirebaseFirestore.DocumentData | Record<string, unknown>
+): boolean =>
+  String(payoutData.source || "").trim().toUpperCase() ===
+    "PLATFORM_FEE_MOBILE_MONEY_COLLECTION" &&
+  !!asNonEmptyString(payoutData.platformFeeCollectionOrderId);
+
+const normalizeFirstPartyFeePaymentRail = (value: unknown): "STRIPE" | "MOBILE_MONEY" => {
+  const normalized = String(value || "STRIPE").trim().toUpperCase();
+  if (normalized === "STRIPE" || normalized === "MOBILE_MONEY") return normalized;
+  throw new functions.https.HttpsError("invalid-argument", "Choose a supported payment method.");
+};
+
+const firstPartyMobileMoneyCollectionMessage = (status: "PENDING" | "COMPLETED" | "FAILED"): string => {
+  switch (status) {
+  case "COMPLETED":
+    return "Mobile money payment confirmed. Your service is now active.";
+  case "FAILED":
+    return "We could not complete this mobile money payment. No service was activated.";
+  default:
+    return "Approve the mobile money prompt on your phone. Your service activates after confirmation.";
+  }
+};
+
+const isFirstPartyMobileMoneyFeeCollectionEnabled = async (): Promise<boolean> => {
+  if (getMobileMoneyProviderName() !== "AFRIEX") return false;
+  if (!isAfriexRuntimeFlagEnabled("AFRIEX_FIRST_PARTY_MOBILE_MONEY_FEE_COLLECTIONS_ENABLED")) {
+    return false;
+  }
+  const config = await db.collection("app_config").doc("system_config").get();
+  return config.get("enableFirstPartyMobileMoneyFeeCollection") === true;
+};
+
+const requireFirstPartyMobileMoneyFeeCollectionEnabled = async (): Promise<void> => {
+  if (await isFirstPartyMobileMoneyFeeCollectionEnabled()) return;
+  throw new functions.https.HttpsError(
+    "failed-precondition",
+    "Mobile money payment is not available for this service yet. Use secure checkout instead."
+  );
+};
+
+const readFirstPartyMobileMoneyFeeMethod = async (params: {
+  buyerId: string;
+  paymentMethodId: string;
+  amountUsd: number;
+}): Promise<FirstPartyMobileMoneyFeeMethod> => {
+  await requireFirstPartyMobileMoneyFeeCollectionEnabled();
+  if (String(process.env.MOBILE_MONEY_PROVIDER_MODE || "MANUAL").trim().toUpperCase() !== "HTTP_API") {
+    throw new functions.https.HttpsError(
+      "unavailable",
+      "Mobile money payment is temporarily unavailable. Use secure checkout instead."
+    );
+  }
+
+  const methodRef = db.collection("users").doc(params.buyerId)
+    .collection("payment_methods").doc(params.paymentMethodId);
+  const methodSnap = await methodRef.get();
+  const method = (methodSnap.data() || {}) as Record<string, unknown>;
+  if (!methodSnap.exists || normalizeMethodType(method.type || method.methodType) !== "MOBILE_MONEY") {
+    throw new functions.https.HttpsError("failed-precondition", "Choose a saved mobile money payment method.");
+  }
+  if (method.phoneOwnershipVerified !== true || String(method.verificationStatus || "").trim().toUpperCase() !== "VERIFIED") {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Choose a verified mobile money payment method before continuing."
+    );
+  }
+
+  const phone = normalizeAfriexIdentityPhone(
+    asNonEmptyString(method.phoneNumber, method.phone, method.mobileNumber, method.accountNumber) || ""
+  );
+  const country = asNonEmptyString(method.country);
+  const network = asNonEmptyString(method.network, method.institutionName);
+  const currency = asNonEmptyString(method.currency, resolveMobileMoneyCurrency(method))?.toUpperCase() || "";
+  const name = asNonEmptyString(method.registeredName, method.accountName, method.holderName);
+  if (!name || !phone || !country || !network || !/^[A-Z]{3}$/.test(currency)) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "This mobile money payment method is incomplete. Update and verify it before continuing."
+    );
+  }
+
+  const resolvedCountry = assertAfriexLiveMobileMoneyDepositForCountry(country);
+  const sourceToUsdRate = currency === "USD" ? 1 : await fetchAfriexBusinessExchangeRatePair(
+    resolveAfriexBusinessApiConfig(),
+    currency,
+    "USD"
+  );
+  const sourceAmount = roundMoney(params.amountUsd / sourceToUsdRate);
+  if (!Number.isFinite(sourceAmount) || sourceAmount <= 0) {
+    throw new functions.https.HttpsError(
+      "unavailable",
+      "Live mobile money pricing is temporarily unavailable. Use secure checkout instead."
+    );
+  }
+
+  return {
+    id: methodSnap.id,
+    name,
+    phone,
+    country: resolvedCountry.country,
+    network,
+    currency,
+    sourceAmount,
+    sourceToUsdRate,
+  };
+};
+
+const startFirstPartyMobileMoneyFeeCollection = async (params: {
+  kind: FirstPartyPlatformFeeKind;
+  buyerId: string;
+  resourceId: string;
+  paymentMethodId: string;
+  prepare: (
+    transaction: admin.firestore.Transaction,
+    orderRef: admin.firestore.DocumentReference
+  ) => Promise<FirstPartyMobileMoneyFeeDraft>;
+}): Promise<FirstPartyMobileMoneyCollectionResult> => {
+  const orderId = firstPartyMobileMoneyFeeOrderId(params.kind, params.buyerId, params.resourceId);
+  const orderRef = firstPartyMobileMoneyFeeOrders.doc(orderId);
+  const preflightMethod = await readFirstPartyMobileMoneyFeeMethod({
+    buyerId: params.buyerId,
+    paymentMethodId: params.paymentMethodId,
+    // The prepare callback validates the authoritative fee before the request is saved.
+    amountUsd: 1,
+  });
+  const prepared = await db.runTransaction(async (transaction) => {
+    const stripeOrderRef = stripeCommerceOrders.doc(
+      stripeCommerceOrderId(params.kind, params.buyerId, params.resourceId)
+    );
+    const methodRef = db.collection("users").doc(params.buyerId)
+      .collection("payment_methods").doc(params.paymentMethodId);
+    const [orderSnap, stripeOrderSnap, methodSnap] = await Promise.all([
+      transaction.get(orderRef),
+      transaction.get(stripeOrderRef),
+      transaction.get(methodRef),
+    ]);
+    const order = (orderSnap.data() || {}) as Record<string, unknown>;
+    const status = String(order.status || "").trim().toUpperCase();
+    // Blind Date entries can legitimately be bought again after leaving or
+    // matching; `prepare` enforces the profile state for those kinds.
+    if (status === "COMPLETED" && params.kind === "SPONSORED_AD") {
+      return {kind: "complete" as const, payoutRequestId: asNonEmptyString(order.payoutRequestId) || ""};
+    }
+    if (isPendingFirstPartyMobileMoneyFeeOrder(status)) {
+      return {kind: "pending" as const, payoutRequestId: asNonEmptyString(order.payoutRequestId) || ""};
+    }
+    if (status === "RECONCILIATION_REQUIRED") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "A previous mobile money payment for this service is being reviewed. Contact support before paying again."
+      );
+    }
+    const stripeOrder = (stripeOrderSnap.data() || {}) as Record<string, unknown>;
+    if (isPendingStripeCommerceOrder(stripeOrder)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "A secure checkout is already waiting for this service. Finish or let it expire before changing payment method."
+      );
+    }
+    const stripeStatus = String(stripeOrder.status || "").trim().toUpperCase();
+    if (params.kind === "SPONSORED_AD" && (stripeStatus === "PAID" || stripeStatus === "FULFILLED")) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "This ad was already paid through secure checkout."
+      );
+    }
+
+    const method = (methodSnap.data() || {}) as Record<string, unknown>;
+    const currentPhone = normalizeAfriexIdentityPhone(
+      asNonEmptyString(method.phoneNumber, method.phone, method.mobileNumber, method.accountNumber) || ""
+    );
+    const currentCountry = canonicalMobileMoneyCountry(asNonEmptyString(method.country)) || "";
+    const currentNetwork = normalizeText(asNonEmptyString(method.network, method.institutionName) || "");
+    const currentCurrency = asNonEmptyString(method.currency, resolveMobileMoneyCurrency(method))?.toUpperCase() || "";
+    if (
+      !methodSnap.exists ||
+      method.phoneOwnershipVerified !== true ||
+      String(method.verificationStatus || "").trim().toUpperCase() !== "VERIFIED" ||
+      currentPhone !== preflightMethod.phone ||
+      currentCountry !== canonicalMobileMoneyCountry(preflightMethod.country) ||
+      currentNetwork !== normalizeText(preflightMethod.network) ||
+      currentCurrency !== preflightMethod.currency
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Your mobile money payment method changed. Review it and try again."
+      );
+    }
+
+    const draft = await params.prepare(transaction, orderRef);
+    const amountUsd = roundMoney(draft.amountUsd);
+    if (!Number.isFinite(amountUsd) || amountUsd <= 0 || amountUsd > 500_000) {
+      throw new functions.https.HttpsError("invalid-argument", "The configured service fee is invalid.");
+    }
+    const sourceToUsdRate = preflightMethod.sourceToUsdRate;
+    const sourceAmount = roundMoney(amountUsd / sourceToUsdRate);
+    if (!Number.isFinite(sourceAmount) || sourceAmount <= 0) {
+      throw new functions.https.HttpsError(
+        "unavailable",
+        "Live mobile money pricing is temporarily unavailable. Use secure checkout instead."
+      );
+    }
+    const attempt = Math.max(1, Math.trunc(Number(order.attempt || 0)) + 1);
+    const payoutRef = db.collection("payout_requests").doc(`${orderId}-${attempt}`);
+    const now = admin.firestore.Timestamp.now();
+    transaction.set(orderRef, {
+      kind: params.kind,
+      buyerId: draft.buyerId,
+      resourceId: draft.resourceId,
+      title: draft.title,
+      description: draft.description || null,
+      amountUsd,
+      platformFeeUsd: roundMoney(draft.platformFeeUsd),
+      paymentProvider: "AFRIEX",
+      paymentRail: "MOBILE_MONEY",
+      paymentMethodId: preflightMethod.id,
+      paymentMethodLast4: preflightMethod.phone.slice(-4),
+      sourceAmount,
+      sourceCurrency: preflightMethod.currency,
+      sourceToUsdRate,
+      payoutRequestId: payoutRef.id,
+      fulfillment: draft.fulfillment,
+      status: "PENDING_PROVIDER",
+      paymentStatus: "PENDING",
+      paymentDetail: firstPartyMobileMoneyCollectionMessage("PENDING"),
+      attempt,
+      createdAt: orderSnap.exists ? order.createdAt || now : now,
+      updatedAt: now,
+      completedAt: admin.firestore.FieldValue.delete(),
+      failureReason: admin.firestore.FieldValue.delete(),
+    }, {merge: true});
+    transaction.set(payoutRef, {
+      senderId: draft.buyerId,
+      recipientId: draft.buyerId,
+      recipientName: preflightMethod.name,
+      recipientPhone: preflightMethod.phone,
+      recipientNetwork: preflightMethod.network,
+      recipientInfo: {
+        name: preflightMethod.name,
+        mobileNumber: preflightMethod.phone,
+        accountNumber: preflightMethod.phone,
+        network: preflightMethod.network,
+        country: preflightMethod.country,
+      },
+      country: preflightMethod.country,
+      network: preflightMethod.network,
+      phone: preflightMethod.phone,
+      paymentMethodId: preflightMethod.id,
+      amount: amountUsd,
+      currency: "USD",
+      localAmount: sourceAmount,
+      localCurrency: preflightMethod.currency,
+      sourceAmount,
+      sourceCurrency: preflightMethod.currency,
+      destinationAmount: amountUsd,
+      destinationCurrency: "USD",
+      destinationRoute: "MOBILE_MONEY",
+      destinationType: "MOBILE_MONEY",
+      type: "CASH_IN",
+      source: "PLATFORM_FEE_MOBILE_MONEY_COLLECTION",
+      fundingSource: "PLATFORM_FEE_MOBILE_MONEY",
+      platformFeeCollectionOrderId: orderId,
+      platformFeeKind: params.kind,
+      status: "PENDING_PROVIDER",
+      providerStatus: "PENDING_APPROVAL",
+      providerMessage: firstPartyMobileMoneyCollectionMessage("PENDING"),
+      createdAt: now,
+      processedAt: now,
+    });
+    return {kind: "created" as const, payoutRequestId: payoutRef.id};
+  });
+
+  if (prepared.kind === "complete") {
+    return {
+      success: true,
+      orderId,
+      payoutRequestId: prepared.payoutRequestId,
+      status: "COMPLETED",
+      paymentStatus: "paid",
+      pending: false,
+      accessUnlocked: true,
+      charged: true,
+      message: "This mobile money payment was already confirmed.",
+    };
+  }
+  return {
+    success: true,
+    orderId,
+    payoutRequestId: prepared.payoutRequestId,
+    status: "PENDING_PROVIDER",
+    paymentStatus: "pending",
+    pending: true,
+    accessUnlocked: false,
+    charged: false,
+    message: firstPartyMobileMoneyCollectionMessage("PENDING"),
+  };
 };
 
 // Business-commerce settlement only. Remittance funding and provider delivery
@@ -1694,8 +2058,26 @@ const startStripeCommerceCheckout = async (params: {
   const orderId = stripeCommerceOrderId(params.kind, params.buyerId, params.resourceId);
   const orderRef = stripeCommerceOrders.doc(orderId);
   const prepared = await db.runTransaction(async (transaction) => {
-    const existing = await transaction.get(orderRef);
+    const mobileMoneyOrderRef = firstPartyMobileMoneyFeeOrders.doc(
+      firstPartyMobileMoneyFeeOrderId(params.kind as FirstPartyPlatformFeeKind, params.buyerId, params.resourceId)
+    );
+    const [existing, mobileMoneyOrder] = await Promise.all([
+      transaction.get(orderRef),
+      transaction.get(mobileMoneyOrderRef),
+    ]);
     const existingData = (existing.data() || {}) as Record<string, unknown>;
+    if (isBlockingFirstPartyMobileMoneyFeeOrder(mobileMoneyOrder.data()?.status)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "A mobile money payment is already waiting for this service. Wait for its final status before changing payment method."
+      );
+    }
+    if (
+      params.kind === "SPONSORED_AD" &&
+      String(mobileMoneyOrder.data()?.status || "").trim().toUpperCase() === "COMPLETED"
+    ) {
+      throw new functions.https.HttpsError("failed-precondition", "This ad was already paid with mobile money.");
+    }
     const existingStatus = String(existingData.status || "").trim().toUpperCase();
     const existingUrl = asNonEmptyString(existingData.checkoutUrl);
 
@@ -4053,6 +4435,7 @@ const requestAfriexPaymentMethodResolution = async (params: {
     throw new functions.https.HttpsError("failed-precondition", failure.message, {
       operation: "RECIPIENT_ROUTE_VERIFICATION",
       reason: "ROUTE_NOT_VERIFIED",
+      failureCode: failure.code,
       httpStatus: failure.httpStatus,
     });
   }
@@ -5236,6 +5619,8 @@ interface PostSponsoredAdRequest {
   ownerPhone?: unknown;
   mediaUrls?: unknown;
   media?: unknown;
+  paymentRail?: unknown;
+  paymentMethodId?: unknown;
 }
 
 export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
@@ -5305,6 +5690,8 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
 
     const feeSettings = await getRuntimeFeeSettings();
     const adFee = roundMoney(Math.max(0, feeSettings.adPostFeeUsd));
+    const paymentRail = normalizeFirstPartyFeePaymentRail(payload.paymentRail);
+    const paymentMethodId = asNonEmptyString(payload.paymentMethodId);
 
     const userRef = db.collection("users").doc(userId);
     const adsCollection = db.collection("advertisements");
@@ -5328,6 +5715,46 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
       const draftKey = createHash("sha256").update(JSON.stringify({
         title, description, targetUrl, ownerPhone, mediaUrls: finalMediaUrls, media,
       })).digest("hex");
+      if (paymentRail === "MOBILE_MONEY") {
+        if (!paymentMethodId) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "Choose a verified mobile money payment method before continuing."
+          );
+        }
+        return startFirstPartyMobileMoneyFeeCollection({
+          kind: "SPONSORED_AD",
+          buyerId: userId,
+          resourceId: draftKey,
+          paymentMethodId,
+          prepare: async (transaction, orderRef) => {
+            const userDoc = await transaction.get(userRef);
+            if (!userDoc.exists) throw new functions.https.HttpsError("not-found", "User profile not found.");
+            if (isStaffFeeExempt((userDoc.data() || {}) as Record<string, unknown>, (context.auth?.token || {}) as Record<string, unknown>)) {
+              throw new functions.https.HttpsError("failed-precondition", "Your fee exemption changed. Submit the ad again.");
+            }
+            return {
+              title: `Sponsored ad: ${title}`,
+              description: "Sponsored listing fee",
+              amountUsd: adFee,
+              platformFeeUsd: adFee,
+              buyerId: userId,
+              resourceId: orderRef.id,
+              fulfillment: {
+                adId: orderRef.id,
+                title,
+                description,
+                targetUrl,
+                ownerPhone,
+                mediaUrls: finalMediaUrls,
+                media,
+                sponsor,
+                ownerId: userId,
+              },
+            };
+          },
+        });
+      }
       return startStripeCommerceCheckout({
         kind: "SPONSORED_AD",
         buyerId: userId,
@@ -5435,6 +5862,8 @@ interface JoinBlindDateRequest {
   bio: string;
   gender: string;
   lookingFor?: string;
+  paymentRail?: unknown;
+  paymentMethodId?: unknown;
 }
 
 const normalizeBlindDateGender = (value: unknown): string => {
@@ -5490,6 +5919,8 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
     }
     const gender = normalizeBlindDateGender(requestData.gender);
     const lookingFor = normalizeBlindDatePreference(requestData.lookingFor);
+    const paymentRail = normalizeFirstPartyFeePaymentRail(requestData.paymentRail);
+    const paymentMethodId = asNonEmptyString(requestData.paymentMethodId);
 
     const feeSettings = await getRuntimeFeeSettings();
     const blindDateFee = feeSettings.blindDateFeeUsd;
@@ -5540,6 +5971,60 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
         });
       });
       return {success: true, charged: false, feeCharged: 0, message: "You joined the Blind Date loop."};
+    }
+
+    if (paymentRail === "MOBILE_MONEY") {
+      if (!paymentMethodId) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Choose a verified mobile money payment method before continuing."
+        );
+      }
+      return startFirstPartyMobileMoneyFeeCollection({
+        kind: "BLIND_DATE_JOIN",
+        buyerId: userId,
+        resourceId: userId,
+        paymentMethodId,
+        prepare: async (transaction, orderRef) => {
+          const [userDoc, profileDoc] = await Promise.all([transaction.get(userRef), transaction.get(blindDateProfileRef)]);
+          if (!userDoc.exists) throw new functions.https.HttpsError("not-found", "User profile not found.");
+          const userData = (userDoc.data() || {}) as Record<string, unknown>;
+          assertDatingEligibleAccount(userData);
+          if (isStaffFeeExempt(userData, (context.auth?.token || {}) as Record<string, unknown>)) {
+            throw new functions.https.HttpsError("failed-precondition", "Your fee exemption changed. Join again without payment.");
+          }
+          if (profileDoc.exists) {
+            const status = normalizeProfileStatus(profileDoc.data()?.status);
+            if (status === "matched") throw new functions.https.HttpsError("failed-precondition", "You are already matched. Use rejoin after ending the current match.");
+            if (status !== "awaiting_payment" ||
+              asNonEmptyString(profileDoc.data()?.mobileMoneyFeeCollectionOrderId) !== orderRef.id) {
+              throw new functions.https.HttpsError("failed-precondition", "You already have an active Blind Date profile.");
+            }
+          }
+          const now = admin.firestore.Timestamp.now();
+          transaction.set(blindDateProfileRef, {
+            ...profilePayload,
+            status: "awaiting_payment",
+            paymentStatus: "PENDING",
+            paymentCollectionStatus: "PENDING",
+            paymentDetail: firstPartyMobileMoneyCollectionMessage("PENDING"),
+            paymentProvider: "AFRIEX",
+            mobileMoneyFeeCollectionOrderId: orderRef.id,
+            stripeCommerceOrderId: admin.firestore.FieldValue.delete(),
+            createdAt: profileDoc.data()?.createdAt || now,
+            updatedAt: now,
+          }, {merge: true});
+          return {
+            title: "Blind Date entry",
+            description: "Blind Date entry fee",
+            amountUsd: blindDateFee,
+            platformFeeUsd: blindDateFee,
+            buyerId: userId,
+            resourceId: orderRef.id,
+            fulfillment: {profile: profilePayload},
+          };
+        },
+      });
     }
 
     return startStripeCommerceCheckout({
@@ -5756,6 +6241,44 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
       return {success: true, charged: false, feeCharged: 0, message: "You are back in the Blind Date loop."};
     }
 
+    const rejoinPayload = (data || {}) as {paymentRail?: unknown; paymentMethodId?: unknown};
+    if (normalizeFirstPartyFeePaymentRail(rejoinPayload.paymentRail) === "MOBILE_MONEY") {
+      const paymentMethodId = asNonEmptyString(rejoinPayload.paymentMethodId);
+      if (!paymentMethodId) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Choose a verified mobile money payment method before continuing."
+        );
+      }
+      return startFirstPartyMobileMoneyFeeCollection({
+        kind: "BLIND_DATE_REJOIN",
+        buyerId: userId,
+        resourceId: userId,
+        paymentMethodId,
+        prepare: async (transaction, orderRef) => {
+          const [userDoc, profileDoc] = await Promise.all([transaction.get(userRef), transaction.get(blindDateProfileRef)]);
+          if (!userDoc.exists) throw new functions.https.HttpsError("not-found", "User profile not found.");
+          const userData = (userDoc.data() || {}) as Record<string, unknown>;
+          assertDatingEligibleAccount(userData);
+          if (isStaffFeeExempt(userData, (context.auth?.token || {}) as Record<string, unknown>)) {
+            throw new functions.https.HttpsError("failed-precondition", "Your fee exemption changed. Rejoin again without payment.");
+          }
+          if (!profileDoc.exists || normalizeProfileStatus(profileDoc.data()?.status) !== "matched") {
+            throw new functions.https.HttpsError("failed-precondition", "You are not in a matched state to rejoin.");
+          }
+          return {
+            title: "Blind Date re-join",
+            description: "Blind Date re-join fee",
+            amountUsd: blindDateFee,
+            platformFeeUsd: blindDateFee,
+            buyerId: userId,
+            resourceId: orderRef.id,
+            fulfillment: {userId},
+          };
+        },
+      });
+    }
+
     return startStripeCommerceCheckout({
       kind: "BLIND_DATE_REJOIN",
       buyerId: userId,
@@ -5782,6 +6305,109 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
         };
       },
     });
+  });
+
+// Read-only eligibility and status for the platform fee payment selector.
+// Stripe remains the default; mobile money is offered only when this reports
+// an eligible verified method on a live collection corridor.
+export const getPlatformFeeMobileMoneyOptions = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    const userId = context.auth.uid;
+    const payload = (data || {}) as {kind?: unknown; orderId?: unknown};
+
+    const orderId = asNonEmptyString(payload.orderId);
+    if (orderId) {
+      const orderSnap = await firstPartyMobileMoneyFeeOrders.doc(orderId).get();
+      const order = (orderSnap.data() || {}) as Record<string, unknown>;
+      if (!orderSnap.exists || asNonEmptyString(order.buyerId) !== userId) {
+        throw new functions.https.HttpsError("not-found", "Payment not found.");
+      }
+      const status = String(order.status || "").trim().toUpperCase();
+      return {
+        orderId,
+        kind: String(order.kind || ""),
+        status,
+        pending: isPendingFirstPartyMobileMoneyFeeOrder(status),
+        accessUnlocked: status === "COMPLETED",
+        charged: status === "COMPLETED",
+        message: asNonEmptyString(order.paymentDetail) || firstPartyMobileMoneyCollectionMessage(
+          status === "COMPLETED" ? "COMPLETED" : (status === "FAILED" ? "FAILED" : "PENDING")
+        ),
+        amountUsd: roundMoney(Number(order.amountUsd || 0)),
+        sourceAmount: Number(order.sourceAmount || 0) || null,
+        sourceCurrency: asNonEmptyString(order.sourceCurrency) || null,
+        paymentMethodLast4: asNonEmptyString(order.paymentMethodLast4) || null,
+      };
+    }
+
+    const kind = String(payload.kind || "").trim().toUpperCase();
+    if (!["SPONSORED_AD", "BLIND_DATE_JOIN", "BLIND_DATE_REJOIN"].includes(kind)) {
+      throw new functions.https.HttpsError("invalid-argument", "Choose a supported service.");
+    }
+    const feeSettings = await getRuntimeFeeSettings();
+    const amountUsd = roundMoney(Math.max(0, kind === "SPONSORED_AD" ? feeSettings.adPostFeeUsd : feeSettings.blindDateFeeUsd));
+    const liveProvider = String(process.env.MOBILE_MONEY_PROVIDER_MODE || "MANUAL").trim().toUpperCase() === "HTTP_API";
+    if (amountUsd <= 0 || !liveProvider || !(await isFirstPartyMobileMoneyFeeCollectionEnabled())) {
+      return {enabled: false, defaultRail: "STRIPE", amountUsd, methods: []};
+    }
+
+    const methodsSnap = await db.collection("users").doc(userId).collection("payment_methods").get();
+    const rateByCurrency = new Map<string, number | null>();
+    const methods = [];
+    for (const doc of methodsSnap.docs) {
+      const method = (doc.data() || {}) as Record<string, unknown>;
+      if (normalizeMethodType(method.type || method.methodType) !== "MOBILE_MONEY") continue;
+      const phone = normalizeAfriexIdentityPhone(
+        asNonEmptyString(method.phoneNumber, method.phone, method.mobileNumber, method.accountNumber) || ""
+      );
+      const country = asNonEmptyString(method.country) || "";
+      const network = asNonEmptyString(method.network, method.institutionName) || "";
+      const currency = asNonEmptyString(method.currency, resolveMobileMoneyCurrency(method))?.toUpperCase() || "";
+      const name = asNonEmptyString(method.registeredName, method.accountName, method.holderName);
+      let reason: string | null = null;
+      if (method.phoneOwnershipVerified !== true || String(method.verificationStatus || "").trim().toUpperCase() !== "VERIFIED") {
+        reason = "Verify this number before paying with it.";
+      } else if (!name || !phone || !country || !network || !/^[A-Z]{3}$/.test(currency)) {
+        reason = "Update this payment method before paying with it.";
+      } else {
+        try {
+          assertAfriexLiveMobileMoneyDepositForCountry(country);
+        } catch {
+          reason = "Mobile money payment is not available in this country yet.";
+        }
+      }
+      let estimatedLocalAmount: number | null = null;
+      if (!reason) {
+        if (!rateByCurrency.has(currency)) {
+          try {
+            rateByCurrency.set(currency, currency === "USD" ? 1 : await fetchAfriexBusinessExchangeRatePair(
+              resolveAfriexBusinessApiConfig(), currency, "USD"
+            ));
+          } catch (error) {
+            functions.logger.warn("Platform fee mobile money pricing unavailable.", {currency, error});
+            rateByCurrency.set(currency, null);
+          }
+        }
+        const rate = rateByCurrency.get(currency);
+        if (rate && Number.isFinite(rate) && rate > 0) {
+          estimatedLocalAmount = roundMoney(amountUsd / rate);
+        } else {
+          reason = "Live mobile money pricing is temporarily unavailable.";
+        }
+      }
+      methods.push({
+        id: doc.id,
+        network,
+        country,
+        currency,
+        last4: phone.slice(-4),
+        eligible: !reason,
+        reason,
+        estimatedLocalAmount,
+      });
+    }
+    return {enabled: true, defaultRail: "STRIPE", amountUsd, methods};
   });
 
 
@@ -6885,6 +7511,8 @@ const getMobileMoneyProviderHttpOptions = (): {
   };
 };
 
+const AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS = "RESOLVE_UPSTREAM_UNAVAILABLE_CATALOG_CONFIRMED";
+
 const runBeneficiaryVerificationDecision = async (params: {
   prepared: PreparedBeneficiaryVerificationInput;
   allowProviderNameOverride?: boolean;
@@ -6960,8 +7588,28 @@ const runBeneficiaryVerificationDecision = async (params: {
         countryCode,
         accountNumber: params.prepared.phoneE164,
         institutionCode: params.prepared.institutionCodeInput,
+        allowUpstreamOutageFallback: params.allowProviderNameOverride === true,
       });
       provider.predictedProvider = resolved.institutionName;
+      if (!resolved.accountRouteVerified) {
+        provider.providerAccountName = null;
+        provider.nameMatchScore = null;
+        provider.rawStatus = AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS;
+        functions.logger.warn("Afriex resolver unavailable; registering catalog-confirmed mobile money route", {
+          country: params.prepared.countryCanonical,
+          institutionCode: resolved.institutionCode,
+        });
+        return {
+          status: "APPROVED",
+          canProceed: true,
+          matchLevel: "PHONE_ONLY",
+          reasonCode: "VERIFIED_CATALOG_ROUTE_PROVIDER_RESOLVE_UNAVAILABLE",
+          reasonMessage: "Afriex could not confirm this number right now, but the country and provider are supported. " +
+            "Confirm the recipient's name with them before saving. Afriex checks the number again when money is sent.",
+          provider,
+          aml,
+        };
+      }
       provider.providerAccountName = resolved.recipientName;
       provider.activeConfValidated = true;
       if (resolved.accountNameVerified && resolved.recipientName) {
@@ -9793,6 +10441,7 @@ const resolveAfriexMobileMoneyAccount = async (params: {
   countryCode: string;
   accountNumber: string;
   institutionCode: string;
+  allowUpstreamOutageFallback?: boolean;
 }): Promise<AfriexResolvedMobileMoneyAccount> => {
   const countryCode = params.countryCode.trim().toUpperCase();
   const accountNumber = normalizeAfriexIdentityPhone(params.accountNumber);
@@ -9826,13 +10475,36 @@ const resolveAfriexMobileMoneyAccount = async (params: {
     );
   }
 
-  const resolved = await requestAfriexPaymentMethodResolution({
-    config: params.config,
-    channel: "MOBILE_MONEY",
-    countryCode,
-    accountNumber,
-    institutionCode: institution.institutionCode,
-  });
+  let resolved: Record<string, unknown>;
+  try {
+    resolved = await requestAfriexPaymentMethodResolution({
+      config: params.config,
+      channel: "MOBILE_MONEY",
+      countryCode,
+      accountNumber,
+      institutionCode: institution.institutionCode,
+    });
+  } catch (error) {
+    const failureCode = error instanceof functions.https.HttpsError &&
+      error.details && typeof error.details === "object" ?
+      (error.details as Record<string, unknown>).failureCode :
+      null;
+    // Afriex's generic resolver outage says nothing about the number itself.
+    // Registration may continue on the catalog-confirmed provider; Afriex
+    // still validates the destination when the payout is created.
+    if (params.allowUpstreamOutageFallback && failureCode === "AFRIEX_RESOLUTION_UPSTREAM_UNAVAILABLE") {
+      return {
+        recipientName: null,
+        recipientPhone: null,
+        institutionCode: institution.institutionCode,
+        institutionName: institution.institutionName,
+        countryCode,
+        accountNameVerified: false,
+        accountRouteVerified: false,
+      };
+    }
+    throw error;
+  }
   const returnedInstitutionCode = normalizeAfriexToken(
     asNonEmptyString(resolved["institutionCode"], resolved["providerCode"]) || ""
   );
@@ -10570,7 +11242,14 @@ const verifyBeneficiaryForServerSave = async (
       countryCode: country.iso2,
       accountNumber: asNonEmptyString(request.accountNumber, request.phone) || "",
       institutionCode: asNonEmptyString(request.institutionCode) || "",
+      allowUpstreamOutageFallback: true,
     });
+    if (!resolved.accountRouteVerified) {
+      functions.logger.warn("Afriex resolver unavailable; saving catalog-confirmed mobile money recipient", {
+        country: country.iso2,
+        institutionCode: resolved.institutionCode,
+      });
+    }
     const resolvedRecipientPhone = resolved.recipientPhone || normalizeAfriexIdentityPhone(
       asNonEmptyString(request.accountNumber, request.phone) || ""
     );
@@ -10621,6 +11300,8 @@ const verifyBeneficiaryForServerSave = async (
       providerResolvedName: resolved.accountNameVerified ? resolved.recipientName : null,
       accountNameVerified: resolved.accountNameVerified,
       accountRouteVerified: resolved.accountRouteVerified,
+      providerRouteValidation: resolved.accountRouteVerified ?
+        "AFRIEX_RESOLVED" : "PENDING_AFRIEX_PAYOUT_VALIDATION",
       recipientDetailsConfirmed: true,
       isVerified: true,
       recipientNameConfirmationSource: confirmationSource,
@@ -13051,6 +13732,16 @@ const processPendingMobileMoneyProviderPayout = async (
   }
 
   const providerMode = String(process.env.MOBILE_MONEY_PROVIDER_MODE || "MANUAL").toUpperCase();
+  if (isFirstPartyMobileMoneyFeeCollection(initialData) && (providerMode !== "HTTP_API" || providerName !== "AFRIEX")) {
+    // Simulated or manual completion would activate a paid service without
+    // provider-confirmed funds, so the request waits for the live adapter.
+    await payoutRef.set({
+      providerStatus: "WAITING_LIVE_PROVIDER",
+      providerMessage: "Waiting for the live mobile money provider.",
+      processedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+    return;
+  }
   if (providerMode === "MANUAL") {
     functions.logger.warn("Mobile money provider processing is in MANUAL mode; payout remains pending.", {
       payoutRequestId: payoutRef.id,
@@ -13200,6 +13891,9 @@ const markMobileMoneyMethodVerifiedFromCashIn = async (
   payoutData: FirebaseFirestore.DocumentData,
   payoutRequestId: string
 ): Promise<void> => {
+  // Fee collections require an already-verified number and must not rewrite
+  // verification provenance.
+  if (isFirstPartyMobileMoneyFeeCollection(payoutData)) return;
   const paymentMethodId = asNonEmptyString(payoutData.paymentMethodId);
   const senderMethodsRef = db.collection("users").doc(senderId).collection("payment_methods");
   const now = admin.firestore.Timestamp.now();
@@ -13268,6 +13962,8 @@ const markMobileMoneyMethodVerificationStatus = async (
   status: "REQUESTED" | "AWAITING_CONFIRMATION" | "FAILED",
   reason?: string
 ): Promise<void> => {
+  // A declined or timed-out fee prompt is not evidence against phone ownership.
+  if (isFirstPartyMobileMoneyFeeCollection(payoutData)) return;
   const paymentMethodId = asNonEmptyString(payoutData.paymentMethodId);
   if (!paymentMethodId) return;
 
@@ -13310,6 +14006,9 @@ const settleMobileMoneyCashInToWallet = async (
   payoutRef: FirebaseFirestore.DocumentReference,
   payoutData: FirebaseFirestore.DocumentData
 ): Promise<void> => {
+  if (isFirstPartyMobileMoneyFeeCollection(payoutData)) {
+    throw new Error("Platform fee collections must never settle into an app wallet.");
+  }
   const senderId = asNonEmptyString(payoutData.senderId);
   if (!senderId) {
     throw new Error("Missing senderId for cash-in settlement.");
@@ -13995,9 +14694,11 @@ export const createBeneficiaryVerification = functions.runWith({enforceAppCheck:
       status: decision.status,
       canProceed: decision.canProceed,
       matchLevel: decision.matchLevel,
-      reasonCode: decision.canProceed ?
-        (decision.provider.providerAccountName ? "RECIPIENT_NAME_VERIFIED" : "RECIPIENT_ROUTE_VERIFIED") :
-        "RECIPIENT_VERIFICATION_NOT_COMPLETED",
+      reasonCode: !decision.canProceed ?
+        "RECIPIENT_VERIFICATION_NOT_COMPLETED" :
+        decision.provider.providerAccountName ? "RECIPIENT_NAME_VERIFIED" :
+          decision.provider.rawStatus === AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS ?
+            "RECIPIENT_ROUTE_PENDING_PAYOUT_VALIDATION" : "RECIPIENT_ROUTE_VERIFIED",
       reasonMessage: decision.reasonMessage,
       fingerprint: prepared.fingerprint,
       createdAt: now,
@@ -14042,7 +14743,8 @@ export const createBeneficiaryVerification = functions.runWith({enforceAppCheck:
       institutionCode: prepared.institutionCodeInput,
       institutionName: decision.provider.predictedProvider || prepared.networkInput,
       accountNameVerified: !!decision.provider.providerAccountName,
-      accountRouteVerified: decision.canProceed,
+      accountRouteVerified: decision.canProceed &&
+        decision.provider.rawStatus !== AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS,
     };
   });
 
@@ -14128,6 +14830,8 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
 
       const nowMs = Date.now();
       const accountNameVerified = !!providerResolvedName;
+      const providerRouteResolvePending =
+        provider.rawStatus === AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS;
       const recipient: Record<string, unknown> = {
         name: recipientName,
         phone,
@@ -14150,7 +14854,9 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
         invoiceReference: null,
         providerResolvedName: providerResolvedName || null,
         accountNameVerified,
-        accountRouteVerified: true,
+        accountRouteVerified: !providerRouteResolvePending,
+        providerRouteValidation: providerRouteResolvePending ?
+          "PENDING_AFRIEX_PAYOUT_VALIDATION" : "AFRIEX_RESOLVED",
         recipientDetailsConfirmed: true,
         isVerified: true,
         recipientNameConfirmationSource: accountNameVerified ?
@@ -19669,6 +20375,232 @@ export const onMobileMoneyRequestCreated = functions.firestore
     return null;
   });
 
+type FirstPartyMobileMoneyFeeOutcome =
+  "COMPLETED" | "FAILED" | "FUNDING_RECONCILIATION_REQUIRED" | "PROCESSING_PROVIDER";
+
+/**
+ * Sole fulfillment authority for mobile money platform fees. A provider-
+ * confirmed collection activates the paid service and books platform revenue;
+ * it never credits or debits an app wallet balance.
+ * @param {FirebaseFirestore.DocumentReference} payoutRef Fee collection request.
+ * @param {FirebaseFirestore.DocumentData} payoutData Latest request data.
+ * @param {FirstPartyMobileMoneyFeeOutcome} outcome Provider outcome to apply.
+ */
+const settleFirstPartyMobileMoneyFeeCollection = async (
+  payoutRef: FirebaseFirestore.DocumentReference,
+  payoutData: FirebaseFirestore.DocumentData,
+  outcome: FirstPartyMobileMoneyFeeOutcome
+): Promise<void> => {
+  const orderId = asNonEmptyString(payoutData.platformFeeCollectionOrderId);
+  if (!orderId) return;
+  await db.runTransaction(async (transaction) => {
+    const orderRef = firstPartyMobileMoneyFeeOrders.doc(orderId);
+    const [orderDoc, payoutDoc] = await Promise.all([transaction.get(orderRef), transaction.get(payoutRef)]);
+    if (!orderDoc.exists) {
+      functions.logger.error("Platform fee collection references an unknown order.", {orderId, payoutRequestId: payoutRef.id});
+      return;
+    }
+    const order = (orderDoc.data() || {}) as Record<string, unknown>;
+    const payout = (payoutDoc.data() || payoutData) as Record<string, unknown>;
+    if (asNonEmptyString(order.payoutRequestId) !== payoutRef.id) {
+      functions.logger.warn("Ignoring a superseded platform fee collection attempt.", {orderId, payoutRequestId: payoutRef.id});
+      return;
+    }
+    const currentStatus = String(order.status || "").trim().toUpperCase();
+    if (["COMPLETED", "FAILED", "RECONCILIATION_REQUIRED"].includes(currentStatus)) return;
+
+    const kind = String(order.kind || "").trim().toUpperCase() as FirstPartyPlatformFeeKind;
+    const buyerId = asNonEmptyString(order.buyerId);
+    const profileRef = buyerId && (kind === "BLIND_DATE_JOIN" || kind === "BLIND_DATE_REJOIN") ?
+      db.collection("blindDateProfiles").doc(buyerId) :
+      null;
+    const profileDoc = profileRef ? await transaction.get(profileRef) : null;
+    const profileHeldForOrder = !!profileDoc?.exists &&
+      normalizeProfileStatus(profileDoc.data()?.status) === "awaiting_payment" &&
+      asNonEmptyString(profileDoc.data()?.mobileMoneyFeeCollectionOrderId) === orderId;
+
+    const now = admin.firestore.Timestamp.now();
+    const providerMessage = asNonEmptyString(payout.errorMessage, payout.providerMessage);
+
+    if (outcome === "PROCESSING_PROVIDER") {
+      if (currentStatus !== "PROCESSING_PROVIDER") {
+        transaction.set(orderRef, {status: "PROCESSING_PROVIDER", updatedAt: now}, {merge: true});
+      }
+      return;
+    }
+
+    if (outcome === "FAILED") {
+      transaction.set(orderRef, {
+        status: "FAILED",
+        paymentStatus: "FAILED",
+        paymentDetail: firstPartyMobileMoneyCollectionMessage("FAILED"),
+        failureReason: providerMessage || "The mobile money provider did not complete the collection.",
+        updatedAt: now,
+      }, {merge: true});
+      if (kind === "BLIND_DATE_JOIN" && profileRef && profileHeldForOrder) {
+        transaction.delete(profileRef);
+      }
+      transaction.set(payoutRef, {
+        platformFeeFulfillmentStatus: "NOT_FULFILLED",
+        walletCreditedAmount: 0,
+        platformFeeSettledAt: now,
+      }, {merge: true});
+      return;
+    }
+
+    const reconcile = (reason: string) => {
+      transaction.set(orderRef, {
+        status: "RECONCILIATION_REQUIRED",
+        paymentStatus: outcome === "COMPLETED" ? "PAID" : "UNKNOWN",
+        paymentDetail: "This mobile money payment is being reviewed. Contact support before paying again.",
+        failureReason: reason,
+        updatedAt: now,
+      }, {merge: true});
+      if (profileRef && profileHeldForOrder) {
+        transaction.set(profileRef, {
+          paymentCollectionStatus: "RECONCILIATION_REQUIRED",
+          paymentDetail: "Your payment is being reviewed. Contact support before paying again.",
+          updatedAt: now,
+        }, {merge: true});
+      }
+      transaction.set(payoutRef, {
+        platformFeeFulfillmentStatus: "RECONCILIATION_REQUIRED",
+        platformFeeReconciliationReason: reason,
+        walletCreditedAmount: 0,
+        platformFeeSettledAt: now,
+      }, {merge: true});
+      functions.logger.error("Platform fee collection requires reconciliation.", {orderId, payoutRequestId: payoutRef.id, reason});
+    };
+
+    if (outcome === "FUNDING_RECONCILIATION_REQUIRED") {
+      return reconcile(providerMessage || "Provider submission outcome must be confirmed manually.");
+    }
+
+    const amountUsd = roundMoney(Number(order.amountUsd || 0));
+    const platformFeeUsd = roundMoney(Number(order.platformFeeUsd || 0));
+    const providerTransferId = asNonEmptyString(payout.providerTransferId);
+    if (
+      !buyerId ||
+      asNonEmptyString(payout.senderId) !== buyerId ||
+      String(payout.type || "").toUpperCase() !== "CASH_IN" ||
+      String(payout.currency || "").toUpperCase() !== "USD" ||
+      !Number.isFinite(amountUsd) || amountUsd <= 0 ||
+      roundMoney(Number(payout.amount || 0)) !== amountUsd
+    ) {
+      return reconcile("Collected amount, currency, or payer did not match the server fee order.");
+    }
+    if (!providerTransferId || String(payout.providerRawStatus || "").toUpperCase().startsWith("SIMULATED")) {
+      return reconcile("Collection completed without a live provider transaction reference.");
+    }
+
+    const fulfillment = (order.fulfillment || {}) as Record<string, unknown>;
+    const receipt = {
+      mobileMoneyFeeCollectionOrderId: orderId,
+      mobileMoneyFeePayoutRequestId: payoutRef.id,
+      providerTransferId,
+      paymentProvider: "AFRIEX",
+      paymentRail: "MOBILE_MONEY",
+      paymentStatus: "PAID",
+      paymentProcessedAt: now,
+      updatedAt: now,
+    };
+    const recordBuyerReceipt = (title: string) => {
+      transaction.set(db.collection("users").doc(buyerId).collection("transactions").doc(), {
+        title,
+        amount: -amountUsd,
+        localAmount: Number(order.sourceAmount || payout.localAmount || 0) || null,
+        localCurrency: asNonEmptyString(order.sourceCurrency, payout.localCurrency) || null,
+        type: "INFO",
+        status: "COMPLETED",
+        timestamp: now,
+        source: "PLATFORM_FEE_MOBILE_MONEY",
+        note: "Paid with mobile money. This is not an app wallet debit.",
+        ...receipt,
+      });
+    };
+
+    switch (kind) {
+    case "SPONSORED_AD": {
+      const adId = asNonEmptyString(fulfillment.adId);
+      if (!adId) return reconcile("Sponsored ad order is missing required fulfillment data.");
+      transaction.set(db.collection("advertisements").doc(adId), {
+        title: asNonEmptyString(fulfillment.title) || "Sponsored ad",
+        description: asNonEmptyString(fulfillment.description) || "",
+        targetUrl: asNonEmptyString(fulfillment.targetUrl) || "",
+        ownerPhone: asNonEmptyString(fulfillment.ownerPhone) || "",
+        mediaUrls: Array.isArray(fulfillment.mediaUrls) ? fulfillment.mediaUrls : [],
+        media: Array.isArray(fulfillment.media) ? fulfillment.media : [],
+        sponsor: asNonEmptyString(fulfillment.sponsor) || "Volunteer App Partner",
+        ownerId: buyerId,
+        status: "ACTIVE",
+        timestamp: now,
+        ...receipt,
+      }, {merge: true});
+      recordBuyerReceipt(`Sponsored ad: ${asNonEmptyString(fulfillment.title) || "Advertisement"}`);
+      if (platformFeeUsd > 0) {
+        recordPlatformRevenue(transaction, {
+          source: "advertisementFees", amount: platformFeeUsd, relatedUserId: buyerId,
+          note: `Sponsored ad fee (mobile money) for ad ${adId}`,
+        });
+      }
+      break;
+    }
+    case "BLIND_DATE_JOIN": {
+      const profile = (fulfillment.profile || {}) as Record<string, unknown>;
+      if (!profileRef || asNonEmptyString(profile.userId) !== buyerId) {
+        return reconcile("Blind Date profile data is invalid.");
+      }
+      if (profileDoc?.exists && !profileHeldForOrder) {
+        return reconcile("A different Blind Date profile already exists for this account.");
+      }
+      transaction.set(profileRef, {
+        ...profile,
+        ...receipt,
+        status: "active",
+        paymentCollectionStatus: "PAID",
+        paymentDetail: null,
+        postedAt: now,
+        createdAt: profileDoc?.data()?.createdAt || now,
+      }, {merge: true});
+      recordBuyerReceipt("Blind Date entry");
+      if (platformFeeUsd > 0) {
+        recordPlatformRevenue(transaction, {
+          source: "blindDateFees", amount: platformFeeUsd, relatedUserId: buyerId, note: "Blind Date entry fee (mobile money)",
+        });
+      }
+      break;
+    }
+    case "BLIND_DATE_REJOIN": {
+      if (!profileRef || !profileDoc?.exists || normalizeProfileStatus(profileDoc.data()?.status) !== "matched") {
+        return reconcile("Blind Date profile was not eligible to rejoin at payment completion.");
+      }
+      transaction.update(profileRef, {...receipt, status: "active"});
+      recordBuyerReceipt("Blind Date re-join");
+      if (platformFeeUsd > 0) {
+        recordPlatformRevenue(transaction, {
+          source: "blindDateFees", amount: platformFeeUsd, relatedUserId: buyerId, note: "Blind Date re-join fee (mobile money)",
+        });
+      }
+      break;
+    }
+    default:
+      return reconcile(`Unsupported platform fee kind '${kind}'.`);
+    }
+
+    transaction.set(orderRef, {
+      ...receipt,
+      status: "COMPLETED",
+      paymentDetail: firstPartyMobileMoneyCollectionMessage("COMPLETED"),
+      completedAt: now,
+    }, {merge: true});
+    transaction.set(payoutRef, {
+      platformFeeFulfillmentStatus: "FULFILLED",
+      walletCreditedAmount: 0,
+      platformFeeSettledAt: now,
+    }, {merge: true});
+  });
+};
+
 export const onPendingMobileMoneyProviderRequestCreated = functions.firestore
   .document("payout_requests/{payoutRequestId}")
   .onCreate(async (snap) => {
@@ -19684,6 +20616,19 @@ export const onPendingMobileMoneyProviderRequestCreated = functions.firestore
     } catch (error) {
       functions.logger.error("Pending mobile money provider processing failed", error);
       const senderId = asNonEmptyString(data.senderId);
+      if (isFirstPartyMobileMoneyFeeCollection(data)) {
+        // The provider may already hold the buyer's funds; never auto-fail or retry.
+        await snap.ref.set({
+          status: "FUNDING_RECONCILIATION_REQUIRED",
+          providerStatus: "COLLECTION_SUBMISSION_RECONCILIATION_REQUIRED",
+          providerMessage: "Provider processing stopped before the fee collection outcome was confirmed.",
+          fundingReconciliationRequired: true,
+          fundingReconciliationReason: "Confirm the platform fee collection with the provider. Do not retry and do not credit an app wallet.",
+          fundingReconciliationRequestedAt: admin.firestore.Timestamp.now(),
+          processedAt: admin.firestore.Timestamp.now(),
+        }, {merge: true});
+        return null;
+      }
       const isDirectMobileMoneyCollection =
         type === "CASH_IN" &&
         String(data.fundingSource || "").trim().toUpperCase() === "EXTERNAL_MOBILE_MONEY";
@@ -19739,6 +20684,18 @@ export const onMobileMoneyPayoutStatusChanged = functions.firestore
     const after = change.after.data() || {};
 
     if (before.status === after.status) return null;
+
+    // Platform fees branch off before any Send Money or wallet settlement logic.
+    if (isFirstPartyMobileMoneyFeeCollection(after)) {
+      const feeStatus = String(after.status || "").trim().toUpperCase();
+      if (
+        feeStatus === "COMPLETED" || feeStatus === "FAILED" ||
+        feeStatus === "FUNDING_RECONCILIATION_REQUIRED" || feeStatus === "PROCESSING_PROVIDER"
+      ) {
+        await settleFirstPartyMobileMoneyFeeCollection(change.after.ref, after, feeStatus);
+      }
+      return null;
+    }
 
     const type = String(after.type || "");
     if (type !== "CASH_OUT" && type !== "BENEFICIARY_TRANSFER" && type !== "CASH_IN") return null;
