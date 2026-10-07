@@ -274,6 +274,6 @@
   },
   "extensions": {},
   "database": {
-    "rules": "database.rules.json"
+    "rules": "my-firebase-project/database.rules.json"
   }
 }

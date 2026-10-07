@@ -6,3 +6,7 @@ my-firebase-project/my-firebase-functions/**/*.json text eol=lf
 my-firebase-project/my-firebase-functions/.eslintrc.js text eol=lf
 my-firebase-project/my-firebase-functions/.editorconfig text eol=lf
 scripts/*.cjs text eol=lf
+
+# Rules and indexes deploy byte-for-byte; keep them LF so Windows and macOS deploys match.
+my-firebase-project/*.rules text eol=lf
+my-firebase-project/*.json text eol=lf
