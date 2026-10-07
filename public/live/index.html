@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Volunteers App Live</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #04111e;
+      --bg-soft: #10263c;
+      --card: rgba(255, 255, 255, 0.08);
+      --card-strong: rgba(255, 255, 255, 0.14);
+      --ink: #f7fbff;
+      --muted: rgba(247, 251, 255, 0.76);
+      --line: rgba(255, 255, 255, 0.12);
+      --accent: #ff4f87;
+      --accent-strong: #ff2c70;
+      --accent-soft: rgba(255, 79, 135, 0.18);
+      --success: #32d583;
+      --warning: #ffb020;
+      --radius: 28px;
+      --shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top, rgba(255, 79, 135, 0.22), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(37, 99, 235, 0.22), transparent 30%),
+        linear-gradient(180deg, #071522 0%, var(--bg) 100%);
+      color: var(--ink);
+      font-family: "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(0, 440px) minmax(0, 1fr);
+      gap: 24px;
+      padding: 24px;
+    }
+
+    .panel,
+    .stage {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--card);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(22px);
+    }
+
+    .panel {
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #ffd7e4;
+      font-size: 0.86rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 6px rgba(255, 79, 135, 0.16);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.2rem);
+      line-height: 0.98;
+      letter-spacing: -0.04em;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 1rem;
+    }
+
+    .status {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 0.94rem;
+      color: var(--ink);
+    }
+
+    .pill.muted {
+      color: var(--muted);
+    }
+
+    .pill.success {
+      color: #d3ffe6;
+      background: rgba(50, 213, 131, 0.14);
+      border-color: rgba(50, 213, 131, 0.28);
+    }
+
+    .pill.warning {
+      color: #ffe4a8;
+      background: rgba(255, 176, 32, 0.14);
+      border-color: rgba(255, 176, 32, 0.26);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .button {
+      appearance: none;
+      border: 0;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 50px;
+      padding: 0 18px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 0.96rem;
+      text-decoration: none;
+      transition: transform 140ms ease, opacity 140ms ease, background 140ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+    }
+
+    .button:disabled {
+      cursor: default;
+      opacity: 0.55;
+      transform: none;
+    }
+
+    .button.primary {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+      color: #fff;
+      box-shadow: 0 14px 30px rgba(255, 44, 112, 0.28);
+    }
+
+    .button.secondary {
+      background: rgba(255, 255, 255, 0.09);
+      color: var(--ink);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    .button.ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    .grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .mini-card {
+      padding: 16px;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .mini-card strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.82rem;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: rgba(247, 251, 255, 0.62);
+    }
+
+    .mini-card span {
+      color: var(--ink);
+      font-size: 1rem;
+      line-height: 1.45;
+    }
+
+    .stage {
+      position: relative;
+      overflow: hidden;
+      min-height: min(78vh, 860px);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+        #02060b;
+    }
+
+    .stage-shell {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stage-meta {
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px;
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    .stage-meta .label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.42);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: #fff;
+      font-size: 0.9rem;
+      font-weight: 700;
+      backdrop-filter: blur(14px);
+    }
+
+    .stage-meta .label.live::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #ff3b5f;
+      box-shadow: 0 0 0 6px rgba(255, 59, 95, 0.16);
+    }
+
+    .stage-surface {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at center, rgba(255, 79, 135, 0.18), transparent 28%),
+        linear-gradient(180deg, rgba(4, 17, 30, 0.24), rgba(1, 4, 8, 0.86));
+    }
+
+    .stage-video,
+    .stage-video video,
+    .stage-video-player {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+    }
+
+    .placeholder {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 28px;
+      color: rgba(247, 251, 255, 0.9);
+      z-index: 2;
+    }
+
+    .placeholder-card {
+      width: min(100%, 520px);
+      padding: 26px;
+      border-radius: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(0, 0, 0, 0.38);
+      backdrop-filter: blur(18px);
+    }
+
+    .placeholder-card h2 {
+      margin: 0 0 12px;
+      font-size: 1.5rem;
+    }
+
+    .placeholder-card p + p {
+      margin-top: 10px;
+    }
+
+    .stage-footer {
+      position: absolute;
+      inset: auto 0 0 0;
+      padding: 20px 22px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 16px;
+      background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.74) 100%);
+      z-index: 3;
+    }
+
+    .stage-footer .copy {
+      max-width: 720px;
+    }
+
+    .stage-footer h3 {
+      margin: 0 0 8px;
+      font-size: 1.28rem;
+    }
+
+    .stage-footer p {
+      color: rgba(247, 251, 255, 0.78);
+      font-size: 0.96rem;
+    }
+
+    .muted-note {
+      font-size: 0.88rem;
+      color: rgba(247, 251, 255, 0.68);
+    }
+
+    @media (max-width: 1024px) {
+      .shell {
+        grid-template-columns: 1fr;
+        padding: 18px;
+      }
+
+      .panel {
+        order: 2;
+      }
+
+      .stage {
+        order: 1;
+        min-height: 62vh;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .shell {
+        padding: 14px;
+        gap: 16px;
+      }
+
+      .panel,
+      .stage {
+        border-radius: 22px;
+      }
+
+      .panel {
+        padding: 22px;
+      }
+
+      .actions {
+        flex-direction: column;
+      }
+
+      .button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="panel">
+      <div class="eyebrow" id="eyebrow">MindLoom Live</div>
+      <div>
+        <h1 id="headline">Open this live stream your way.</h1>
+        <p id="intro">If you already have Volunteers App, this link will try to open it automatically. If you do not, you can keep watching here on the web in view-only mode when the broadcaster shared a browser-ready link.</p>
+      </div>
+
+      <div class="status">
+        <div class="pill" id="status-pill">Preparing your live link…</div>
+        <div class="pill muted" id="mode-pill">App + Web</div>
+      </div>
+
+      <div class="actions">
+        <a class="button primary" id="open-app" href="volunteersapp://live">Open Volunteers App</a>
+        <button class="button secondary" id="watch-web" type="button">Watch on Web</button>
+        <a class="button ghost" id="get-app" href="/volunteersapp/">Get the App</a>
+      </div>
+
+      <div class="grid">
+        <div class="mini-card">
+          <strong>Session</strong>
+          <span id="meta-session">Preparing your stream…</span>
+        </div>
+        <div class="mini-card">
+          <strong>Host</strong>
+          <span id="meta-host">Resolving broadcaster…</span>
+        </div>
+        <div class="mini-card">
+          <strong>Browser Access</strong>
+          <span id="meta-browser">Waiting for the link check…</span>
+        </div>
+        <div class="mini-card">
+          <strong>Interaction</strong>
+          <span id="meta-interaction">Chat, stage requests, and reactions stay inside the app.</span>
+        </div>
+      </div>
+
+      <p class="muted-note" id="status-copy">Trying to open Volunteers App now. If nothing happens, you can watch on web or install the app.</p>
+    </section>
+
+    <section class="stage">
+      <div class="stage-shell">
+        <div class="stage-meta">
+          <div class="label live" id="stage-state">LIVE ACCESS</div>
+          <div class="label" id="stage-mode">View Only</div>
+        </div>
+
+        <div class="stage-surface">
+          <div class="stage-video" id="stage-video"></div>
+        </div>
+
+        <div class="placeholder" id="placeholder">
+          <div class="placeholder-card">
+            <h2 id="placeholder-title">Your live stream is almost ready.</h2>
+            <p id="placeholder-body">Tap <strong>Watch on Web</strong> if you want to keep watching here without installing the app.</p>
+            <p id="placeholder-note">Live web viewing is intentionally view-only. Join requests, chat, and on-stage participation still stay in Volunteers App.</p>
+          </div>
+        </div>
+
+        <div class="stage-footer">
+          <div class="copy">
+            <h3 id="stage-title">MindLoom Live</h3>
+            <p id="stage-description">The broadcaster can share the same link for app viewers and browser viewers.</p>
+          </div>
+          <div class="muted-note" id="stage-note">Waiting for live metadata…</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var sessionId = (params.get("sessionId") || "").trim();
+      var hostId = (params.get("hostId") || "").trim();
+      var shareToken = (params.get("token") || "").trim();
+      var appStorePath = "/volunteersapp/";
+      var leftPageForApp = false;
+      var resolvedAccess = null;
+      var resolvingAccess = null;
+      var agoraClient = null;
+      var remoteVideoMounted = false;
+      var terminalState = false;
+      var canResolveAccess = Boolean(shareToken || (sessionId && hostId));
+      var isAppleTouchDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+      var elements = {
+        eyebrow: document.getElementById("eyebrow"),
+        headline: document.getElementById("headline"),
+        intro: document.getElementById("intro"),
+        statusPill: document.getElementById("status-pill"),
+        modePill: document.getElementById("mode-pill"),
+        openApp: document.getElementById("open-app"),
+        watchWeb: document.getElementById("watch-web"),
+        getApp: document.getElementById("get-app"),
+        metaSession: document.getElementById("meta-session"),
+        metaHost: document.getElementById("meta-host"),
+        metaBrowser: document.getElementById("meta-browser"),
+        metaInteraction: document.getElementById("meta-interaction"),
+        statusCopy: document.getElementById("status-copy"),
+        stageState: document.getElementById("stage-state"),
+        stageMode: document.getElementById("stage-mode"),
+        stageVideo: document.getElementById("stage-video"),
+        placeholder: document.getElementById("placeholder"),
+        placeholderTitle: document.getElementById("placeholder-title"),
+        placeholderBody: document.getElementById("placeholder-body"),
+        placeholderNote: document.getElementById("placeholder-note"),
+        stageTitle: document.getElementById("stage-title"),
+        stageDescription: document.getElementById("stage-description"),
+        stageNote: document.getElementById("stage-note")
+      };
+
+      function buildAppUrl() {
+        var appUrl = new URL("volunteersapp://live");
+        if (sessionId) {
+          appUrl.searchParams.set("sessionId", sessionId);
+        }
+        if (hostId) {
+          appUrl.searchParams.set("hostId", hostId);
+        }
+        if (shareToken) {
+          // Preserve signed invitation access when handing off to iOS or Android.
+          appUrl.searchParams.set("token", shareToken);
+        }
+        return appUrl;
+      }
+
+      var appUrl = buildAppUrl();
+      elements.openApp.setAttribute("href", appUrl.toString());
+      elements.getApp.setAttribute("href", appStorePath);
+
+      if (sessionId) {
+        elements.metaSession.textContent = sessionId;
+      } else {
+        elements.metaSession.textContent = "Live share link";
+      }
+      if (hostId) {
+        elements.metaHost.textContent = hostId;
+      }
+
+      function markPageHidden() {
+        if (document.visibilityState === "hidden") {
+          leftPageForApp = true;
+        }
+      }
+
+      document.addEventListener("visibilitychange", markPageHidden);
+      window.addEventListener("pagehide", function () {
+        leftPageForApp = true;
+      });
+
+      function setStatus(message, pillText) {
+        if (message) {
+          elements.statusCopy.textContent = message;
+        }
+        if (pillText) {
+          elements.statusPill.textContent = pillText;
+        }
+      }
+
+      function setStageCopy(title, description, note) {
+        if (title) {
+          elements.stageTitle.textContent = title;
+        }
+        if (description) {
+          elements.stageDescription.textContent = description;
+        }
+        if (note) {
+          elements.stageNote.textContent = note;
+        }
+      }
+
+      function setPlaceholder(title, body, note) {
+        if (title) {
+          elements.placeholderTitle.textContent = title;
+        }
+        if (body) {
+          elements.placeholderBody.innerHTML = body;
+        }
+        if (note) {
+          elements.placeholderNote.textContent = note;
+        }
+      }
+
+      function showPlaceholder() {
+        elements.placeholder.style.display = "grid";
+      }
+
+      function hidePlaceholder() {
+        elements.placeholder.style.display = "none";
+      }
+
+      function teardownVideoSurface() {
+        var existingVideo = elements.stageVideo.querySelector("video");
+        if (existingVideo && existingVideo._hlsInstance) {
+          try {
+            existingVideo._hlsInstance.destroy();
+          } catch (_) {}
+        }
+        if (agoraClient) {
+          try {
+            agoraClient.removeAllListeners();
+          } catch (_) {}
+          try {
+            agoraClient.leave();
+          } catch (_) {}
+          agoraClient = null;
+        }
+        remoteVideoMounted = false;
+        elements.stageVideo.innerHTML = "";
+      }
+
+      function loadAgoraSdk() {
+        return new Promise(function (resolve, reject) {
+          if (window.AgoraRTC) {
+            resolve(window.AgoraRTC);
+            return;
+          }
+
+          var existing = document.querySelector("script[data-agora-sdk]");
+          if (existing) {
+            existing.addEventListener("load", function () { resolve(window.AgoraRTC); }, { once: true });
+            existing.addEventListener("error", function () { reject(new Error("Agora Web SDK failed to load.")); }, { once: true });
+            return;
+          }
+
+          var script = document.createElement("script");
+          script.src = "https://download.agora.io/sdk/release/AgoraRTC_N.js";
+          script.async = true;
+          script.setAttribute("data-agora-sdk", "true");
+          script.onload = function () { resolve(window.AgoraRTC); };
+          script.onerror = function () { reject(new Error("Agora Web SDK failed to load.")); };
+          document.head.appendChild(script);
+        });
+      }
+
+      function loadHlsSdk() {
+        return new Promise(function (resolve, reject) {
+          if (window.Hls) {
+            resolve(window.Hls);
+            return;
+          }
+
+          var existing = document.querySelector("script[data-hls-sdk]");
+          if (existing) {
+            existing.addEventListener("load", function () { resolve(window.Hls); }, { once: true });
+            existing.addEventListener("error", function () { reject(new Error("HLS playback library failed to load.")); }, { once: true });
+            return;
+          }
+
+          var script = document.createElement("script");
+          script.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
+          script.async = true;
+          script.setAttribute("data-hls-sdk", "true");
+          script.onload = function () { resolve(window.Hls); };
+          script.onerror = function () { reject(new Error("HLS playback library failed to load.")); };
+          document.head.appendChild(script);
+        });
+      }
+
+      function resolveAccess() {
+        if (resolvedAccess) {
+          return Promise.resolve(resolvedAccess);
+        }
+        if (resolvingAccess) {
+          return resolvingAccess;
+        }
+        if (!canResolveAccess) {
+          return Promise.reject(new Error("This link does not contain browser viewing access."));
+        }
+
+        var endpoint = new URL("/api/live-share-access", window.location.origin);
+        if (shareToken) {
+          endpoint.searchParams.set("token", shareToken);
+        }
+        if (sessionId) {
+          endpoint.searchParams.set("sessionId", sessionId);
+        }
+        if (hostId) {
+          endpoint.searchParams.set("hostId", hostId);
+        }
+
+        resolvingAccess = fetch(endpoint.toString(), {
+          method: "GET",
+          headers: {
+            "Accept": "application/json"
+          }
+        })
+          .then(function (response) {
+            return response.json().then(function (payload) {
+              if (!response.ok) {
+                var error = new Error(payload && payload.error ? payload.error : "Could not resolve this live share.");
+                error.payload = payload;
+                if (payload && payload.state) {
+                  updateResolvedMetadata(payload);
+                }
+                throw error;
+              }
+              return payload;
+            });
+          })
+          .then(function (payload) {
+            resolvedAccess = payload;
+            resolvingAccess = null;
+            updateResolvedMetadata(payload);
+            return payload;
+          })
+          .catch(function (error) {
+            resolvingAccess = null;
+            throw error;
+          });
+
+        return resolvingAccess;
+      }
+
+      function updateResolvedMetadata(payload) {
+        var title = payload && payload.title ? payload.title : "Live Session";
+        var hostName = payload && payload.hostName ? payload.hostName : "Host";
+        var state = payload && payload.state ? String(payload.state).toLowerCase() : "unknown";
+
+        elements.metaSession.textContent = payload && payload.sessionId ? payload.sessionId : (sessionId || "Live share");
+        elements.metaHost.textContent = hostName;
+        elements.stageTitle.textContent = title;
+        elements.headline.textContent = state === "replay"
+          ? "Watch this replay on web or open it in Volunteers App."
+          : "Watch this live stream on web or open it in Volunteers App.";
+
+        if (payload && payload.appUrl) {
+          elements.openApp.setAttribute("href", payload.appUrl);
+        }
+
+        terminalState = state === "processing" || state === "ended" || state === "restricted";
+
+        if (state === "live") {
+          elements.statusPill.textContent = "Live ready on web";
+          elements.modePill.textContent = "Live + App";
+          elements.metaBrowser.textContent = "This link includes browser live viewing in view-only mode.";
+          elements.stageState.textContent = "LIVE";
+          elements.stageMode.textContent = "View Only";
+          setPlaceholder(
+            "View-only live playback is ready.",
+            "Tap <strong>Watch on Web</strong> to join as a browser viewer without downloading the app.",
+            "Chat, stage joining, and join requests stay in Volunteers App."
+          );
+          setStageCopy(
+            title,
+            hostName + " is live right now. The browser experience is watch-only so the app still stays the main place for chat and on-stage participation.",
+            "Live viewer token is prepared for web playback."
+          );
+        } else if (state === "replay") {
+          elements.statusPill.textContent = "Replay ready on web";
+          elements.modePill.textContent = "Replay + App";
+          elements.metaBrowser.textContent = "This shared replay can be watched right here in the browser.";
+          elements.stageState.textContent = "REPLAY";
+          elements.stageMode.textContent = "On Demand";
+          setPlaceholder(
+            "Replay playback is ready.",
+            "Tap <strong>Watch on Web</strong> to start the saved replay in your browser.",
+            "The app still gives the full Volunteers App experience, but web replay is ready too."
+          );
+          setStageCopy(
+            title,
+            hostName + " shared this saved replay. You can watch it in-browser or open it in the app.",
+            "Replay access is short-lived and signed for safety."
+          );
+        } else if (state === "processing") {
+          elements.statusPill.textContent = "Replay processing";
+          elements.modePill.textContent = "App + Replay Soon";
+          elements.metaBrowser.textContent = "Replay is still processing on the server.";
+          elements.stageState.textContent = "PROCESSING";
+          elements.stageMode.textContent = "Please Wait";
+          elements.watchWeb.disabled = true;
+          setPlaceholder(
+            "This stream has ended.",
+            "The replay is still processing on the server. You can try again in a little while.",
+            "If the host allows link access, this same link opens the replay once processing finishes."
+          );
+          setStageCopy(
+            title,
+            hostName + " already ended this stream. The replay is still being prepared.",
+            "Replay processing is not finished yet."
+          );
+        } else if (state === "ended") {
+          elements.statusPill.textContent = "Live ended";
+          elements.modePill.textContent = "Ended";
+          elements.metaBrowser.textContent = "This stream ended before replay became available.";
+          elements.stageState.textContent = "ENDED";
+          elements.stageMode.textContent = "Unavailable";
+          elements.watchWeb.disabled = true;
+          setPlaceholder(
+            "This stream already ended.",
+            "There is no browser playback available on this link right now.",
+            "Ask the broadcaster to share a replay if they publish one later."
+          );
+          setStageCopy(
+            title,
+            hostName + " already ended this stream.",
+            "No replay is available on this link right now."
+          );
+        } else if (state === "restricted") {
+          var reason = payload && payload.error ? payload.error : "This broadcast is not open to browser viewers.";
+          elements.statusPill.textContent = "App only";
+          elements.modePill.textContent = "Open in App";
+          elements.metaBrowser.textContent = reason;
+          elements.stageState.textContent = "PRIVATE";
+          elements.stageMode.textContent = "App Only";
+          elements.watchWeb.disabled = true;
+          setPlaceholder(
+            "Browser viewing is not available for this link.",
+            "Open it in Volunteers App to check whether your account can watch.",
+            reason
+          );
+          setStageCopy(
+            title,
+            hostName + " limited who can watch this broadcast.",
+            reason
+          );
+        }
+      }
+
+      async function startReplay(playbackUrl) {
+        teardownVideoSurface();
+        hidePlaceholder();
+        var video = document.createElement("video");
+        video.className = "stage-video-player";
+        video.controls = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        elements.stageVideo.appendChild(video);
+
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = playbackUrl;
+        } else {
+          var Hls = await loadHlsSdk();
+          if (!Hls || !Hls.isSupported || !Hls.isSupported()) {
+            throw new Error("This browser does not support HLS replay playback.");
+          }
+          var hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: false
+          });
+          hls.loadSource(playbackUrl);
+          hls.attachMedia(video);
+          video._hlsInstance = hls;
+        }
+
+        try {
+          await video.play();
+        } catch (_) {
+          setStatus("Replay is ready. Tap play to start watching in the browser.", "Replay ready");
+        }
+      }
+
+      async function startLiveViewer(access) {
+        teardownVideoSurface();
+        hidePlaceholder();
+        var AgoraRTC = await loadAgoraSdk();
+        var client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+        agoraClient = client;
+        remoteVideoMounted = false;
+
+        client.on("user-published", async function (user, mediaType) {
+          await client.subscribe(user, mediaType);
+          if (mediaType === "video" && user.videoTrack) {
+            user.videoTrack.play("stage-video");
+            remoteVideoMounted = true;
+          }
+          if (mediaType === "audio" && user.audioTrack) {
+            user.audioTrack.play();
+          }
+          setStatus("Watching live on web in view-only mode.", "Live on Web");
+          setStageCopy(
+            access.title || "Live Session",
+            (access.hostName || "Host") + " is broadcasting live. You are watching the browser viewer version.",
+            "View-only web playback is active."
+          );
+        });
+
+        client.on("user-unpublished", function (_, mediaType) {
+          if (mediaType === "video") {
+            remoteVideoMounted = false;
+            showPlaceholder();
+            setPlaceholder(
+              "Waiting for the broadcaster video feed…",
+              "The live room is connected, but the broadcaster video is not publishing right now.",
+              "Audio may still continue even if the host camera is off."
+            );
+          }
+        });
+
+        // Each resolve mints a fresh viewer uid, so rejoin instead of renewing the token in place.
+        client.on("token-privilege-did-expire", function () {
+          resolvedAccess = null;
+          resolveAccess()
+            .then(function (fresh) {
+              if (fresh.state === "live" && fresh.web && fresh.web.mode === "agora_live_viewer") {
+                return startLiveViewer(fresh);
+              }
+              if (fresh.state === "replay" && fresh.web && fresh.web.playbackUrl) {
+                return startReplay(fresh.web.playbackUrl);
+              }
+              teardownVideoSurface();
+              showPlaceholder();
+            })
+            .catch(function (error) {
+              teardownVideoSurface();
+              showPlaceholder();
+              setStatus(error && error.message ? error.message : "Browser viewing ended.", "Watch ended");
+            });
+        });
+
+        client.on("user-left", function () {
+          remoteVideoMounted = false;
+          showPlaceholder();
+          setPlaceholder(
+            "The broadcaster left the live room.",
+            "This stream may have ended or the host may have disconnected.",
+            "Try reopening the app if the live room is continuing there."
+          );
+        });
+
+        await client.setClientRole("audience");
+        await client.join(
+          access.web.appId,
+          access.web.channelName,
+          access.web.rtcToken,
+          access.web.uid
+        );
+
+        if (!remoteVideoMounted) {
+          showPlaceholder();
+          setPlaceholder(
+            "Connected to the live room.",
+            "Waiting for the broadcaster video to appear. Stay here and it should start automatically when the host publishes video.",
+            "This web view stays watch-only by design."
+          );
+        }
+      }
+
+      async function handleWatchOnWeb() {
+        elements.watchWeb.disabled = true;
+        var originalLabel = elements.watchWeb.textContent;
+        elements.watchWeb.textContent = "Loading…";
+
+        try {
+          var access = await resolveAccess();
+          if (access.state === "replay" && access.web && access.web.playbackUrl) {
+            await startReplay(access.web.playbackUrl);
+          } else if (access.state === "live" && access.web && access.web.mode === "agora_live_viewer") {
+            await startLiveViewer(access);
+          } else {
+            showPlaceholder();
+            throw new Error(access.error || "This shared link is not watchable on the web right now.");
+          }
+        } catch (error) {
+          showPlaceholder();
+          if (terminalState) {
+            setStatus(error && error.message ? error.message : "This link is not watchable on the web right now.");
+            return;
+          }
+          setStatus(error && error.message ? error.message : "Could not load this live stream on the web.", "Watch unavailable");
+          setPlaceholder(
+            "Web playback is not available right now.",
+            "This link can still open in Volunteers App. If you expected browser viewing, ask the broadcaster to reshare from the updated live screen.",
+            "Stage joining, live chat, and reactions still stay in the app even when web playback is available."
+          );
+          setStageCopy(
+            "Volunteers App Live",
+            "Open the app if you want the full interactive experience, or try this link again after the broadcaster refreshes their share.",
+            "Browser playback could not be prepared."
+          );
+        } finally {
+          elements.watchWeb.disabled = terminalState;
+          elements.watchWeb.textContent = originalLabel;
+        }
+      }
+
+      elements.watchWeb.addEventListener("click", function () {
+        handleWatchOnWeb();
+      });
+
+      if (!canResolveAccess) {
+        elements.watchWeb.disabled = true;
+        elements.metaBrowser.textContent = "This link opens the app, but it does not include browser playback access.";
+        setPlaceholder(
+          "This link is app-first.",
+          "Open it in Volunteers App, or ask the broadcaster to share again from the updated live screen if you need browser viewing too.",
+          "Browser playback is only enabled on signed live share links."
+        );
+      } else {
+        resolveAccess().catch(function (error) {
+          if (terminalState) {
+            setStatus(error && error.message ? error.message : "This link is not watchable on the web right now.");
+            return;
+          }
+          setStatus(error && error.message ? error.message : "Could not check browser access for this link.", "Link check failed");
+          elements.metaBrowser.textContent = "Browser playback could not be prepared right now.";
+        });
+      }
+
+      // Installed iOS apps open universal links before this page loads; a custom-scheme redirect
+      // would only show Safari's "invalid address" alert when the app is missing.
+      if (!isAppleTouchDevice) {
+        window.setTimeout(function () {
+          window.location.replace(elements.openApp.getAttribute("href"));
+        }, 120);
+      }
+
+      window.setTimeout(function () {
+        if (leftPageForApp) {
+          return;
+        }
+        if (canResolveAccess && !terminalState) {
+          setStatus("If Volunteers App did not open, use Watch on Web to keep viewing here.", "App or Web");
+        } else {
+          setStatus("If Volunteers App did not open, install the app to continue from this link.", "App required");
+        }
+      }, 1500);
+    })();
+  </script>
+</body>
+</html>

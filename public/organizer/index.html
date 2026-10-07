@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Organizer Portal</title>
+    <meta
+      name="description"
+      content="Organizer-only portal for creating hosted events and reviewing event applicants."
+    />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="stylesheet" href="../styles.css" />
+    <style>
+      body.organizer-portal {
+        background:
+          radial-gradient(circle at top right, rgba(33, 150, 243, 0.12), transparent 28%),
+          linear-gradient(180deg, #f4f8fc 0%, #eef4f8 100%);
+      }
+
+      .organizer-shell {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 28px 0 48px;
+      }
+
+      .organizer-topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+
+      .organizer-utility {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .organizer-top-summary {
+        display: inline-flex;
+        align-items: stretch;
+        overflow: hidden;
+        border: 1px solid #d6e4ee;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.76);
+        box-shadow: 0 8px 18px rgba(18, 58, 90, 0.07);
+      }
+
+      .organizer-top-metric {
+        display: grid;
+        gap: 2px;
+        min-width: 58px;
+        padding: 7px 10px;
+        text-align: center;
+      }
+
+      .organizer-top-metric + .organizer-top-metric {
+        border-left: 1px solid #dce8f0;
+      }
+
+      .organizer-top-metric strong {
+        color: #123a5a;
+        font-size: 0.98rem;
+        line-height: 1;
+      }
+
+      .organizer-top-metric span {
+        color: #5d7385;
+        font-size: 0.68rem;
+        font-weight: 700;
+        line-height: 1.1;
+      }
+
+      .organizer-brand {
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        color: #123a5a;
+        text-decoration: none;
+      }
+
+      .organizer-hero {
+        position: relative;
+        overflow: hidden;
+        background: linear-gradient(135deg, #123a5a, #1a5f8c 55%, #2787b7);
+        color: #fff;
+        border-radius: 28px;
+        padding: 28px;
+        box-shadow: 0 24px 60px rgba(16, 42, 67, 0.18);
+      }
+
+      .organizer-hero::after {
+        content: "";
+        position: absolute;
+        width: 290px;
+        height: 290px;
+        right: -128px;
+        bottom: -162px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 50%;
+        box-shadow: 0 0 0 38px rgba(255, 255, 255, 0.05), 0 0 0 78px rgba(255, 255, 255, 0.035);
+        pointer-events: none;
+      }
+
+      .organizer-hero h1 {
+        margin: 8px 0 12px;
+        font-size: clamp(1.9rem, 4vw, 2.8rem);
+        line-height: 1.08;
+        color: #fff;
+      }
+
+      .organizer-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.14);
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+
+      .organizer-hero p {
+        max-width: 760px;
+        margin: 0;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .organizer-hero-grid {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .organizer-hero-card {
+        padding: 14px 16px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+      }
+
+      .organizer-hero-card strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 1.5rem;
+        line-height: 1.05;
+        color: #fff;
+      }
+
+      .organizer-hero-card span {
+        color: rgba(255, 255, 255, 0.82);
+        font-size: 0.9rem;
+      }
+
+      .organizer-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.9fr);
+        gap: 18px;
+        margin-top: 20px;
+      }
+
+      .organizer-card {
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(18, 58, 90, 0.08);
+        border-radius: 24px;
+        box-shadow: 0 16px 36px rgba(18, 58, 90, 0.08);
+        padding: 22px;
+      }
+
+      .organizer-card h2 {
+        margin: 0 0 6px;
+        font-size: 1.18rem;
+        color: #163b59;
+      }
+
+      .organizer-card p.section-copy {
+        margin: 0 0 16px;
+        color: #597086;
+        font-size: 0.96rem;
+      }
+
+      .organizer-alert {
+        padding: 12px 14px;
+        border-radius: 16px;
+        margin-bottom: 14px;
+        font-size: 0.95rem;
+      }
+
+      .organizer-alert.info {
+        background: #edf7ff;
+        color: #0f4f7b;
+        border: 1px solid #cfe8fb;
+      }
+
+      .organizer-alert.error {
+        background: #fff3f2;
+        color: #a23b33;
+        border: 1px solid #f0d0cc;
+      }
+
+      .organizer-auth-form,
+      .organizer-form-grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .organizer-form-grid.two-up {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .organizer-field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .organizer-field label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #274861;
+      }
+
+      .organizer-field input,
+      .organizer-field textarea,
+      .organizer-field select {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid #d6e1ea;
+        background: #fff;
+        color: #17384f;
+        font: inherit;
+        box-sizing: border-box;
+      }
+
+      .organizer-field textarea {
+        min-height: 112px;
+        resize: vertical;
+      }
+
+      .organizer-field input:focus-visible,
+      .organizer-field textarea:focus-visible,
+      .organizer-field select:focus-visible,
+      .organizer-btn:focus-visible {
+        outline: 3px solid rgba(39, 135, 183, 0.28);
+        outline-offset: 2px;
+      }
+
+      .organizer-field-hint {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        color: #6d8294;
+        font-size: 0.78rem;
+      }
+
+      .organizer-button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 4px;
+      }
+
+      .organizer-btn {
+        appearance: none;
+        border: 0;
+        border-radius: 999px;
+        padding: 12px 18px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform 0.15s ease, opacity 0.15s ease;
+      }
+
+      .organizer-btn:hover {
+        transform: translateY(-1px);
+      }
+
+      .organizer-btn:disabled {
+        opacity: 0.55;
+        cursor: wait;
+        transform: none;
+      }
+
+      .organizer-btn.primary {
+        background: linear-gradient(135deg, #195f8a, #2787b7);
+        color: #fff;
+      }
+
+      .organizer-btn.secondary {
+        background: #edf4f9;
+        color: #184260;
+      }
+
+      .organizer-btn.ghost {
+        background: #fff;
+        color: #184260;
+        border: 1px solid #d6e1ea;
+      }
+
+      .organizer-btn.danger {
+        background: #fff1ef;
+        color: #a23b33;
+        border: 1px solid #efcdc8;
+      }
+
+      .organizer-user-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: #edf4f9;
+        color: #204563;
+        font-size: 0.9rem;
+      }
+
+      .organizer-events-list,
+      .organizer-applicant-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .organizer-event-item,
+      .organizer-applicant-item {
+        border: 1px solid #dde8f0;
+        border-radius: 18px;
+        padding: 16px;
+        background: #fbfdff;
+        transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+      }
+
+      .organizer-event-item:hover,
+      .organizer-applicant-item:hover {
+        border-color: #b9d6e8;
+        box-shadow: 0 10px 24px rgba(18, 58, 90, 0.08);
+        transform: translateY(-1px);
+      }
+
+      .organizer-event-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .organizer-event-item h3,
+      .organizer-applicant-item h3 {
+        margin: 0 0 6px;
+        font-size: 1rem;
+        color: #17384f;
+      }
+
+      .organizer-meta,
+      .organizer-mini-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .organizer-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #edf4f9;
+        color: #365871;
+        font-size: 0.82rem;
+      }
+
+      .organizer-state {
+        display: inline-flex;
+        align-items: center;
+        flex: 0 0 auto;
+        padding: 5px 9px;
+        border-radius: 999px;
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .organizer-state.upcoming,
+      .organizer-state.approved {
+        background: #e5f7ed;
+        color: #17653c;
+      }
+
+      .organizer-state.pending {
+        background: #fff5d8;
+        color: #78560b;
+      }
+
+      .organizer-state.closed,
+      .organizer-state.past,
+      .organizer-state.rejected {
+        background: #eef2f5;
+        color: #52687b;
+      }
+
+      .organizer-empty {
+        padding: 18px;
+        border-radius: 18px;
+        background: #f5f9fc;
+        color: #567086;
+        text-align: center;
+      }
+
+      .organizer-filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .organizer-note {
+        margin-top: 14px;
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: #fff8e8;
+        border: 1px solid #f4dfaa;
+        color: #7a5a17;
+      }
+
+      .organizer-hidden {
+        display: none !important;
+      }
+
+      .organizer-portal:not(.organizer-authenticated) .organizer-authenticated-only {
+        display: none !important;
+      }
+
+      @media (max-width: 960px) {
+        .organizer-layout {
+          grid-template-columns: 1fr;
+        }
+
+        #organizer-hosted-events-panel {
+          order: -1;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .organizer-shell {
+          width: min(100% - 20px, 1180px);
+          padding-top: 18px;
+        }
+
+        .organizer-hero,
+        .organizer-card {
+          padding: 18px;
+          border-radius: 22px;
+        }
+
+        .organizer-form-grid.two-up {
+          grid-template-columns: 1fr;
+        }
+
+        .organizer-topbar {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .organizer-utility {
+          justify-content: flex-start;
+        }
+
+        .organizer-top-summary {
+          width: 100%;
+          justify-content: space-around;
+        }
+
+        .organizer-top-metric {
+          flex: 1;
+        }
+
+        .organizer-event-heading {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body class="organizer-portal">
+    <main class="organizer-shell">
+      <div class="organizer-topbar">
+        <a class="organizer-brand" href="https://softsolutionstech.com/">SoftSolutions Technologies LLC</a>
+        <div class="organizer-utility">
+          <div id="organizer-top-summary" class="organizer-top-summary organizer-authenticated-only" aria-label="Organizer activity summary">
+            <div class="organizer-top-metric"><strong data-overview-count="events">--</strong><span>Hosted</span></div>
+            <div class="organizer-top-metric"><strong data-overview-count="upcoming">--</strong><span>Upcoming</span></div>
+            <div class="organizer-top-metric"><strong data-overview-count="pending">--</strong><span>Awaiting</span></div>
+          </div>
+          <button id="refresh-portal-button" class="organizer-btn ghost organizer-authenticated-only" type="button">Refresh</button>
+          <div id="session-chip" class="organizer-user-chip organizer-hidden"></div>
+        </div>
+      </div>
+
+      <section id="organizer-dashboard-hero" class="organizer-hero organizer-authenticated-only">
+        <span class="organizer-eyebrow">Organizer Access</span>
+        <h1>Run every hosted event with a clear view.</h1>
+        <p>
+          This portal is limited to organizer event operations only. It supports
+          hosted events and applicant review, and does not expose wallet,
+          payout, transfer, or other money-movement features.
+        </p>
+        <div class="organizer-hero-grid">
+          <div class="organizer-hero-card" aria-live="polite">
+            <strong id="overview-events" data-overview-count="events">--</strong>
+            <span>Hosted events</span>
+          </div>
+          <div class="organizer-hero-card" aria-live="polite">
+            <strong id="overview-upcoming" data-overview-count="upcoming">--</strong>
+            <span>Upcoming events</span>
+          </div>
+          <div class="organizer-hero-card" aria-live="polite">
+            <strong id="overview-pending" data-overview-count="pending">--</strong>
+            <span>Applicants awaiting review</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="organizer-layout">
+        <section class="organizer-card">
+          <div id="portal-status"></div>
+
+          <div id="auth-panel">
+            <h2>Organizer Sign In</h2>
+            <p class="section-copy">
+              Use the same organizer account credentials you use in the app.
+            </p>
+            <form id="login-form" class="organizer-auth-form">
+              <div class="organizer-field">
+                <label for="login-email">Email</label>
+                <input id="login-email" name="email" type="email" autocomplete="email" required />
+              </div>
+              <div class="organizer-field">
+                <label for="login-password">Password</label>
+                <input
+                  id="login-password"
+                  name="password"
+                  type="password"
+                  autocomplete="current-password"
+                  required
+                />
+              </div>
+              <div class="organizer-button-row">
+                <button id="login-button" class="organizer-btn primary" type="submit">Sign In</button>
+              </div>
+            </form>
+          </div>
+
+          <div id="portal-panel" class="organizer-authenticated-only">
+            <h2 id="composer-title">Create Event</h2>
+            <p class="section-copy">
+              Publish clear, complete event details. Changes stay in sync with the mobile app.
+            </p>
+
+            <form id="event-form" class="organizer-form-grid">
+              <div class="organizer-form-grid two-up">
+                <div class="organizer-field">
+                  <label for="event-title">Title</label>
+                  <input id="event-title" name="title" type="text" required />
+                </div>
+                <div class="organizer-field">
+                  <label for="event-category">Category</label>
+                  <input id="event-category" name="category" type="text" value="Community" required />
+                </div>
+              </div>
+
+              <div class="organizer-field">
+                <label for="event-description">Description</label>
+                <textarea id="event-description" name="description" maxlength="2000" aria-describedby="event-description-hint" required></textarea>
+                <div id="event-description-hint" class="organizer-field-hint">
+                  <span>Explain the purpose, schedule, and what volunteers will do.</span>
+                  <span id="event-description-count">0 / 2,000</span>
+                </div>
+              </div>
+
+              <div class="organizer-form-grid two-up">
+                <div class="organizer-field">
+                  <label for="event-location-name">Location Name</label>
+                  <input id="event-location-name" name="locationName" type="text" required />
+                </div>
+                <div class="organizer-field">
+                  <label for="event-location-address">Address</label>
+                  <input id="event-location-address" name="locationAddress" type="text" />
+                </div>
+              </div>
+
+              <div class="organizer-form-grid two-up">
+                <div class="organizer-field">
+                  <label for="event-date-time">Date and Time</label>
+                  <input id="event-date-time" name="eventDateTime" type="datetime-local" required />
+                </div>
+                <div class="organizer-field">
+                  <label for="event-volunteer-limit">Volunteer Limit</label>
+                  <input id="event-volunteer-limit" name="volunteerLimit" type="number" min="1" step="1" value="20" required />
+                </div>
+              </div>
+
+              <div class="organizer-form-grid two-up">
+                <div class="organizer-field">
+                  <label for="event-payment">Payment per Volunteer (USD)</label>
+                  <input id="event-payment" name="payment" type="number" min="0" step="0.01" value="0.00" required />
+                </div>
+                <div class="organizer-field">
+                  <label for="event-contact">Contact Info</label>
+                  <input id="event-contact" name="contactInfo" type="text" />
+                </div>
+              </div>
+
+              <div class="organizer-field">
+                <label for="event-requirements">Volunteer Requirements</label>
+                <textarea id="event-requirements" name="requirements"></textarea>
+              </div>
+
+              <div class="organizer-button-row">
+                <button id="save-event-button" class="organizer-btn primary" type="submit">Create Event</button>
+                <button id="cancel-edit-button" class="organizer-btn secondary organizer-hidden" type="button">Cancel Edit</button>
+                <button id="sign-out-button" class="organizer-btn ghost" type="button">Sign Out</button>
+              </div>
+            </form>
+
+            <div class="organizer-note">
+              This portal does not include organizer wallet, payouts, deposits,
+              transfer initiation, or other financial controls.
+            </div>
+          </div>
+        </section>
+
+        <section id="organizer-hosted-events-panel" class="organizer-card organizer-authenticated-only">
+          <h2>Hosted Events</h2>
+          <p class="section-copy">
+            Use this panel to edit or remove events already tied to your
+            organizer account.
+          </p>
+          <div id="events-list" class="organizer-events-list">
+            <div class="organizer-empty">Sign in to load your hosted events.</div>
+          </div>
+        </section>
+      </div>
+
+      <section id="organizer-applicants-panel" class="organizer-card organizer-authenticated-only" style="margin-top: 18px;">
+        <h2>Review Applicants</h2>
+        <p class="section-copy">
+          Review event applicants without opening any wallet or transaction
+          features.
+        </p>
+        <div id="applicant-filters" class="organizer-filter-bar organizer-hidden">
+          <div class="organizer-field" style="min-width: 220px;">
+            <label for="applicant-event-filter">Filter by event</label>
+            <select id="applicant-event-filter">
+              <option value="">All Events</option>
+            </select>
+          </div>
+        </div>
+        <div id="applicants-list" class="organizer-applicant-list">
+          <div class="organizer-empty">Sign in to review event applicants.</div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

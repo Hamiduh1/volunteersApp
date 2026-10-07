@@ -1,93 +1,279 @@
 {
-    "emulators":  {
-                      "dataconnect":  {
-                                          "dataDir":  "dataconnect/.dataconnect/pgliteData",
-                                          "port":  9399
-                                      },
-                      "apphosting":  {
-                                         "port":  5002,
-                                         "rootDirectory":  "./src/main/java/com/example/volunteersApp"
-                                     },
-                      "auth":  {
-                                   "port":  9099
-                               },
-                      "functions":  {
-                                        "port":  5001
-                                    },
-                      "firestore":  {
-                                        "port":  8080
-                                    },
-                      "database":  {
-                                       "port":  9000
-                                   },
-                      "hosting":  {
-                                      "port":  5000
-                                  },
-                      "pubsub":  {
-                                     "port":  8085
-                                 },
-                      "storage":  {
-                                      "port":  9199
-                                  },
-                      "eventarc":  {
-                                       "port":  9299
-                                   },
-                      "tasks":  {
-                                    "port":  9499
-                                },
-                      "ui":  {
-                                 "enabled":  true
-                             },
-                      "singleProjectMode":  true
-                  },
-    "dataconnect":  {
-                        "source":  "dataconnect"
-                    },
-    "firestore":  {
-                      "rules":  "my-firebase-project/firestore.rules",
-                      "indexes":  "my-firebase-project/firestore.indexes.json"
-                  },
-    "functions":  [
-                      {
-                          "source":  "my-firebase-project/my-firebase-functions",
-                          "codebase":  "default",
-                          "ignore":  [
-                                         "venv",
-                                         ".git",
-                                         "firebase-debug.log",
-                                         "firebase-debug.*.log",
-                                         "*.local",
-                                         "node_modules"
-                                     ],
-                          "predeploy":  [
-                                            "scripts/functions-predeploy.cmd"
-                                        ]
-                      }
-                  ],
-    "hosting":  {
-                    "public":  "public",
-                    "ignore":  [
-                                   "firebase.json",
-                                   "**/.*",
-                                   "**/node_modules/**"
-                               ],
-                    "rewrites":  [
-                                     {
-                                         "source":  "**",
-                                         "destination":  "/index.html"
-                                     }
-                                 ]
-                },
-    "storage":  {
-                    "rules":  "my-firebase-project/storage.rules"
-                },
-    "remoteconfig":  {
-                         "template":  "remoteconfig.template.json"
-                     },
-    "extensions":  {
-
-                   },
-    "database":  {
-                     "rules":  "database.rules.json"
-                 }
+  "emulators": {
+    "dataconnect": {
+      "dataDir": "dataconnect/.dataconnect/pgliteData",
+      "port": 9399
+    },
+    "apphosting": {
+      "port": 5002,
+      "rootDirectory": "./src/main/java/com/example/volunteersApp"
+    },
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "database": {
+      "port": 9000
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "pubsub": {
+      "port": 8085
+    },
+    "storage": {
+      "port": 9199
+    },
+    "eventarc": {
+      "port": 9299
+    },
+    "tasks": {
+      "port": 9499
+    },
+    "ui": {
+      "enabled": true
+    },
+    "singleProjectMode": true
+  },
+  "dataconnect": {
+    "source": "dataconnect"
+  },
+  "firestore": {
+    "rules": "my-firebase-project/firestore.rules",
+    "indexes": "my-firebase-project/firestore.indexes.json"
+  },
+  "functions": [
+    {
+      "source": "my-firebase-project/my-firebase-functions",
+      "codebase": "default",
+      "ignore": [
+        "venv",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        ".env",
+        ".env.*",
+        ".runtimeconfig.json",
+        ".firebase-config",
+        ".firebase-config/**",
+        "*.local",
+        "node_modules"
+      ],
+      "predeploy": [
+        "node scripts/run-functions-predeploy.cjs my-firebase-project/my-firebase-functions lint",
+        "node scripts/run-functions-predeploy.cjs my-firebase-project/my-firebase-functions build"
+      ]
+    }
+  ],
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "!/.well-known/**",
+      "**/node_modules/**"
+    ],
+    "redirects": [
+      {
+        "source": "/privacy-policy.html",
+        "destination": "/privacy/",
+        "type": 301
+      },
+      {
+        "source": "/privacy.html",
+        "destination": "/privacy/",
+        "type": 301
+      },
+      {
+        "source": "/terms.html",
+        "destination": "/terms/",
+        "type": 301
+      },
+      {
+        "source": "/terms-and-conditions.html",
+        "destination": "/terms/",
+        "type": 301
+      },
+      {
+        "source": "/aml-cft.html",
+        "destination": "/aml-cft-guide/",
+        "type": 301
+      },
+      {
+        "source": "/how-to-use.html",
+        "destination": "/how-to-use/",
+        "type": 301
+      },
+      {
+        "source": "/contact.html",
+        "destination": "/contact/",
+        "type": 301
+      },
+      {
+        "source": "/organizer.html",
+        "destination": "/organizer/",
+        "type": 301
+      },
+      {
+        "source": "/employer.html",
+        "destination": "/employer/",
+        "type": 301
+      },
+      {
+        "source": "/volunteersapp.html",
+        "destination": "/volunteersapp/",
+        "type": 301
+      },
+      {
+        "source": "/treo-wallet-imt.html",
+        "destination": "/wallet/",
+        "type": 301
+      },
+      {
+        "source": "/treo-wallet-imt",
+        "destination": "/wallet/",
+        "type": 301
+      },
+      {
+        "source": "/treo-wallet-imt/",
+        "destination": "/wallet/",
+        "type": 301
+      },
+      {
+        "source": "/softsolutionstech-wallet.html",
+        "destination": "/wallet/",
+        "type": 301
+      },
+      {
+        "source": "/softsolutionstech-wallet",
+        "destination": "/wallet/",
+        "type": 301
+      },
+      {
+        "source": "/softsolutionstech-wallet/",
+        "destination": "/wallet/",
+        "type": 301
+      },
+      {
+        "source": "/wallet.html",
+        "destination": "/wallet/",
+        "type": 301
+      },
+      {
+        "source": "/support",
+        "destination": "/contact/",
+        "type": 301
+      },
+      {
+        "source": "/support/",
+        "destination": "/contact/",
+        "type": 301
+      }
+    ],
+    "headers": [
+      {
+        "source": "/.well-known/apple-app-site-association",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      },
+      {
+        "source": "/.well-known/assetlinks.json",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      },
+      {
+        "source": "/styles.css",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      },
+      {
+        "source": "**/*.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=300"
+          }
+        ]
+      },
+      {
+        "source": "/organizer/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/employer/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/volunteers/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/404.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=300"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/api/live-share-access",
+        "function": "resolveLiveShareAccess"
+      }
+    ],
+    "cleanUrls": true,
+    "trailingSlash": true
+  },
+  "storage": {
+    "rules": "my-firebase-project/storage.rules"
+  },
+  "remoteconfig": {
+    "template": "remoteconfig.template.json"
+  },
+  "extensions": {},
+  "database": {
+    "rules": "database.rules.json"
+  }
 }

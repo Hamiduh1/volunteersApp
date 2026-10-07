@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Returning to Volunteers App</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --ink: #16324f;
+      --muted: #5f7287;
+      --accent: #1463b8;
+      --border: rgba(20, 99, 184, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at top, rgba(20, 99, 184, 0.10), transparent 36%),
+        linear-gradient(180deg, #f9fbfe 0%, var(--bg) 100%);
+      color: var(--ink);
+      font-family: "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .card {
+      width: min(100%, 520px);
+      padding: 28px;
+      border-radius: 24px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      box-shadow: 0 18px 42px rgba(15, 52, 96, 0.10);
+    }
+
+    h1 { margin: 0 0 10px; font-size: 1.65rem; line-height: 1.15; }
+    p { margin: 0 0 16px; color: var(--muted); line-height: 1.55; }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      padding: 0 18px;
+      border-radius: 999px;
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    .button.primary { background: var(--accent); color: #fff; }
+    .button.secondary { background: rgba(20, 99, 184, 0.09); color: var(--accent); }
+
+    .status {
+      margin-top: 18px;
+      font-size: 0.95rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Stripe setup finished</h1>
+    <p>Your payout details were sent to Stripe. Next, return to Volunteers App so your payout status can refresh.</p>
+    <p>This does <strong>not</strong> require the App Store. You need the Volunteers App build installed on this iPhone (from Xcode or TestFlight).</p>
+
+    <div class="actions">
+      <a class="button primary" id="open-app" href="#">Open Volunteers App</a>
+      <a class="button secondary" href="/wallet/">Stay on Web</a>
+    </div>
+
+    <p class="status" id="status">Tap Open Volunteers App below.</p>
+  </main>
+
+  <script id="stripe-connect-return-config" type="application/json">
+    {"flow":"connect_onboarding","result":"return"}
+  </script>
+  <script src="/stripe/connect/stripe-connect-return.js"></script>
+</body>
+</html>

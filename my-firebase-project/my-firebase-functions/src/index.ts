@@ -3,7 +3,6 @@
 // =============================================================================
 //  IMPORTS & INITIALIZATION
 // =============================================================================
-import {RtcRole, RtcTokenBuilder} from "agora-token";
 import axios from "axios";
 import {createHash, createPublicKey, createVerify, randomInt} from "crypto";
 import * as admin from "firebase-admin";
@@ -11,15 +10,7 @@ import {DataSnapshot} from "firebase-admin/database";
 import * as functions from "firebase-functions/v1";
 import {database, EventContext} from "firebase-functions/v1";
 import Stripe from "stripe";
-import {
-  createLiveReplayAccessLink,
-  createLiveShareAccessLink,
-  enforceLiveRtcTokenAccess,
-  onLiveSessionCreatedStartArchive,
-  onLiveSessionEndedFinalizeArchive,
-  reconcileStaleLiveSessions,
-  resolveLiveShareAccess,
-} from "./liveSessions.js";
+import {reconcileStaleLiveSessions} from "./liveSessions.js";
 // These names preserve deployed v1 function identities recovered after the
 // accidental source deletion. Keep the exports explicit so retired functions
 // are not recreated by a future deployment.
@@ -45,6 +36,8 @@ export {
   agentVerifyCustomerWithdrawalOtp,
   createAfriexWithdrawPaymentMethod,
   createAfriexWithdrawTransaction,
+  createLiveReplayAccessLink,
+  createLiveShareAccessLink,
   createOrganizerWalletTransfer,
   deleteLiveBroadcast,
   enforceProviderSettlementReportingOnly,
@@ -52,16 +45,22 @@ export {
   flagStaleMobileMoneyProviderPayouts,
   getAfriexBalance,
   getAfriexLiveModeDiagnostics,
+  getAgoraRtcToken,
   getConversationMessagingAvailability,
   getCurrentUserPrivateFlags,
   getPublicCommerceFeeSettings,
   getSocialInboxPushDiagnostics,
+  grantLiveShareViewerAccess,
   initializeProviderHostedWallet,
   listRecipientPayoutMethods,
   liveReplayAccess,
   liveReplayMedia,
   onChatCallLogWrite,
   onChatMessageCreatedNotifyRecipients,
+  onLiveReplayVisibilityChangedSyncPosts,
+  onLiveSessionCreatedStartArchive,
+  onLiveSessionEndedFinalizeArchive,
+  onLiveViewerBlockedKickFromChannel,
   onMarketplaceItemCreated,
   onWalletTransferPayoutStatusChanged,
   reconcileExpiredAgentCustomerWalletWithdrawals,
@@ -74,20 +73,14 @@ export {
   requestPasswordResetLink,
   resetPayoutSetup,
   resolveAfriexInstitutionCode,
+  resolveLiveShareAccess,
   swiftTransferInvoice,
   syncAfriexPayoutMethods,
   syncConnectPayoutMethods,
   syncStripePlatformSettlementMirror,
 } from "./legacyDeployedFunctions/index.js";
 
-export {
-  createLiveReplayAccessLink,
-  createLiveShareAccessLink,
-  onLiveSessionCreatedStartArchive,
-  onLiveSessionEndedFinalizeArchive,
-  reconcileStaleLiveSessions,
-  resolveLiveShareAccess,
-};
+export {reconcileStaleLiveSessions};
 
 // The recovered legacy module may load first; share the default Firebase app.
 if (!admin.apps.length) {
@@ -638,43 +631,6 @@ const getRuntimeFeeSettings = async (): Promise<RuntimeFeeSettings> => {
   };
 };
 
-const getAgoraConfig = () => {
-  const runtimeConfig = getRuntimeConfig();
-  const agoraConfig = (runtimeConfig["agora"] as Record<string, unknown> | undefined) || {};
-  const ttlSecondsRaw = Number(
-    process.env.AGORA_TOKEN_TTL_SECONDS ||
-      agoraConfig["token_ttl_seconds"] ||
-      3600
-  );
-  const ttlSeconds = Number.isFinite(ttlSecondsRaw) && ttlSecondsRaw > 0 ? ttlSecondsRaw : 3600;
-
-  return {
-    appId: (process.env.AGORA_APP_ID ||
-      agoraConfig["app_id"] ||
-      agoraConfig["appId"]) as string | undefined,
-    appCertificate: (process.env.AGORA_APP_CERTIFICATE ||
-      process.env.AGORA_APP_CERT ||
-      agoraConfig["app_certificate"] ||
-      agoraConfig["appCertificate"] ||
-      agoraConfig["certificate"]) as string | undefined,
-    ttlSeconds,
-  };
-};
-
-/**
- * Matches Android's String.hashCode based Agora UID so a live viewer cannot mint another user's token.
- * @param {string} firebaseUid Authenticated Firebase user ID.
- * @return {number} Positive deterministic Agora UID.
- */
-const stableLiveAgoraUid = (firebaseUid: string): number => {
-  let hash = 0;
-  for (let index = 0; index < firebaseUid.length; index += 1) {
-    hash = ((hash * 31) + firebaseUid.charCodeAt(index)) | 0;
-  }
-  if (hash === -2147483648) return 1;
-  return Math.max(Math.abs(hash), 1);
-};
-
 const defaultTermsAndConditions = `Last updated: March 10, 2026
 
 Welcome to Volunteers App. By using this app, you agree to these terms:
@@ -760,166 +716,6 @@ Contact us:
 - Website: https://softsolutionstech.com
 
 By using Volunteers App, you acknowledge this Privacy Policy and consent to the handling of data described here.`;
-
-export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
-  .https.onCall(async (data, context) => {
-    if (!context.auth?.uid) {
-      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
-    }
-
-    const sessionId = String(data?.sessionId || "").trim();
-    const channelNameParam = String(data?.channelName || "").trim();
-    const liveSessionRequested = data?.liveSession === true;
-    let channelName: string;
-    let liveSessionData: admin.firestore.DocumentData | null = null;
-    if (sessionId) {
-      const liveSessionSnap = await admin.firestore().collection("live_sessions").doc(sessionId).get();
-      if (liveSessionSnap.exists) {
-        const liveData = liveSessionSnap.data() || {};
-        liveSessionData = liveData;
-        const liveChannelName = String(
-          liveData.agoraChannelName || liveData.channelName || sessionId
-        ).trim();
-        if (!liveChannelName) {
-          throw new functions.https.HttpsError(
-            "failed-precondition",
-            "Live session is missing an Agora channel name."
-          );
-        }
-        channelName = liveChannelName;
-        if (channelNameParam && channelNameParam !== channelName) {
-          throw new functions.https.HttpsError(
-            "invalid-argument",
-            "channelName must match the live session channel name."
-          );
-        }
-      } else {
-        if (liveSessionRequested) {
-          throw new functions.https.HttpsError("not-found", "Live session not found.");
-        }
-        const callSessionSnap = await admin.firestore().collection("call_sessions").doc(sessionId).get();
-        if (!callSessionSnap.exists) {
-          throw new functions.https.HttpsError("not-found", "Call session not found.");
-        }
-        const callData = callSessionSnap.data() || {};
-        const callerId = String(callData.callerId || "").trim();
-        const receiverId = String(callData.receiverId || "").trim();
-        const participantIds = Array.isArray(callData.participantIds) ?
-          callData.participantIds
-            .filter((value: unknown): value is string => typeof value === "string")
-            .map((value: string) => value.trim()) :
-          [];
-        const callParticipants = new Set([callerId, receiverId, ...participantIds].filter(Boolean));
-        if (!callParticipants.has(context.auth.uid)) {
-          throw new functions.https.HttpsError("permission-denied", "You are not a participant in this call.");
-        }
-        const callStatus = String(callData.status || "ringing").trim().toLowerCase();
-        if (callStatus !== "ringing" && callStatus !== "accepted") {
-          throw new functions.https.HttpsError("failed-precondition", "This call is no longer active.");
-        }
-        channelName = String(callData.agoraChannelName || `call_${sessionId}`).trim();
-        if (!channelName) {
-          throw new functions.https.HttpsError("failed-precondition", "Call session is missing an Agora channel name.");
-        }
-        if (channelNameParam && channelNameParam !== channelName) {
-          throw new functions.https.HttpsError(
-            "invalid-argument",
-            "channelName must match the call session channel name."
-          );
-        }
-      }
-    } else if (channelNameParam && !liveSessionRequested) {
-      channelName = channelNameParam;
-    } else {
-      throw new functions.https.HttpsError("invalid-argument", "sessionId is required.");
-    }
-    if (channelName.length > 64) {
-      throw new functions.https.HttpsError("invalid-argument", "channelName must be 64 characters or fewer.");
-    }
-
-    const rawRequestedRole = String(
-      data?.requestedRole ||
-      data?.role ||
-      (liveSessionData ? "viewer" : "publisher")
-    ).trim().toLowerCase();
-    const requestedRole = rawRequestedRole === "viewer" ? "subscriber" : rawRequestedRole;
-    if (!["publisher", "subscriber"].includes(requestedRole)) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "role must be either 'publisher', 'subscriber', or 'viewer'."
-      );
-    }
-
-    if (sessionId && liveSessionData) {
-      await enforceLiveRtcTokenAccess({
-        sessionId,
-        userId: context.auth.uid,
-        requestedRole: requestedRole as "publisher" | "subscriber",
-        shareAccessToken: String(data?.shareAccessToken || "").trim() || undefined,
-        liveData: liveSessionData,
-      });
-    }
-
-    const requestedUid = Number(data?.uid ?? 0);
-    if (!Number.isInteger(requestedUid) || requestedUid < 0 || requestedUid > 4294967295) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "uid must be an integer between 0 and 4294967295."
-      );
-    }
-    // Live rooms: the server owns the Agora uid and returns it; clients must join with the returned uid.
-    // A client may omit uid (0); a uid that belongs to another account is still rejected.
-    let tokenUid = requestedUid;
-    if (liveSessionRequested) {
-      if (!liveSessionData) {
-        throw new functions.https.HttpsError("not-found", "Live session not found.");
-      }
-      const expectedUid = stableLiveAgoraUid(context.auth.uid);
-      if (requestedUid !== 0 && requestedUid !== expectedUid) {
-        throw new functions.https.HttpsError(
-          "permission-denied",
-          "Live token UID does not match the signed-in account."
-        );
-      }
-      tokenUid = expectedUid;
-    }
-
-    const {appId, appCertificate, ttlSeconds} = getAgoraConfig();
-    if (!appId) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Agora App ID is not configured in Cloud Functions environment."
-      );
-    }
-
-    if (!appCertificate) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Agora App Certificate is not configured in Cloud Functions environment."
-      );
-    }
-
-    const rtcRole = requestedRole === "subscriber" ? RtcRole.SUBSCRIBER : RtcRole.PUBLISHER;
-
-    const token = RtcTokenBuilder.buildTokenWithUid(
-      appId,
-      appCertificate,
-      channelName,
-      tokenUid,
-      rtcRole,
-      ttlSeconds,
-      ttlSeconds
-    );
-
-    return {
-      token,
-      tokenRequired: true,
-      expiresInSeconds: ttlSeconds,
-      role: requestedRole,
-      uid: tokenUid,
-      agoraUid: tokenUid,
-    };
-  });
 
 interface CreateCallSessionRequest {
   sessionId?: unknown;

@@ -1,0 +1,24 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "6627V9L46V.com.softsolutionstechnologies.volunteersapp.ios",
+        "paths": [
+          "/stripe/connect/return",
+          "/stripe/connect/return/*",
+          "/stripe/connect/refresh",
+          "/stripe/connect/refresh/*",
+          "/stripe/connect/success",
+          "/stripe/connect/success/*",
+          "/stripe/connect/failure",
+          "/stripe/connect/failure/*",
+          "/stripe/connect/failurez",
+          "/stripe/connect/failurez/*",
+          "/live",
+          "/live/*"
+        ]
+      }
+    ]
+  }
+}

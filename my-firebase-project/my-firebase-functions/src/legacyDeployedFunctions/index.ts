@@ -351,7 +351,6 @@ const configuredLiveArchiveBucketName = (value: unknown): string | undefined => 
   if (!bucket) return undefined;
   const normalized = bucket.toLowerCase();
   if ([
-    "agora_recording_storage_bucket",
     "your-recording-bucket",
     "your-recording-bucket-name",
   ].includes(normalized)) {
@@ -2185,6 +2184,15 @@ const hasAcceptedLiveJoinRequest = async (sessionId: string, userId: string): Pr
   return status === "accepted";
 };
 
+const LIVE_STAGE_GUEST_TOKEN_TTL_SECONDS = 600;
+
+/** Clients name live channels `live-<hostUid>-<timestamp>`; anything else could be another user's channel. */
+const isLiveChannelOwnedByHost = (channelName: string, hostId: string): boolean => {
+  if (!channelName || !hostId) return false;
+  const prefix = `live-${hostId}-`;
+  return channelName.startsWith(prefix) && /^\d{9,13}$/.test(channelName.slice(prefix.length));
+};
+
 const sessionHostOwnsOrganizerEventSource = async (
   session: Record<string, unknown>,
   hostId: string
@@ -2192,7 +2200,8 @@ const sessionHostOwnsOrganizerEventSource = async (
   if (!hostId) return false;
   const sourceType = String(session.sourceType || "").trim().toLowerCase();
   const sourceId = String(session.sourceId || "").trim();
-  if (sourceType !== "organizer_event" || !sourceId) return false;
+  // Android labels the same organizer-event link "event".
+  if ((sourceType !== "organizer_event" && sourceType !== "event") || !sourceId) return false;
 
   const eventSnap = await db.collection("events").doc(sourceId).get();
   if (!eventSnap.exists) return false;
@@ -2242,6 +2251,46 @@ const canUserWatchLiveSession = async (
   }
 };
 
+const isValidLiveShareTokenForSession = (
+  sessionId: string,
+  session: Record<string, unknown>,
+  hostId: string,
+  userId: string,
+  shareAccessToken?: string
+): boolean => {
+  const cleanToken = String(shareAccessToken || "").trim();
+  if (!cleanToken) return false;
+  // Event-only streams are gated on accepted-guest status, which an invite link must not bypass.
+  if (normalizeLiveViewAccessMode(session.viewAccessMode) === "accepted_event_volunteers") return false;
+  try {
+    const claims = verifyLiveShareAccessToken(cleanToken);
+    const sessionHostId = String(session.hostId || session.hostUid || "").trim();
+    return claims.sid === sessionId &&
+      claims.kind === "live" &&
+      claims.hostId === hostId &&
+      (!sessionHostId || claims.hostId === sessionHostId);
+  } catch (error) {
+    functions.logger.warn("Invalid live share token.", {sessionId, userId, error});
+    return false;
+  }
+};
+
+/**
+ * Firestore rules cannot verify signed share tokens, so a validated share-link viewer gets a
+ * server-written marker that the rules accept for session, chat, like and presence access.
+ */
+const grantLiveInvitedViewerAccess = async (sessionId: string, userId: string): Promise<void> => {
+  await db.collection("live_sessions")
+    .doc(sessionId)
+    .collection("invited_viewers")
+    .doc(userId)
+    .set({
+      userId,
+      via: "share_link",
+      grantedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+};
+
 const canUserWatchLiveSessionWithShareToken = async (
   sessionId: string,
   session: Record<string, unknown>,
@@ -2249,26 +2298,8 @@ const canUserWatchLiveSessionWithShareToken = async (
   hostId: string,
   shareAccessToken?: string
 ): Promise<boolean> => {
-  const cleanToken = String(shareAccessToken || "").trim();
-  if (cleanToken) {
-    try {
-      const claims = verifyLiveShareAccessToken(cleanToken);
-      const sessionHostId = String(session.hostId || session.hostUid || "").trim();
-      if (
-        claims.sid === sessionId &&
-        claims.kind === "live" &&
-        claims.hostId === hostId &&
-        (!sessionHostId || claims.hostId === sessionHostId)
-      ) {
-        return true;
-      }
-    } catch (error) {
-      functions.logger.warn("Invalid live share token during RTC auth.", {
-        sessionId,
-        userId,
-        error,
-      });
-    }
+  if (isValidLiveShareTokenForSession(sessionId, session, hostId, userId, shareAccessToken)) {
+    return true;
   }
   return canUserWatchLiveSession(sessionId, session, userId, hostId);
 };
@@ -2289,7 +2320,8 @@ const canUserJoinLiveStage = async (
   case "request_to_join":
     return hasAcceptedLiveJoinRequest(sessionId, userId);
   case "open_to_accepted_volunteers":
-    return hasApprovedLiveEventAccess(session, userId, hostId) || hasAcceptedLiveJoinRequest(sessionId, userId);
+    return (await hasApprovedLiveEventAccess(session, userId, hostId)) ||
+      (await hasAcceptedLiveJoinRequest(sessionId, userId));
   }
 };
 
@@ -2389,10 +2421,12 @@ const getLiveReplayAccessTtlSeconds = (purpose: LiveReplayAccessPurpose): number
   const raw = Number(
     purpose === "share" ?
       (process.env.LIVE_REPLAY_SHARE_TTL_SECONDS || 86400) :
-      (process.env.LIVE_REPLAY_ACCESS_TTL_SECONDS || 900)
+      // HLS segment URLs carry this token for the whole watch; liveReplayMedia re-authorizes
+      // every request against current visibility, so a longer lifetime doesn't extend access.
+      (process.env.LIVE_REPLAY_ACCESS_TTL_SECONDS || 14400)
   );
   if (!Number.isFinite(raw) || raw <= 0) {
-    return purpose === "share" ? 86400 : 900;
+    return purpose === "share" ? 86400 : 14400;
   }
   return Math.max(60, Math.floor(raw));
 };
@@ -2447,8 +2481,13 @@ const assertLiveReplayMediaPathAllowed = (
   objectPath: string
 ): string => {
   const recordingConfig = getAgoraRecordingConfig();
-  const allowedPrefix = String(session.archiveObjectPrefix || "").trim() ||
-    buildLiveArchiveObjectPrefix(recordingConfig, sessionId).joined;
+  const expectedPrefix = buildLiveArchiveObjectPrefix(recordingConfig, sessionId).joined;
+  // Session docs were once host-writable, so a stored prefix is only trusted when it is this session's folder.
+  const storedPrefix = sanitizeLiveArchiveObjectPath(String(session.archiveObjectPrefix || ""));
+  const storedSegments = storedPrefix.split("/");
+  const allowedPrefix = storedPrefix && storedSegments[storedSegments.length - 1] === sessionId ?
+    storedPrefix :
+    expectedPrefix;
   const cleanPath = sanitizeLiveArchiveObjectPath(objectPath);
   if (!cleanPath) {
     throw new Error("Replay media path is missing.");
@@ -2521,23 +2560,66 @@ const rewriteLiveReplayHlsManifest = (
     .join("\n");
 };
 
+/** Bearer replay links (anonymous web or share-link viewers) are only honoured while the host allows link access. */
+const isLiveReplayLinkShareable = (visibility: LiveReplayVisibility): boolean =>
+  visibility === "shared_link" || visibility === "public";
+
+const isUserBlockedFromLiveSession = async (sessionId: string, userId: string): Promise<boolean> => {
+  if (!sessionId || !userId) return false;
+  const snap = await db.collection("live_sessions").doc(sessionId).collection("blocked_users").doc(userId).get();
+  return snap.exists;
+};
+
+/**
+ * Re-authorizes every replay media request against the session's current state so narrowing
+ * replay visibility or blocking a viewer revokes previously issued replay tokens.
+ */
 const authorizeLiveReplayClaims = async (
   claims: LiveReplayAccessClaims,
   session: Record<string, unknown>,
   sessionId: string
 ): Promise<void> => {
   const hostId = String(session.hostId || session.hostUid || "").trim();
+  if (!hostId) {
+    throw new Error("You are not allowed to access this replay.");
+  }
+  if (claims.hostId && claims.hostId !== hostId) {
+    throw new Error("You are not allowed to access this replay.");
+  }
+  const visibility = normalizeLiveReplayVisibility(session.replayVisibility);
+
   if (claims.purpose !== "playback" || !claims.uid) {
+    if (!isLiveReplayLinkShareable(visibility)) {
+      throw new Error("The host has turned off link access to this replay.");
+    }
     return;
   }
 
   const requesterUid = String(claims.uid).trim();
-  const [hostBlockedViewer, viewerBlockedHost, canWatchReplay] = await Promise.all([
+  if (!requesterUid) {
+    throw new Error("You are not allowed to access this replay.");
+  }
+  if (requesterUid === hostId) {
+    return;
+  }
+
+  const [hostBlockedViewer, viewerBlockedHost, streamBlocked] = await Promise.all([
     userHasBlocked(hostId, requesterUid),
     userHasBlocked(requesterUid, hostId),
-    canUserWatchLiveReplay(sessionId, session, requesterUid, hostId),
+    isUserBlockedFromLiveSession(sessionId, requesterUid),
   ]);
-  if (!requesterUid || !hostId || hostBlockedViewer || viewerBlockedHost || !canWatchReplay) {
+  if (hostBlockedViewer || viewerBlockedHost || streamBlocked) {
+    throw new Error("You are not allowed to access this replay.");
+  }
+
+  if (claims.via === "share_link") {
+    if (!isLiveReplayLinkShareable(visibility)) {
+      throw new Error("The host has turned off link access to this replay.");
+    }
+    return;
+  }
+
+  if (!(await canUserWatchLiveReplay(sessionId, session, requesterUid, hostId))) {
     throw new Error("You are not allowed to access this replay.");
   }
 };
@@ -2595,6 +2677,7 @@ interface LiveReplayAccessClaims {
   uid?: string;
   hostId?: string;
   replayVisibility: LiveReplayVisibility;
+  via?: "share_link";
   version: number;
 }
 
@@ -2611,6 +2694,8 @@ const signLiveReplayAccessToken = (params: {
   requesterUid: string;
   hostId: string;
   replayVisibility: LiveReplayVisibility;
+  via?: "share_link";
+  ttlSecondsOverride?: number;
 }): {token: string; expiresAtMs: number} => {
   const secret = getLiveReplayAccessSecret();
   if (!secret) {
@@ -2620,7 +2705,7 @@ const signLiveReplayAccessToken = (params: {
     );
   }
 
-  const ttlSeconds = getLiveReplayAccessTtlSeconds(params.purpose);
+  const ttlSeconds = params.ttlSecondsOverride ?? getLiveReplayAccessTtlSeconds(params.purpose);
   const issuedAtSeconds = Math.floor(Date.now() / 1000);
   const expiresAtSeconds = issuedAtSeconds + ttlSeconds;
   const token = jwt.sign(
@@ -2630,6 +2715,7 @@ const signLiveReplayAccessToken = (params: {
       uid: params.purpose === "playback" ? params.requesterUid : undefined,
       hostId: params.hostId,
       replayVisibility: params.replayVisibility,
+      via: params.via,
       version: 1,
     } satisfies LiveReplayAccessClaims,
     secret,
@@ -2677,12 +2763,14 @@ const verifyLiveReplayAccessToken = (token: string): LiveReplayAccessClaims => {
 
   const uid = trimStringValue((verified as Record<string, unknown>).uid);
   const hostId = trimStringValue((verified as Record<string, unknown>).hostId);
+  const via = trimStringValue((verified as Record<string, unknown>).via) === "share_link" ? "share_link" : undefined;
   return {
     sid,
     purpose,
     uid,
     hostId,
     replayVisibility,
+    via,
     version,
   };
 };
@@ -2698,11 +2786,11 @@ const getLiveShareAccessSecret = (): string | undefined => {
 const getLiveShareAccessTtlSeconds = (kind: LiveShareAccessKind): number => {
   const raw = Number(
     kind === "replay" ?
-      (process.env.LIVE_SHARE_REPLAY_TTL_SECONDS || process.env.LIVE_REPLAY_SHARE_TTL_SECONDS || 86400) :
+      (process.env.LIVE_SHARE_REPLAY_TTL_SECONDS || process.env.LIVE_REPLAY_SHARE_TTL_SECONDS || 2592000) :
       (process.env.LIVE_SHARE_ACCESS_TTL_SECONDS || 7200)
   );
   if (!Number.isFinite(raw) || raw <= 0) {
-    return kind === "replay" ? 86400 : 7200;
+    return kind === "replay" ? 2592000 : 7200;
   }
   return Math.max(300, Math.floor(raw));
 };
@@ -2747,6 +2835,20 @@ const signLiveShareAccessToken = (params: {
 };
 
 const verifyLiveShareAccessToken = (token: string): LiveShareAccessClaims => {
+  const {claims, expired} = verifyLiveShareAccessTokenAllowingExpiry(token);
+  if (expired) {
+    throw new Error("Live share access token has expired.");
+  }
+  return claims;
+};
+
+/**
+ * Signature, issuer and audience are always enforced. Expired links are still recognised so a
+ * host-shared link can keep opening a replay whose visibility allows link access.
+ */
+const verifyLiveShareAccessTokenAllowingExpiry = (
+  token: string
+): {claims: LiveShareAccessClaims; expired: boolean} => {
   const secret = getLiveShareAccessSecret();
   if (!secret) {
     throw new Error("Live share signing is not configured on the server.");
@@ -2756,6 +2858,7 @@ const verifyLiveShareAccessToken = (token: string): LiveShareAccessClaims => {
     algorithms: ["HS256"],
     issuer: "volunteersapp-live-share",
     audience: "live-share-access",
+    ignoreExpiration: true,
   });
 
   if (!verified || typeof verified !== "object") {
@@ -2771,11 +2874,15 @@ const verifyLiveShareAccessToken = (token: string): LiveShareAccessClaims => {
     throw new Error("Live share access token payload is incomplete.");
   }
 
+  const exp = Number((verified as Record<string, unknown>).exp || 0);
   return {
-    sid,
-    kind,
-    hostId,
-    version,
+    claims: {
+      sid,
+      kind,
+      hostId,
+      version,
+    },
+    expired: !Number.isFinite(exp) || exp <= 0 || exp * 1000 <= Date.now(),
   };
 };
 
@@ -2786,16 +2893,34 @@ const buildLiveShareCorsHeaders = (res: functions.Response): void => {
   res.set("Cache-Control", "private, no-store, no-cache, max-age=0");
 };
 
+/** Replay URLs carry a signed access token, so any web origin may fetch them (hls.js loads them with XHR). */
+const applyLiveReplayCorsHeaders = (req: functions.https.Request, res: functions.Response): boolean => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Range");
+  res.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type");
+  res.set("Access-Control-Max-Age", "3600");
+  if (String(req.method || "").toUpperCase() !== "OPTIONS") return false;
+  res.status(204).end();
+  return true;
+};
+
 const buildWebViewerRtcCredentials = (channelName: string): {
   appId: string;
   rtcToken: string;
   uid: number;
   expiresAtMs: number;
 } => {
-  const {appId, appCertificate, ttlSeconds} = getAgoraConfig();
+  const {appId, appCertificate, ttlSeconds: appTtlSeconds} = getAgoraConfig();
   if (!appId || !appCertificate) {
     throw new Error("Agora web playback is not configured on the server.");
   }
+  // Browser viewers cannot renew in place (each resolve mints a new uid), so give them a full viewing window.
+  const webTtlRaw = Number(process.env.LIVE_WEB_VIEWER_TTL_SECONDS || 21600);
+  const ttlSeconds = Math.min(
+    86400,
+    Math.max(appTtlSeconds, Number.isFinite(webTtlRaw) && webTtlRaw > 0 ? Math.floor(webTtlRaw) : 21600)
+  );
 
   const agoraUid = randomInt(100000, 2147483000);
   const token = RtcTokenBuilder.buildTokenWithUid(
@@ -2852,6 +2977,9 @@ export const createLiveReplayAccessLink = functions.runWith({enforceAppCheck: tr
       );
     }
 
+    const replayVisibility = normalizeLiveReplayVisibility(session.replayVisibility);
+    let via: "share_link" | undefined;
+
     if (purpose === "share") {
       if (authUid !== hostId) {
         throw new functions.https.HttpsError(
@@ -2859,14 +2987,21 @@ export const createLiveReplayAccessLink = functions.runWith({enforceAppCheck: tr
           "Only the broadcaster can create a replay share link."
         );
       }
+      if (!isLiveReplayLinkShareable(replayVisibility)) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Set replay visibility to \"Anyone with the link\" or \"Public\" before sharing a replay link."
+        );
+      }
     } else if (authUid !== hostId) {
-      const [hostBlockedViewer, viewerBlockedHost, canWatchReplay] = await Promise.all([
+      const [hostBlockedViewer, viewerBlockedHost, streamBlocked, canWatchReplay] = await Promise.all([
         userHasBlocked(hostId, authUid),
         userHasBlocked(authUid, hostId),
+        isUserBlockedFromLiveSession(sessionId, authUid),
         canUserWatchLiveReplay(sessionId, session, authUid, hostId),
       ]);
 
-      if (hostBlockedViewer || viewerBlockedHost) {
+      if (hostBlockedViewer || viewerBlockedHost || streamBlocked) {
         throw new functions.https.HttpsError(
           "permission-denied",
           "You are not allowed to access this replay."
@@ -2874,20 +3009,35 @@ export const createLiveReplayAccessLink = functions.runWith({enforceAppCheck: tr
       }
 
       if (!canWatchReplay) {
-        throw new functions.https.HttpsError(
-          "permission-denied",
-          "This replay is not available for your account."
-        );
+        const shareAccessToken = String(data?.shareAccessToken || data?.shareToken || "").trim();
+        let hasValidReplayShareToken = false;
+        if (shareAccessToken && isLiveReplayLinkShareable(replayVisibility)) {
+          try {
+            // Matches resolveLiveShareAccess: any host-signed link opens a link-shareable replay.
+            const {claims} = verifyLiveShareAccessTokenAllowingExpiry(shareAccessToken);
+            hasValidReplayShareToken = claims.sid === sessionId &&
+              claims.hostId === hostId;
+          } catch {
+            hasValidReplayShareToken = false;
+          }
+        }
+        if (!hasValidReplayShareToken) {
+          throw new functions.https.HttpsError(
+            "permission-denied",
+            "This replay is not available for your account."
+          );
+        }
+        via = "share_link";
       }
     }
 
-    const replayVisibility = normalizeLiveReplayVisibility(session.replayVisibility);
     const signed = signLiveReplayAccessToken({
       sessionId,
       purpose,
       requesterUid: authUid,
       hostId,
       replayVisibility,
+      via,
     });
 
     const playbackUrl = purpose === "playback" && primaryFile ?
@@ -2934,17 +3084,31 @@ export const createLiveShareAccessLink = functions.runWith({enforceAppCheck: tru
     const isActive = isLiveSessionCurrentlyActive(session.status);
     const archiveStatus = String(session.archiveStatus || "").trim().toUpperCase();
     const primaryFile = String(session.archivePrimaryFile || "").trim();
-    if (kind === "live" && !isActive && !(archiveStatus === "READY" && primaryFile)) {
+    if (kind === "live" && !isActive) {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "This live session is no longer active and its replay is not ready yet."
+        "This live session has ended. Share the replay link instead."
       );
     }
-    if (kind === "replay" && (archiveStatus !== "READY" || !primaryFile)) {
+    if (kind === "live" && normalizeLiveViewAccessMode(session.viewAccessMode) === "accepted_event_volunteers") {
       throw new functions.https.HttpsError(
         "failed-precondition",
-        "Replay is not ready to share yet."
+        "Event-only live streams are limited to accepted event guests, so invite links are not available."
       );
+    }
+    if (kind === "replay") {
+      if (archiveStatus !== "READY" || !primaryFile) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Replay is not ready to share yet."
+        );
+      }
+      if (!isLiveReplayLinkShareable(normalizeLiveReplayVisibility(session.replayVisibility))) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Set replay visibility to \"Anyone with the link\" or \"Public\" before sharing a replay link."
+        );
+      }
     }
 
     const signed = signLiveShareAccessToken({
@@ -2966,6 +3130,7 @@ export const createLiveShareAccessLink = functions.runWith({enforceAppCheck: tru
   });
 
 export const liveReplayAccess = functions.https.onRequest(async (req, res) => {
+  if (applyLiveReplayCorsHeaders(req, res)) return;
   if (!["GET", "HEAD"].includes(String(req.method || "").toUpperCase())) {
     res.status(405).json({error: "Method not allowed. Use GET."});
     return;
@@ -3023,6 +3188,7 @@ export const liveReplayMedia = functions.runWith({
   timeoutSeconds: 120,
   memory: "512MB",
 }).https.onRequest(async (req, res) => {
+  if (applyLiveReplayCorsHeaders(req, res)) return;
   if (!["GET", "HEAD"].includes(String(req.method || "").toUpperCase())) {
     res.status(405).json({error: "Method not allowed. Use GET."});
     return;
@@ -3061,28 +3227,31 @@ export const liveReplayMedia = functions.runWith({
     await authorizeLiveReplayClaims(claims, session, claims.sid);
 
     const objectPath = assertLiveReplayMediaPathAllowed(claims.sid, session, requestedFile);
-    const bucketName = getLiveArchiveStorageBucketName();
-    if (!bucketName) {
+    if (liveArchiveBucketCandidates(session).length === 0) {
       res.status(500).json({error: "Replay storage is not configured."});
       return;
     }
 
-    const bucket = getStorage().bucket(bucketName);
-    const file = bucket.file(objectPath);
-    let exists = false;
-    try {
-      [exists] = await file.exists();
-    } catch (error) {
-      const details = liveReplayStorageErrorDetails(error);
-      functions.logger.error("Live replay storage availability check failed.", {
-        sessionId: claims.sid,
-        storageErrorCode: details.code,
-        storageErrorMessage: details.message,
-      });
+    const lookup = await findLiveArchiveObjectBucket(session, objectPath);
+    if (!lookup.bucketName && lookup.hadError) {
+      functions.logger.error("Live replay storage availability check failed.", {sessionId: claims.sid});
       res.status(503).json({
         error: "Replay storage is temporarily unavailable. Please try again shortly.",
         code: "REPLAY_STORAGE_UNAVAILABLE",
       });
+      return;
+    }
+    const exists = !!lookup.bucketName;
+    if (lookup.bucketName && lookup.bucketName !== String(session.archiveBucket || "").trim()) {
+      liveSnap.ref.set({archiveBucket: lookup.bucketName}, {merge: true}).catch((error) => {
+        functions.logger.warn("Could not remember live replay bucket.", {sessionId: claims.sid, error: String(error)});
+      });
+    }
+    // Only the server-recorded primary file may demote the replay; the caller picks `file`,
+    // so any other missing path must not change session state.
+    const primaryObjectPath = sanitizeLiveArchiveObjectPath(String(session.archivePrimaryFile || ""));
+    if (!exists && objectPath !== primaryObjectPath) {
+      res.status(404).json({error: "Replay media file was not found."});
       return;
     }
     if (!exists) {
@@ -3107,6 +3276,7 @@ export const liveReplayMedia = functions.runWith({
       return;
     }
 
+    const file = getStorage().bucket(lookup.bucketName as string).file(objectPath);
     const contentType = getLiveReplayMediaContentType(objectPath);
     res.set("Cache-Control", "private, no-store, no-cache, max-age=0");
     res.set("Content-Type", contentType);
@@ -3193,22 +3363,39 @@ export const resolveLiveShareAccess = functions.https.onRequest(async (req, res)
   }
 
   const token = String(req.query["token"] || "").trim();
-  if (!token) {
-    res.status(400).json({error: "Missing live share token."});
+  const requestedSessionId = String(req.query["sessionId"] || "").trim();
+  const requestedHostId = String(req.query["hostId"] || "").trim();
+
+  // Signed links carry host-delegated access; plain links only open what is already public.
+  let claims: LiveShareAccessClaims | undefined;
+  let tokenExpired = false;
+  if (token) {
+    try {
+      const verified = verifyLiveShareAccessTokenAllowingExpiry(token);
+      claims = verified.claims;
+      tokenExpired = verified.expired;
+    } catch (error) {
+      functions.logger.warn("Invalid live share token.", {error});
+      if (!requestedSessionId || !requestedHostId) {
+        res.status(403).json({error: "Live share token is invalid or expired."});
+        return;
+      }
+    }
+  }
+
+  const sessionId = claims?.sid || requestedSessionId;
+  const claimedHostId = claims?.hostId || requestedHostId;
+  if (!sessionId || !claimedHostId || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) {
+    res.status(400).json({error: "Missing live share link details."});
+    return;
+  }
+  if (claims && requestedSessionId && requestedSessionId !== claims.sid) {
+    res.status(403).json({error: "Live share link does not match this session."});
     return;
   }
 
-  let claims: LiveShareAccessClaims;
   try {
-    claims = verifyLiveShareAccessToken(token);
-  } catch (error) {
-    functions.logger.warn("Invalid live share token.", {error});
-    res.status(403).json({error: "Live share token is invalid or expired."});
-    return;
-  }
-
-  try {
-    const liveSnap = await db.collection("live_sessions").doc(claims.sid).get();
+    const liveSnap = await db.collection("live_sessions").doc(sessionId).get();
     if (!liveSnap.exists) {
       res.status(404).json({error: "Live session not found."});
       return;
@@ -3216,8 +3403,7 @@ export const resolveLiveShareAccess = functions.https.onRequest(async (req, res)
 
     const session = (liveSnap.data() || {}) as Record<string, unknown>;
     const hostId = String(session.hostId || session.hostUid || "").trim();
-    const sessionId = claims.sid;
-    if (!hostId || hostId !== claims.hostId) {
+    if (!hostId || hostId !== claimedHostId) {
       res.status(403).json({error: "Live share host information does not match."});
       return;
     }
@@ -3226,75 +3412,86 @@ export const resolveLiveShareAccess = functions.https.onRequest(async (req, res)
     const hostName = String(session.hostName || session.hostUsername || "Host").trim() || "Host";
     // The token authorizes invite-only/shared-link access. Returning it in the
     // app link prevents the browser-to-app handoff from silently losing access.
-    const appUrl = buildLiveAppDeepLink(sessionId, hostId, token);
+    const appUrl = buildLiveAppDeepLink(sessionId, hostId, claims ? token : undefined);
     const isActive = isLiveSessionCurrentlyActive(session.status);
     const archiveStatus = String(session.archiveStatus || "").trim().toUpperCase();
-    const archivePlaybackUrl = await resolveLiveArchivePlaybackUrl(sessionId, session);
     const primaryFile = String(session.archivePrimaryFile || "").trim();
     const replayVisibility = normalizeLiveReplayVisibility(session.replayVisibility);
+    const replayReady = archiveStatus === "READY" && Boolean(primaryFile);
+    const replayPending = ["STARTING", "RECORDING", "PROCESSING"].includes(archiveStatus);
+    const viewAccessMode = normalizeLiveViewAccessMode(session.viewAccessMode);
+    const base = {sessionId, hostId, title, hostName, appUrl};
 
-    if (claims.kind === "replay" || (!isActive && archiveStatus === "READY" && (archivePlaybackUrl || primaryFile))) {
-      if (archiveStatus !== "READY" || !primaryFile) {
-        res.status(410).json({
-          error: "Replay is not available right now.",
-          state: "processing",
-          sessionId,
-          hostId,
-          title,
-          hostName,
-          appUrl,
-        });
-        return;
-      }
+    // Any host-signed link opens a replay the host has made link-shareable; public replays open from plain links.
+    // Visibility is rechecked on every media request, so link expiry is not the revocation mechanism here.
+    const replayOpenToLink = claims ?
+      isLiveReplayLinkShareable(replayVisibility) :
+      replayVisibility === "public";
 
+    const sendReplay = (): void => {
       const signedReplay = signLiveReplayAccessToken({
         sessionId,
         purpose: "share",
         requesterUid: hostId,
         hostId,
         replayVisibility,
+        ttlSecondsOverride: 4 * 60 * 60,
       });
-
       res.status(200).json({
         success: true,
         state: "replay",
-        sessionId,
-        hostId,
-        title,
-        hostName,
-        appUrl,
+        ...base,
         web: {
           mode: "video",
           playbackUrl: buildLiveReplayMediaUrl(signedReplay.token, primaryFile),
           expiresAtMs: signedReplay.expiresAtMs,
         },
       });
-      return;
-    }
+    };
 
-    if (!isActive) {
+    if (claims?.kind === "replay" || !isActive) {
+      if (!replayOpenToLink) {
+        const isReplayLink = claims?.kind === "replay";
+        res.status(isReplayLink ? 403 : 410).json({
+          error: isReplayLink ?
+            "The host has turned off link access to this replay." :
+            "This live session has ended.",
+          state: isReplayLink ? "restricted" : "ended",
+          replayAvailable: false,
+          ...base,
+        });
+        return;
+      }
+      if (replayReady) {
+        sendReplay();
+        return;
+      }
       res.status(410).json({
-        error: "This live session has ended.",
-        state: "ended",
-        sessionId,
-        hostId,
-        title,
-        hostName,
-        appUrl,
+        error: replayPending ? "The replay is still being prepared." : "Replay is not available for this broadcast.",
+        state: replayPending ? "processing" : "ended",
+        replayAvailable: false,
+        ...base,
       });
       return;
     }
 
-    const viewAccessMode = normalizeLiveViewAccessMode(session.viewAccessMode);
     if (viewAccessMode === "accepted_event_volunteers") {
       res.status(403).json({
         error: "Browser share links are not available for event-only live streams.",
         state: "restricted",
-        sessionId,
-        hostId,
-        title,
-        hostName,
-        appUrl,
+        ...base,
+      });
+      return;
+    }
+
+    const hasLiveInvite = claims?.kind === "live" && !tokenExpired;
+    if (!hasLiveInvite && viewAccessMode !== "public") {
+      res.status(403).json({
+        error: claims ?
+          "This live invite has expired. Open it in Volunteers App or ask the host for a new link." :
+          "This live stream is not open to browser viewers. Open it in Volunteers App.",
+        state: "restricted",
+        ...base,
       });
       return;
     }
@@ -3304,23 +3501,24 @@ export const resolveLiveShareAccess = functions.https.onRequest(async (req, res)
       res.status(500).json({error: "Live stream channel is missing."});
       return;
     }
+    if (!isLiveChannelOwnedByHost(channelName, hostId)) {
+      res.status(403).json({error: "Live stream channel does not match this session."});
+      return;
+    }
 
     // Host-minted share JWTs intentionally delegate watch access on the web without Firebase auth.
-    functions.logger.info("resolveLiveShareAccess granted live web viewer via host share bearer.", {
+    functions.logger.info("resolveLiveShareAccess granted live web viewer.", {
       sessionId,
       hostId,
       viewAccessMode,
+      viaInvite: hasLiveInvite,
     });
 
     const rtc = buildWebViewerRtcCredentials(channelName);
     res.status(200).json({
       success: true,
       state: "live",
-      sessionId,
-      hostId,
-      title,
-      hostName,
-      appUrl,
+      ...base,
       web: {
         mode: "agora_live_viewer",
         appId: rtc.appId,
@@ -3332,7 +3530,7 @@ export const resolveLiveShareAccess = functions.https.onRequest(async (req, res)
     });
   } catch (error) {
     functions.logger.error("Could not resolve live share access.", {
-      sessionId: claims.sid,
+      sessionId,
       error,
     });
     res.status(500).json({error: "Could not load this live stream right now."});
@@ -3388,6 +3586,9 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
 
     if (liveSnap.exists) {
       const hostId = String(session.hostId || session.hostUid || "").trim();
+      if (!isLiveChannelOwnedByHost(expectedChannel, hostId)) {
+        throw new functions.https.HttpsError("permission-denied", "Channel does not match session.");
+      }
       const statusRaw = String(session.status || "").trim().toLowerCase();
       const isLiveLike =
         statusRaw.includes("live") || statusRaw.includes("active") || statusRaw.includes("started");
@@ -3397,25 +3598,34 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
 
       const isHost = Boolean(hostId && hostId === authUid);
       if (!isHost && hostId) {
-        const [streamBlockSnap, hostBlockedViewer, viewerBlockedHost, canWatch, canStage] = await Promise.all([
-          db.collection("live_sessions").doc(sessionId).collection("blocked_users").doc(authUid).get(),
-          userHasBlocked(hostId, authUid),
-          userHasBlocked(authUid, hostId),
-          canUserWatchLiveSessionWithShareToken(
-            sessionId,
-            session,
-            authUid,
-            hostId,
-            shareAccessToken
-          ),
-          canUserJoinLiveStage(sessionId, session, authUid, hostId),
-        ]);
+        const [streamBlockSnap, hostBlockedViewer, viewerBlockedHost, canWatchDirectly, invitedSnap, canStage] =
+          await Promise.all([
+            db.collection("live_sessions").doc(sessionId).collection("blocked_users").doc(authUid).get(),
+            userHasBlocked(hostId, authUid),
+            userHasBlocked(authUid, hostId),
+            canUserWatchLiveSessionWithShareToken(
+              sessionId,
+              session,
+              authUid,
+              hostId,
+              shareAccessToken
+            ),
+            db.collection("live_sessions").doc(sessionId).collection("invited_viewers").doc(authUid).get(),
+            canUserJoinLiveStage(sessionId, session, authUid, hostId),
+          ]);
+        // A viewer admitted by a share link keeps access for this broadcast even after the link expires,
+        // unless the host has since narrowed the audience to accepted event guests.
+        const isEventOnly = normalizeLiveViewAccessMode(session.viewAccessMode) === "accepted_event_volunteers";
+        const canWatch = canWatchDirectly || (invitedSnap.exists && !isEventOnly);
         const stageMode = normalizeLiveStageAccessMode(session.stageAccessMode);
         if (streamBlockSnap.exists || hostBlockedViewer || viewerBlockedHost) {
           throw new functions.https.HttpsError("permission-denied", "You cannot join this live stream.");
         }
         if (!canWatch) {
           throw new functions.https.HttpsError("permission-denied", "You are not allowed to watch this live stream.");
+        }
+        if (isValidLiveShareTokenForSession(sessionId, session, hostId, authUid, shareAccessToken)) {
+          await grantLiveInvitedViewerAccess(sessionId, authUid);
         }
         if (wantsPublisherRole && !canStage) {
           const deniedMessage = stageMode === "host_only" ?
@@ -3505,14 +3715,7 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
     // Calls use a stable UID derived from the authenticated Firebase user. This
     // prevents a participant from requesting an RTC token that impersonates a
     // different member of the same private call.
-    const stableAgoraUidForFirebaseUid = (uid: string): number => {
-      let hash = 0;
-      for (let index = 0; index < uid.length; index += 1) {
-        hash = (Math.imul(hash, 31) + uid.charCodeAt(index)) | 0;
-      }
-      if (hash === -2147483648) return 1;
-      return Math.max(Math.abs(hash), 1);
-    };
+    const stableAgoraUidForFirebaseUid = stableAgoraUidFromFirebaseUid;
 
     let agoraUid: number;
     if (callSnap?.exists) {
@@ -3525,8 +3728,9 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       }
       agoraUid = expectedAgoraUid;
     } else {
-      // Live sessions intentionally continue to accept their existing viewer UID flow.
-      agoraUid = requestedAgoraUid;
+      // Live tokens are bound to a server-derived uid; clients must join with the returned `uid`.
+      // A uid-0 (wildcard) token would let any viewer join as the host and kick them off.
+      agoraUid = stableAgoraUidForFirebaseUid(authUid);
     }
 
     const {appId, appCertificate, ttlSeconds} = getAgoraConfig();
@@ -3549,14 +3753,22 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       );
     }
 
+    // Stage guests renew through this callable, which re-checks removal and blocks, so a short
+    // lifetime caps how long a removed guest's modified client could keep publishing.
+    const isLiveStageGuest = liveSnap.exists && canPublish &&
+      String(session.hostId || session.hostUid || "").trim() !== authUid;
+    const tokenTtlSeconds = isLiveStageGuest ?
+      Math.min(ttlSeconds, LIVE_STAGE_GUEST_TOKEN_TTL_SECONDS) :
+      ttlSeconds;
+
     const token = RtcTokenBuilder.buildTokenWithUid(
       appId,
       appCertificate,
       channelName,
       agoraUid,
       rtcRole,
-      ttlSeconds,
-      ttlSeconds
+      tokenTtlSeconds,
+      tokenTtlSeconds
     );
 
     return {
@@ -3565,7 +3777,7 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       // Certificate stays server-side only.
       appId,
       tokenRequired: true,
-      expiresInSeconds: ttlSeconds,
+      expiresInSeconds: tokenTtlSeconds,
       role: requestedRole,
       requestedRole,
       canPublish,
@@ -3573,6 +3785,53 @@ export const getAgoraRtcToken = functions.runWith({enforceAppCheck: true})
       replayVisibility: liveSnap.exists ? normalizeLiveReplayVisibility(session.replayVisibility) : null,
       uid: agoraUid,
     };
+  });
+
+/** Called before the room attaches listeners so share-link viewers are not denied by Firestore rules. */
+export const grantLiveShareViewerAccess = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    const authUid = context.auth?.uid;
+    if (!authUid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+    const sessionId = String(data?.sessionId || "").trim();
+    const shareAccessToken = String(data?.shareAccessToken || data?.shareToken || "").trim();
+    if (!sessionId || !shareAccessToken) {
+      throw new functions.https.HttpsError("invalid-argument", "sessionId and shareAccessToken are required.");
+    }
+
+    const sessionSnap = await db.collection("live_sessions").doc(sessionId).get();
+    if (!sessionSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "Live session not found.");
+    }
+    const session = (sessionSnap.data() || {}) as Record<string, unknown>;
+    const hostId = String(session.hostId || session.hostUid || "").trim();
+    const statusRaw = String(session.status || "").trim().toLowerCase();
+    const isLiveLike = statusRaw.includes("live") || statusRaw.includes("active") || statusRaw.includes("started");
+    if (!isLiveLike) {
+      return {granted: false, state: "ended"};
+    }
+    if (!hostId) {
+      throw new functions.https.HttpsError("failed-precondition", "This live session has no broadcaster.");
+    }
+    if (hostId === authUid) {
+      return {granted: true, state: "live"};
+    }
+
+    const [streamBlockSnap, hostBlockedViewer, viewerBlockedHost] = await Promise.all([
+      db.collection("live_sessions").doc(sessionId).collection("blocked_users").doc(authUid).get(),
+      userHasBlocked(hostId, authUid),
+      userHasBlocked(authUid, hostId),
+    ]);
+    if (streamBlockSnap.exists || hostBlockedViewer || viewerBlockedHost) {
+      throw new functions.https.HttpsError("permission-denied", "You cannot join this live stream.");
+    }
+    if (!isValidLiveShareTokenForSession(sessionId, session, hostId, authUid, shareAccessToken)) {
+      throw new functions.https.HttpsError("permission-denied", "This invite link is invalid or has expired.");
+    }
+
+    await grantLiveInvitedViewerAccess(sessionId, authUid);
+    return {granted: true, state: "live"};
   });
 
 export const seedLegalDocuments = functions.region("us-central1").https.onRequest(async (req, res) => {
@@ -4264,21 +4523,46 @@ const notifyFollowers = async (params: {
   referenceId: string;
   settingsField: FollowerNotificationSetting;
   extraData?: Record<string, string>;
+  /** Extra people to notify (e.g. accepted event guests), deduplicated against followers. */
+  additionalRecipientIds?: string[];
+  /** For audiences followers can't watch (invite/event-only), notify only the additional recipients. */
+  skipFollowers?: boolean;
 }): Promise<void> => {
   const {actorId, title, body, type, referenceId, settingsField, extraData} = params;
-  const followersSnap = await db.collection("users").doc(actorId).collection("followers").get();
-  if (followersSnap.empty) {
+  const recipientIds = new Set<string>();
+  if (!params.skipFollowers) {
+    const followersSnap = await db.collection("users").doc(actorId).collection("followers").get();
+    followersSnap.docs.forEach((doc) => recipientIds.add(doc.id));
+  }
+  (params.additionalRecipientIds || []).forEach((id) => {
+    const clean = String(id || "").trim();
+    if (clean) recipientIds.add(clean);
+  });
+  recipientIds.delete(actorId);
+  // Follow docs survive a block, so a blocked user could otherwise keep receiving the actor's alerts.
+  const [actorBlockedSnap, actorBlockedLegacySnap] = await Promise.all([
+    db.collection("users").doc(actorId).collection("blocked_users").get(),
+    db.collection("users").doc(actorId).collection("blockedUsers").get(),
+  ]);
+  actorBlockedSnap.docs.forEach((doc) => recipientIds.delete(doc.id));
+  actorBlockedLegacySnap.docs.forEach((doc) => recipientIds.delete(doc.id));
+  if (recipientIds.size === 0) {
     return;
   }
 
   const tokens: string[] = [];
-  const batch = db.batch();
+  let batch = db.batch();
+  let batchWrites = 0;
   const timestamp = admin.firestore.FieldValue.serverTimestamp();
 
-  for (const followerDoc of followersSnap.docs) {
-    const followerId = followerDoc.id;
-    const settingsDoc = await db.collection("users").doc(followerId)
-      .collection("settings").doc("notifications").get();
+  for (const followerId of recipientIds) {
+    const [settingsDoc, recipientBlockedActor] = await Promise.all([
+      db.collection("users").doc(followerId).collection("settings").doc("notifications").get(),
+      userHasBlocked(followerId, actorId),
+    ]);
+    if (recipientBlockedActor) {
+      continue;
+    }
     const settings = settingsDoc.data();
 
     if (!shouldNotifyFollower(settings, settingsField)) {
@@ -4304,9 +4588,17 @@ const notifyFollowers = async (params: {
       read: false,
       createdAt: timestamp,
     });
+    batchWrites += 1;
+    if (batchWrites >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      batchWrites = 0;
+    }
   }
 
-  await batch.commit();
+  if (batchWrites > 0) {
+    await batch.commit();
+  }
 
   if (tokens.length > 0) {
     const data: Record<string, string> = {
@@ -4319,11 +4611,13 @@ const notifyFollowers = async (params: {
       data.sessionId = data.sessionId || referenceId;
       data.hostId = data.hostId || actorId;
     }
-    await admin.messaging().sendEachForMulticast({
-      tokens,
-      notification: {title, body},
-      data,
-    });
+    for (let start = 0; start < tokens.length; start += 500) {
+      await admin.messaging().sendEachForMulticast({
+        tokens: tokens.slice(start, start + 500),
+        notification: {title, body},
+        data,
+      });
+    }
   }
 };
 
@@ -5910,12 +6204,8 @@ export const processPurchaseRequest = functions.firestore
       const requestedFundingPreference = normalizeMarketplaceCheckoutFundingPreference(
         requestData.fundingPreference
       );
-      activeProcessor = requestedFundingPreference === "AFRIEX_MOBILE_MONEY" ?
-        "AFRIEX" :
-        "STRIPE";
-      activeProcessorMode = requestedFundingPreference === "AFRIEX_MOBILE_MONEY" ?
-        AFRIEX_COMMERCE_PROCESSOR_MODE :
-        STRIPE_CONNECT_DIRECT_CHARGE_MODE;
+      activeProcessor = "STRIPE";
+      activeProcessorMode = STRIPE_CONNECT_DIRECT_CHARGE_MODE;
       await snap.ref.set({
         status: "processing",
         fundingPreference: requestedFundingPreference,
@@ -6014,7 +6304,6 @@ export const processPurchaseRequest = functions.firestore
         recipientUserData: sellerData,
         flowName: "Marketplace purchase",
         requestedFundingPreference,
-        afriexPayoutPlan: sellerAfriexPayoutPlan,
       });
       if (settlementDecision.provider === "AFRIEX" && settlementDecision.executionMode === "LIVE") {
         activeProcessor = "AFRIEX";
@@ -6329,7 +6618,6 @@ export const processPurchaseRequest = functions.firestore
               destinationAccountId: connectedAccountId,
               stripeConnectedAccountId: chargeResult.connectedAccountId,
               platformFee,
-              afriexPayoutPlan: sellerAfriexPayoutPlan,
               extraContext: {
                 purchaseRequestId: requestId,
                 itemId: String(itemId || "").trim(),
@@ -6919,9 +7207,14 @@ const normalizeGarageSaleCheckoutFundingPreference = (
   value: unknown
 ): GarageSaleCheckoutFundingPreference => {
   const normalized = String(value || "").trim().toUpperCase();
-  // Older app versions had only the card flow; never infer mobile money without consent.
+  // Older app versions had only the card flow; never infer a different funding method.
   if (!normalized || normalized === "STRIPE_CARD") return "STRIPE_CARD";
-  if (normalized === "AFRIEX_MOBILE_MONEY") return "AFRIEX_MOBILE_MONEY";
+  if (normalized === "AFRIEX_MOBILE_MONEY") {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Mobile money checkout is not available for seller or organizer payments right now. Use a card so the recipient is paid through Stripe Connect."
+    );
+  }
   throw new functions.https.HttpsError(
     "invalid-argument",
     "Select a supported garage sale payment method."
@@ -6980,12 +7273,8 @@ export const processGarageSalePayment = functions.firestore
       const requestedFundingPreference = normalizeGarageSaleCheckoutFundingPreference(
         paymentData.fundingPreference
       );
-      activeProcessor = requestedFundingPreference === "AFRIEX_MOBILE_MONEY" ?
-        "AFRIEX" :
-        "STRIPE";
-      activeProcessorMode = requestedFundingPreference === "AFRIEX_MOBILE_MONEY" ?
-        AFRIEX_COMMERCE_PROCESSOR_MODE :
-        STRIPE_CONNECT_DIRECT_CHARGE_MODE;
+      activeProcessor = "STRIPE";
+      activeProcessorMode = STRIPE_CONNECT_DIRECT_CHARGE_MODE;
       await snap.ref.set({
         status: "processing",
         fundingPreference: requestedFundingPreference,
@@ -7047,7 +7336,6 @@ export const processGarageSalePayment = functions.firestore
         recipientUserData: sellerData,
         flowName: "Garage sale checkout",
         requestedFundingPreference,
-        afriexPayoutPlan: sellerAfriexPayoutPlan,
       });
       if (settlementDecision.provider === "AFRIEX" && settlementDecision.executionMode === "LIVE") {
         activeProcessor = "AFRIEX";
@@ -7279,7 +7567,6 @@ export const processGarageSalePayment = functions.firestore
               destinationAccountId: connectedAccountId,
               stripeConnectedAccountId: chargeResult.connectedAccountId,
               platformFee,
-              afriexPayoutPlan: sellerAfriexPayoutPlan,
               extraContext: {
                 garageSalePaymentId: paymentId,
                 garageSaleId: String(garageSaleId || "").trim(),
@@ -7659,25 +7946,61 @@ export const onJokePostedNotifyFollowers = functions.firestore
     const liveSessionId = typeof joke.sourceLiveSessionId === "string"
       ? joke.sourceLiveSessionId.trim()
       : "";
-    const sourceHostId = typeof joke.sourceLiveHostId === "string"
-      ? joke.sourceLiveHostId.trim()
-      : actorId;
-    const isLiveSessionPost = mediaType === "LIVE_SESSION" && liveSessionId.length > 0;
+    const isLiveLinkedPost = mediaType === "LIVE_SESSION" || mediaType === "LIVE_REPLAY";
+
+    if (isLiveLinkedPost) {
+      // Never trust client-supplied live references: only the session's own host may announce it.
+      if (!liveSessionId) return undefined;
+      const sessionSnap = await db.collection("live_sessions").doc(liveSessionId).get();
+      const session = (sessionSnap.data() || {}) as Record<string, unknown>;
+      const sessionHostId = String(session.hostId || session.hostUid || "").trim();
+      if (!sessionSnap.exists || sessionHostId !== actorId) {
+        functions.logger.warn("Skipping follower push for a live post that does not belong to its author.", {
+          actorId,
+          liveSessionId,
+          jokeId: context.params.jokeId,
+        });
+        return undefined;
+      }
+
+      if (mediaType === "LIVE_SESSION") {
+        if (!isLiveSessionCurrentlyActive(session.status)) return undefined;
+        // Shares the go-live lock so followers get one "is live" push per broadcast.
+        if (!(await claimLiveFollowerNotification(liveSessionId))) return undefined;
+        await notifyFollowers({
+          actorId,
+          title: `${authorName} is live on MindLoom`,
+          body: preview,
+          type: "liveStream",
+          referenceId: liveSessionId,
+          settingsField: "liveStreams",
+          extraData: {
+            jokeId: context.params.jokeId,
+            hostId: actorId,
+            sessionId: liveSessionId,
+          },
+        });
+        return undefined;
+      }
+
+      await notifyFollowers({
+        actorId,
+        title: `${authorName} shared a live replay`,
+        body: preview,
+        type: "jokesPost",
+        referenceId: context.params.jokeId,
+        settingsField: "jokesPosts",
+      });
+      return undefined;
+    }
 
     await notifyFollowers({
       actorId,
-      title: isLiveSessionPost ? `${authorName} is live on MindLoom` : `${authorName} posted a new joke`,
-      body: isLiveSessionPost ? preview : preview,
-      type: isLiveSessionPost ? "liveStream" : "jokesPost",
-      referenceId: isLiveSessionPost ? liveSessionId : context.params.jokeId,
-      settingsField: isLiveSessionPost ? "liveStreams" : "jokesPosts",
-      extraData: isLiveSessionPost
-        ? {
-          jokeId: context.params.jokeId,
-          hostId: sourceHostId || actorId,
-          sessionId: liveSessionId,
-        }
-        : undefined,
+      title: `${authorName} posted a new joke`,
+      body: preview,
+      type: "jokesPost",
+      referenceId: context.params.jokeId,
+      settingsField: "jokesPosts",
     });
 
     return undefined;
@@ -7915,6 +8238,48 @@ const getLiveArchiveStorageBucketName = (): string | undefined => {
   return configuredLiveArchiveBucketName(getAgoraRecordingConfig().storage.bucket);
 };
 
+/** Buckets that received recordings under earlier configs; replays stored there must stay playable. */
+const LIVE_ARCHIVE_LEGACY_BUCKETS = String(process.env.AGORA_RECORDING_LEGACY_BUCKETS ?? "agora_recording_storage_bucket")
+  .split(",")
+  .map((bucket) => bucket.trim())
+  .filter((bucket) => bucket.length > 0);
+
+const liveArchiveBucketCandidates = (session: Record<string, unknown>): string[] => {
+  const candidates = [
+    configuredLiveArchiveBucketName(session.archiveBucket),
+    getLiveArchiveStorageBucketName(),
+    ...LIVE_ARCHIVE_LEGACY_BUCKETS,
+  ].filter((bucket): bucket is string => !!bucket);
+  return Array.from(new Set(candidates));
+};
+
+/**
+ * The recording bucket can change between deploys, so each replay is looked up in the
+ * bucket recorded on the session first, then the configured and legacy buckets.
+ */
+const findLiveArchiveObjectBucket = async (
+  session: Record<string, unknown>,
+  objectPath: string
+): Promise<{bucketName?: string; hadError: boolean}> => {
+  let hadError = false;
+  for (const bucketName of liveArchiveBucketCandidates(session)) {
+    try {
+      const [exists] = await getStorage().bucket(bucketName).file(objectPath).exists();
+      if (exists) return {bucketName, hadError};
+    } catch (error) {
+      hadError = true;
+      const details = liveReplayStorageErrorDetails(error);
+      functions.logger.warn("Could not check live replay object in bucket.", {
+        bucketName,
+        objectPath,
+        storageErrorCode: details.code,
+        storageErrorMessage: details.message,
+      });
+    }
+  }
+  return {hadError};
+};
+
 /**
  * Keep replay media private. Playback is authorized and streamed by
  * `liveReplayMedia`, so archive objects must never be exposed through a
@@ -7978,24 +8343,13 @@ const restrictLiveArchiveObjectsToServerAccess = async (params: {
  * Agora can report a file list before its backup uploader has completed the
  * transfer to GCS. A replay is only playable after its primary file exists.
  */
-const liveArchivePrimaryFileExists = async (primaryFile: string): Promise<boolean> => {
-  const bucketName = getLiveArchiveStorageBucketName();
+const findLiveArchivePrimaryFileBucket = async (
+  session: Record<string, unknown>,
+  primaryFile: string
+): Promise<string | undefined> => {
   const objectPath = sanitizeLiveArchiveObjectPath(primaryFile);
-  if (!bucketName || !objectPath) return false;
-
-  try {
-    const [exists] = await getStorage().bucket(bucketName).file(objectPath).exists();
-    return exists;
-  } catch (error) {
-    const details = liveReplayStorageErrorDetails(error);
-    functions.logger.warn("Could not check pending live replay upload.", {
-      bucketName,
-      objectPath,
-      storageErrorCode: details.code,
-      storageErrorMessage: details.message,
-    });
-    return false;
-  }
+  if (!objectPath) return undefined;
+  return (await findLiveArchiveObjectBucket(session, objectPath)).bucketName;
 };
 
 const normalizeLiveArchiveFileList = (
@@ -8053,11 +8407,37 @@ const normalizeLiveArchiveFileList = (
   return [];
 };
 
-const pickPrimaryLiveArchiveFile = (files: AgoraRecordingFileInfo[]): AgoraRecordingFileInfo | undefined => {
+/**
+ * Server-assigned Agora uid for a Firebase user. RTC tokens are bound to it, so the host's
+ * recorded track can be identified in individual-mode recordings.
+ */
+const stableAgoraUidFromFirebaseUid = (uid: string): number => {
+  let hash = 0;
+  for (let index = 0; index < uid.length; index += 1) {
+    hash = (Math.imul(hash, 31) + uid.charCodeAt(index)) | 0;
+  }
+  if (hash === -2147483648) return 1;
+  return Math.max(Math.abs(hash), 1);
+};
+
+const pickPrimaryLiveArchiveFile = (
+  files: AgoraRecordingFileInfo[],
+  hostFirebaseUid?: string
+): AgoraRecordingFileInfo | undefined => {
   const isPreferredPlayableFile = (file: AgoraRecordingFileInfo): boolean => {
     const lowerName = file.fileName.toLowerCase();
     return lowerName.endsWith(".m3u8") || lowerName.endsWith(".mp4");
   };
+
+  // With stage guests, individual mode records one file per participant; the replay should be the host's.
+  const hostAgoraUid = hostFirebaseUid ? String(stableAgoraUidFromFirebaseUid(hostFirebaseUid)) : "";
+  const hostFile = hostAgoraUid ? files.find((file) =>
+    file.uid === hostAgoraUid &&
+    file.isPlayable !== false &&
+    (file.trackType === undefined || file.trackType === "audio_and_video") &&
+    isPreferredPlayableFile(file)
+  ) : undefined;
+  if (hostFile) return hostFile;
 
   return files.find((file) =>
     file.isPlayable === true &&
@@ -8152,6 +8532,12 @@ const LIVE_ARCHIVE_TERMINAL_STATUSES: AgoraRecordingStatus[] = [
   "FAILED",
   "READY",
 ];
+/** The recorder leaves the channel when its token expires, so it must outlast any broadcast (Agora caps at 24h). */
+const LIVE_ARCHIVE_RECORDER_TOKEN_TTL_SECONDS = 24 * 60 * 60;
+const LIVE_ARCHIVE_ENDED_BEFORE_START_MESSAGE = "Live ended before replay recording finished starting on the server.";
+const LIVE_ARCHIVE_PENDING_UPLOAD_MESSAGE =
+  "Replay files are still being prepared. Playback will be enabled automatically when the upload completes.";
+const LIVE_ARCHIVE_ENDED_SESSION_STATUSES = ["ended", "completed", "closed"];
 const LIVE_ARCHIVE_STOP_METADATA_WAIT_ATTEMPTS = 25;
 const LIVE_ARCHIVE_STOP_METADATA_WAIT_MS = 3000;
 const LIVE_ARCHIVE_PROCESSING_TIMEOUT_MS = Math.max(
@@ -8181,7 +8567,15 @@ const liveArchiveProcessingHasExpired = (session: Record<string, unknown>): bool
 };
 
 const liveArchiveProcessingTimedOutMessage =
-  "Replay recording did not reach secure storage in time. This broadcast cannot be replayed; start a new live stream to record another replay.";
+  "The replay recording has not reached storage yet. It will appear automatically if it arrives in the next few days.";
+/** Earlier wording still stored on timed-out sessions; kept so the recovery query matches them. */
+const liveArchiveProcessingTimedOutMessages = [
+  liveArchiveProcessingTimedOutMessage,
+  "Replay recording did not reach secure storage in time. This broadcast cannot be replayed; start a new live stream to record another replay.",
+];
+
+/** Agora keeps retrying `backuped` uploads, so timed-out replays are re-checked for this long. */
+const LIVE_ARCHIVE_LATE_UPLOAD_RECOVERY_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface LiveArchiveStopMetadata {
   archiveStatus?: AgoraRecordingStatus;
@@ -8296,6 +8690,14 @@ const startLiveArchiveRecording = async (
     });
     return;
   }
+  const archiveHostId = String(latestData.hostId || latestData.hostUid || "").trim();
+  if (!isLiveChannelOwnedByHost(channelName, archiveHostId)) {
+    await updateLiveArchiveFields(sessionRef, {
+      archiveStatus: "FAILED",
+      archiveError: "Live channel does not belong to this host.",
+    });
+    return;
+  }
 
   const storage = buildLiveArchiveStorageConfig(recordingConfig, sessionId);
   functions.logger.info("Live archive start configuration", {
@@ -8334,8 +8736,10 @@ const startLiveArchiveRecording = async (
     archiveError: admin.firestore.FieldValue.delete(),
     archiveRecorderUid: recorderUid,
     archiveObjectPrefix: storage.objectPrefix,
+    archiveBucket: recordingConfig.storage.bucket,
   });
 
+  let finalizeAfterStart: Record<string, unknown> | undefined;
   try {
     const acquireResponse = await callAgoraRecordingApi<AgoraAcquireResponse>(
       "/acquire",
@@ -8361,8 +8765,8 @@ const startLiveArchiveRecording = async (
       channelName,
       Number.parseInt(recorderUid, 10),
       RtcRole.SUBSCRIBER,
-      agoraConfig.ttlSeconds,
-      agoraConfig.ttlSeconds
+      Math.max(agoraConfig.ttlSeconds, LIVE_ARCHIVE_RECORDER_TOKEN_TTL_SECONDS),
+      Math.max(agoraConfig.ttlSeconds, LIVE_ARCHIVE_RECORDER_TOKEN_TTL_SECONDS)
     );
 
     const startResponse = await callAgoraRecordingApi<AgoraStartResponse>(
@@ -8392,16 +8796,58 @@ const startLiveArchiveRecording = async (
       throw new Error("Agora did not return a recording SID.");
     }
 
-    await updateLiveArchiveFields(sessionRef, {
-      archiveStatus: "RECORDING",
-      archiveResourceId: resourceId,
-      archiveSid: sid,
-      archiveRecorderUid: recorderUid,
-      archiveObjectPrefix: storage.objectPrefix,
-      archiveStartedAt: admin.firestore.FieldValue.serverTimestamp(),
-      archiveError: admin.firestore.FieldValue.delete(),
+    // The end-of-live trigger may have run while Agora was starting; never overwrite a later state.
+    const claim = await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(sessionRef);
+      const currentData = (current.data() || {}) as Record<string, unknown>;
+      if (!current.exists) return {recorded: false, ended: false, data: currentData};
+      const currentArchiveStatus = normalizeLiveArchiveStatus(currentData.archiveStatus);
+      const endedBeforeStart = currentArchiveStatus === "FAILED" &&
+        String(currentData.archiveError || "").trim() === LIVE_ARCHIVE_ENDED_BEFORE_START_MESSAGE;
+      if (currentArchiveStatus !== "STARTING" && !endedBeforeStart) {
+        return {recorded: false, ended: false, data: currentData};
+      }
+      transaction.set(sessionRef, {
+        archiveStatus: "RECORDING",
+        archiveResourceId: resourceId,
+        archiveSid: sid,
+        archiveRecorderUid: recorderUid,
+        archiveObjectPrefix: storage.objectPrefix,
+        archiveStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+        archiveStoppedAt: admin.firestore.FieldValue.delete(),
+        archiveError: admin.firestore.FieldValue.delete(),
+      }, {merge: true});
+      const liveStatus = String(currentData.status || "").trim().toLowerCase();
+      return {
+        recorded: true,
+        ended: LIVE_ARCHIVE_ENDED_SESSION_STATUSES.includes(liveStatus),
+        data: {
+          ...currentData,
+          archiveStatus: "RECORDING",
+          archiveResourceId: resourceId,
+          archiveSid: sid,
+          archiveRecorderUid: recorderUid,
+          archiveObjectPrefix: storage.objectPrefix,
+        } as Record<string, unknown>,
+      };
     });
+
+    if (!claim.recorded) {
+      functions.logger.warn("Live archive start was superseded; stopping the untracked recorder.", {sessionId});
+      await callAgoraRecordingApi(
+        `/resourceid/${resourceId}/sid/${sid}/mode/${LIVE_ARCHIVE_MODE}/stop`,
+        {cname: channelName, uid: recorderUid, clientRequest: {async_stop: true}},
+        recordingConfig
+      ).catch((stopError) => {
+        functions.logger.warn("Could not stop superseded live archive recorder.", {
+          sessionId,
+          message: extractAgoraRecordingErrorMessage(stopError, "Stop failed."),
+        });
+      });
+      return;
+    }
     functions.logger.info("Live archive recording started", {sessionId});
+    if (claim.ended) finalizeAfterStart = claim.data;
   } catch (error) {
     const message = extractAgoraRecordingErrorMessage(
       error,
@@ -8415,6 +8861,11 @@ const startLiveArchiveRecording = async (
       archiveStatus: "FAILED",
       archiveError: message,
     });
+  }
+
+  if (finalizeAfterStart) {
+    functions.logger.info("Live ended while the recorder was starting; finalizing the replay now.", {sessionId});
+    await stopLiveArchiveRecording(sessionId, finalizeAfterStart);
   }
 };
 
@@ -8438,7 +8889,13 @@ const promoteMindLoomLivePostToReplay = async (
     .get();
   if (postsSnap.empty) return;
 
-  const replayVisibility = normalizeLiveReplayVisibility(session.replayVisibility);
+  // The caller's snapshot can predate a slow recording stop; visibility may have changed meanwhile.
+  const freshSnap = await db.collection("live_sessions").doc(sessionId).get();
+  const freshSession = freshSnap.exists ? (freshSnap.data() || {}) as Record<string, unknown> : session;
+  const replayVisibility = normalizeLiveReplayVisibility(freshSession.replayVisibility);
+  const title = String(freshSession.title || session.title || "").trim();
+  const canonicalShareUrl = `${buildLiveShareBaseUrl()}?sessionId=${encodeURIComponent(sessionId)}` +
+    `&hostId=${encodeURIComponent(hostId)}`;
   const batch = db.batch();
   for (const post of postsSnap.docs) {
     const postData = post.data() || {};
@@ -8451,8 +8908,9 @@ const promoteMindLoomLivePostToReplay = async (
       mediaType: "LIVE_REPLAY",
       sourceType: "LIVE_REPLAY",
       sourceReplayVisibility: replayVisibility,
-      // Remove legacy, expiring browser invitations from existing posts.
-      sourceLiveShareUrl: admin.firestore.FieldValue.delete(),
+      ...(title ? {text: `Replay: ${title}`} : {}),
+      // Replace legacy, expiring browser invitations with the canonical link.
+      sourceLiveShareUrl: canonicalShareUrl,
     }, {merge: true});
   }
   await batch.commit();
@@ -8463,8 +8921,8 @@ const deleteLiveArchiveObjects = async (
   sessionId: string,
   session: Record<string, unknown>
 ): Promise<void> => {
-  const bucketName = getLiveArchiveStorageBucketName();
-  if (!bucketName) return;
+  const bucketNames = liveArchiveBucketCandidates(session);
+  if (bucketNames.length === 0) return;
 
   const recordingConfig = getAgoraRecordingConfig();
   const expectedPrefix = buildLiveArchiveObjectPrefix(recordingConfig, sessionId).joined;
@@ -8474,20 +8932,22 @@ const deleteLiveArchiveObjects = async (
     : expectedPrefix;
   if (!objectPrefix) return;
 
-  try {
-    await getStorage().bucket(bucketName).deleteFiles({
-      prefix: `${objectPrefix}/`,
-      force: true,
-    });
-  } catch (error) {
-    // App access is removed below even if an external storage provider is down.
-    // Retain an operator-visible log so its private objects can be cleaned up.
-    functions.logger.warn("Could not remove live archive objects during broadcast deletion.", {
-      sessionId,
-      bucketName,
-      objectPrefix,
-      error,
-    });
+  for (const bucketName of bucketNames) {
+    try {
+      await getStorage().bucket(bucketName).deleteFiles({
+        prefix: `${objectPrefix}/`,
+        force: true,
+      });
+    } catch (error) {
+      // App access is removed below even if an external storage provider is down.
+      // Retain an operator-visible log so its private objects can be cleaned up.
+      functions.logger.warn("Could not remove live archive objects during broadcast deletion.", {
+        sessionId,
+        bucketName,
+        objectPrefix,
+        error,
+      });
+    }
   }
 };
 
@@ -8502,13 +8962,40 @@ const deleteMindLoomPostsForLiveSession = async (
     .get();
   if (postsSnap.empty) return 0;
 
-  const writer = db.bulkWriter();
+  // recursiveDelete also removes each post's comments subcollection, which a plain delete would orphan.
   for (const post of postsSnap.docs) {
-    writer.delete(post.ref);
+    await db.recursiveDelete(post.ref);
   }
-  await writer.close();
   return postsSnap.size;
 };
+
+/** Keeps MindLoom replay cards in sync when the host changes who can watch the replay. */
+export const onLiveReplayVisibilityChangedSyncPosts = functions.firestore
+  .document("live_sessions/{sessionId}")
+  .onUpdate(async (change, context) => {
+    const before = (change.before.data() || {}) as Record<string, unknown>;
+    const after = (change.after.data() || {}) as Record<string, unknown>;
+    const beforeVisibility = normalizeLiveReplayVisibility(before.replayVisibility);
+    const afterVisibility = normalizeLiveReplayVisibility(after.replayVisibility);
+    if (beforeVisibility === afterVisibility) return undefined;
+
+    const hostId = String(after.hostId || after.hostUid || "").trim();
+    if (!hostId) return undefined;
+    const postsSnap = await db.collection("users")
+      .doc(hostId)
+      .collection("jokes")
+      .where("sourceLiveSessionId", "==", context.params.sessionId)
+      .limit(450)
+      .get();
+    if (postsSnap.empty) return undefined;
+
+    const batch = db.batch();
+    for (const post of postsSnap.docs) {
+      batch.set(post.ref, {sourceReplayVisibility: afterVisibility}, {merge: true});
+    }
+    await batch.commit();
+    return undefined;
+  });
 
 /**
  * Hosts delete only completed broadcasts. The server removes all private
@@ -8603,7 +9090,7 @@ const stopLiveArchiveRecording = async (
 
   if (!channelName || !resourceId || !sid || !recorderUid || !recordingConfig.customerId || !recordingConfig.customerSecret) {
     const archiveError = metadata.archiveStatus === "STARTING" || metadata.archiveStatus === undefined ?
-      "Live ended before replay recording finished starting on the server." :
+      LIVE_ARCHIVE_ENDED_BEFORE_START_MESSAGE :
       "Live replay recording could not be finalized because recorder metadata was missing.";
     functions.logger.warn("Live archive stop skipped because recorder metadata was incomplete.", {
       sessionId,
@@ -8615,18 +9102,45 @@ const stopLiveArchiveRecording = async (
       hasCustomerId: !!recordingConfig.customerId,
       hasCustomerSecret: !!recordingConfig.customerSecret,
     });
-    await updateLiveArchiveFields(sessionRef, {
-      archiveStatus: "FAILED",
-      archiveStoppedAt: admin.firestore.FieldValue.serverTimestamp(),
-      archiveError,
+    const canStopRecorder = !!recordingConfig.customerId && !!recordingConfig.customerSecret;
+    const recorderStartedMeanwhile = await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(sessionRef);
+      if (!current.exists) return false;
+      const currentData = (current.data() || {}) as Record<string, unknown>;
+      const currentMetadata = buildLiveArchiveStopMetadata(currentData, snapshotData, recordingConfig, sessionId);
+      if (canStopRecorder && currentMetadata.archiveStatus === "RECORDING" &&
+        hasLiveArchiveRecorderMetadata(currentMetadata)) {
+        return true;
+      }
+      transaction.set(sessionRef, {
+        archiveStatus: "FAILED",
+        archiveStoppedAt: admin.firestore.FieldValue.serverTimestamp(),
+        archiveError,
+      }, {merge: true});
+      return false;
     });
+    if (recorderStartedMeanwhile) {
+      await stopLiveArchiveRecording(sessionId, snapshotData);
+    }
     return;
   }
 
-  await updateLiveArchiveFields(sessionRef, {
-    archiveStatus: "PROCESSING",
-    archiveStoppedAt: admin.firestore.FieldValue.serverTimestamp(),
+  // The end-of-live trigger and the reconciler can both reach this point; only one may stop the recorder.
+  const claimedStop = await db.runTransaction(async (transaction) => {
+    const current = await transaction.get(sessionRef);
+    if (!current.exists) return false;
+    const currentStatus = normalizeLiveArchiveStatus((current.data() || {}).archiveStatus);
+    if (currentStatus !== "RECORDING" && currentStatus !== "STARTING") return false;
+    transaction.set(sessionRef, {
+      archiveStatus: "PROCESSING",
+      archiveStoppedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+    return true;
   });
+  if (!claimedStop) {
+    functions.logger.info("Live archive stop is already being handled", {sessionId});
+    return;
+  }
 
   try {
     const stopResponse = await callAgoraRecordingApi<AgoraStopResponse>(
@@ -8645,26 +9159,30 @@ const stopLiveArchiveRecording = async (
     const serverResponse = stopResponse.serverResponse || {};
     const uploadStatus = String(serverResponse.uploadingStatus || "").trim();
     const files = normalizeLiveArchiveFileList(serverResponse.fileList, objectPrefix);
-    const primaryFile = pickPrimaryLiveArchiveFile(files);
+    const primaryFile = pickPrimaryLiveArchiveFile(
+      files,
+      String(snapshotData.hostId || snapshotData.hostUid || "").trim() || undefined
+    );
     const archivePlaybackUrl = primaryFile ?
       buildLiveArchivePlaybackUrl(recordingConfig.playbackBaseUrl, primaryFile.fileName) :
       undefined;
 
-    const primaryFileExists = primaryFile ? await liveArchivePrimaryFileExists(primaryFile.fileName) : false;
-    const replayReady = files.length > 0 && !!primaryFile && primaryFileExists;
+    const primaryFileBucket = primaryFile ?
+      await findLiveArchivePrimaryFileBucket(latestData, primaryFile.fileName) :
+      undefined;
+    const replayReady = files.length > 0 && !!primaryFile && !!primaryFileBucket;
     const replayPendingMessage = uploadStatus.toLowerCase() === "backuped" ?
       "Replay files are still transferring to secure storage. Playback will be enabled automatically when the upload completes." :
-      "Replay files are still being prepared. Playback will be enabled automatically when the upload completes.";
+      LIVE_ARCHIVE_PENDING_UPLOAD_MESSAGE;
 
     await updateLiveArchiveFields(sessionRef, {
-      archiveStatus: files.length === 0 ? "FAILED" : (replayReady ? "READY" : "PROCESSING"),
+      archiveStatus: replayReady ? "READY" : "PROCESSING",
       archiveUploadStatus: uploadStatus || admin.firestore.FieldValue.delete(),
       archivePrimaryFile: primaryFile?.fileName || admin.firestore.FieldValue.delete(),
       archiveFileCount: files.length,
+      ...(primaryFileBucket ? {archiveBucket: primaryFileBucket} : {}),
       archiveReadyAt: replayReady ? admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.delete(),
-      archiveError: replayReady ?
-        admin.firestore.FieldValue.delete() :
-        (files.length === 0 ? "No replay files were returned by the recording service." : replayPendingMessage),
+      archiveError: replayReady ? admin.firestore.FieldValue.delete() : replayPendingMessage,
     });
     functions.logger.info("Live archive finalization result", {
       sessionId,
@@ -8681,9 +9199,9 @@ const stopLiveArchiveRecording = async (
         functions.logger.error("Could not promote MindLoom live post to replay", {sessionId, error});
       }
     }
-    if (replayReady && recordingConfig.storage.bucket) {
+    if (replayReady && primaryFileBucket) {
       await restrictLiveArchiveObjectsToServerAccess({
-        bucketName: recordingConfig.storage.bucket,
+        bucketName: primaryFileBucket,
         objectPaths: files.map((file) => file.fileName),
         objectPrefix,
       });
@@ -8697,15 +9215,85 @@ const stopLiveArchiveRecording = async (
       sessionId,
       message,
     });
+    const agoraErrorCode = axios.isAxiosError(error) ?
+      Number((error.response?.data as Record<string, unknown> | undefined)?.code) :
+      Number.NaN;
+    // Agora 435: nothing was recorded because no one published media.
+    if (agoraErrorCode === 435) {
+      await updateLiveArchiveFields(sessionRef, {
+        archiveStatus: "FAILED",
+        archiveError: "No video was published during this broadcast, so there is no replay.",
+      });
+      return;
+    }
+    // The recorder can stop on its own (idle timeout) and still upload; reconciliation finds the files in storage.
     await updateLiveArchiveFields(sessionRef, {
-      archiveStatus: "FAILED",
-      archiveError: message,
+      archiveStatus: "PROCESSING",
+      archiveError: LIVE_ARCHIVE_PENDING_UPLOAD_MESSAGE,
     });
   }
 };
 
+/**
+ * A blocked user's RTC token stays valid until it expires, so a modified client could keep
+ * watching or publishing. Agora's kicking rule removes them from the channel right away.
+ */
+export const onLiveViewerBlockedKickFromChannel = functions.firestore
+  .document("live_sessions/{sessionId}/blocked_users/{blockedUid}")
+  .onCreate(async (_snapshot, context) => {
+    const sessionId = String(context.params.sessionId || "").trim();
+    const blockedUid = String(context.params.blockedUid || "").trim();
+    if (!sessionId || !blockedUid) return;
+
+    const sessionSnap = await db.collection("live_sessions").doc(sessionId).get();
+    if (!sessionSnap.exists) return;
+    const session = (sessionSnap.data() || {}) as Record<string, unknown>;
+    const status = String(session.status || "").trim().toLowerCase();
+    if (!["live", "active", "started"].includes(status)) return;
+
+    const hostId = String(session.hostId || session.hostUid || "").trim();
+    const channelName = String(session.agoraChannelName || session.channelName || "").trim();
+    if (blockedUid === hostId || !isLiveChannelOwnedByHost(channelName, hostId)) return;
+
+    const recordingConfig = getAgoraRecordingConfig();
+    const {appId, ttlSeconds} = getAgoraConfig();
+    if (!appId || !recordingConfig.customerId || !recordingConfig.customerSecret) {
+      functions.logger.warn("Agora REST credentials missing; blocked live viewer was not kicked.", {sessionId});
+      return;
+    }
+
+    try {
+      await axios.post(
+        "https://api.agora.io/dev/v1/kicking-rule",
+        {
+          appid: appId,
+          cname: channelName,
+          uid: stableAgoraUidFromFirebaseUid(blockedUid),
+          // Outlasts any token already issued; new tokens are refused by the block check.
+          time: Math.min(1440, Math.max(1, Math.ceil(ttlSeconds / 60))),
+          privileges: ["join_channel"],
+        },
+        {
+          timeout: 15000,
+          headers: {
+            Authorization: buildAgoraRecordingAuthorizationHeader(
+              recordingConfig.customerId,
+              recordingConfig.customerSecret
+            ),
+            "Content-Type": "application/json;charset=utf-8",
+          },
+        }
+      );
+    } catch (error) {
+      functions.logger.warn("Failed to kick blocked live viewer from Agora channel.", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
 export const onLiveSessionCreatedStartArchive = functions.runWith({
-  timeoutSeconds: 120,
+  timeoutSeconds: 540,
   memory: "512MB",
 }).firestore
   .document("live_sessions/{sessionId}")
@@ -8737,24 +9325,144 @@ export const onLiveSessionEndedFinalizeArchive = functions.runWith({
  * Agora retries files marked `backuped` after the stop call. Promote only
  * archives whose actual primary file has reached our private storage bucket.
  */
-export const reconcilePendingLiveReplayArchives = functions.pubsub
+const LIVE_ARCHIVE_STUCK_RECORDER_GRACE_MS = 3 * 60 * 1000;
+const LIVE_ARCHIVE_STUCK_START_GRACE_MS = 15 * 60 * 1000;
+const liveArchiveRecoveryExpiredMessage =
+  "The replay recording never reached storage, so this broadcast can't be replayed.";
+
+/** Finds the host's replay playlist in storage when Agora's stop response never listed it. */
+const discoverLiveArchivePrimaryFile = async (
+  sessionId: string,
+  session: Record<string, unknown>
+): Promise<string | undefined> => {
+  const storedPrefix = sanitizeLiveArchiveObjectPath(String(session.archiveObjectPrefix || ""));
+  const objectPrefix = storedPrefix.split("/").includes(sessionId) ?
+    storedPrefix :
+    buildLiveArchiveObjectPrefix(getAgoraRecordingConfig(), sessionId).joined;
+  if (!objectPrefix) return undefined;
+
+  const hostId = String(session.hostId || session.hostUid || "").trim();
+  const hostAgoraUid = hostId ? String(stableAgoraUidFromFirebaseUid(hostId)) : "";
+  // Individual mode names files `<sid>_<cname>__uid_s_<uid>__uid_e_<av|video|audio>.m3u8`.
+  const rank = (fileName: string): number => {
+    const match = /__uid_s_(\d+)__uid_e_([a-z]+)\.(m3u8|mp4)$/i.exec(fileName);
+    const uid = match?.[1] || "";
+    const track = (match?.[2] || "").toLowerCase();
+    const trackScore = track === "av" ? 2 : (track === "video" ? 1 : 0);
+    return (hostAgoraUid && uid === hostAgoraUid ? 10 : 0) + trackScore;
+  };
+
+  for (const bucketName of liveArchiveBucketCandidates(session)) {
+    try {
+      const [objects] = await getStorage().bucket(bucketName).getFiles({prefix: `${objectPrefix}/`});
+      const playable = objects
+        .map((object) => String(object.name || "").trim())
+        .filter((name) => /\.(m3u8|mp4)$/i.test(name))
+        .sort((left, right) => rank(right) - rank(left));
+      if (playable.length > 0) return playable[0];
+    } catch (error) {
+      functions.logger.warn("Could not list live archive objects for replay discovery.", {
+        sessionId,
+        bucketName,
+        error: String(error),
+      });
+    }
+  }
+  return undefined;
+};
+
+/** The end-of-live trigger can time out or miss a recorder that was still starting; finish those here. */
+const finalizeStuckLiveArchiveRecorders = async (): Promise<void> => {
+  const stuck = await db.collection("live_sessions")
+    .where("archiveStatus", "in", ["STARTING", "RECORDING"])
+    .limit(40)
+    .get();
+  const recordingConfig = getAgoraRecordingConfig();
+
+  for (const snapshot of stuck.docs) {
+    const session = (snapshot.data() || {}) as Record<string, unknown>;
+    const liveStatus = String(session.status || "").trim().toLowerCase();
+    if (!LIVE_ARCHIVE_ENDED_SESSION_STATUSES.includes(liveStatus)) continue;
+
+    const endedAtMs = readFirestoreTimestampMs(session.endedAt) || readFirestoreTimestampMs(session.updatedAt);
+    const sinceEndMs = endedAtMs > 0 ? Date.now() - endedAtMs : Number.POSITIVE_INFINITY;
+    const metadata = buildLiveArchiveStopMetadata(session, session, recordingConfig, snapshot.id);
+    try {
+      if (hasLiveArchiveRecorderMetadata(metadata)) {
+        if (sinceEndMs < LIVE_ARCHIVE_STUCK_RECORDER_GRACE_MS) continue;
+        functions.logger.warn("Finalizing a live replay recorder that was never stopped.", {sessionId: snapshot.id});
+        await stopLiveArchiveRecording(snapshot.id, session);
+      } else if (sinceEndMs >= LIVE_ARCHIVE_STUCK_START_GRACE_MS) {
+        await db.runTransaction(async (transaction) => {
+          const current = await transaction.get(snapshot.ref);
+          if (!current.exists) return;
+          const currentData = (current.data() || {}) as Record<string, unknown>;
+          if (normalizeLiveArchiveStatus(currentData.archiveStatus) !== "STARTING") return;
+          if (String(currentData.archiveSid || "").trim()) return;
+          transaction.set(snapshot.ref, {
+            archiveStatus: "FAILED",
+            archiveError: LIVE_ARCHIVE_ENDED_BEFORE_START_MESSAGE,
+          }, {merge: true});
+        });
+      }
+    } catch (error) {
+      functions.logger.warn("Could not finalize a stuck live replay recorder.", {
+        sessionId: snapshot.id,
+        error: String(error),
+      });
+    }
+  }
+};
+
+export const reconcilePendingLiveReplayArchives = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
   .schedule("every 5 minutes")
   .onRun(async () => {
     const recordingConfig = getAgoraRecordingConfig();
-    if (!recordingConfig.storage.bucket) return undefined;
 
-    const pending = await db.collection("live_sessions")
-      .where("archiveStatus", "==", "PROCESSING")
-      .limit(40)
-      .get();
+    await finalizeStuckLiveArchiveRecorders();
+
+    const [pending, timedOut] = await Promise.all([
+      db.collection("live_sessions")
+        .where("archiveStatus", "==", "PROCESSING")
+        .limit(40)
+        .get(),
+      db.collection("live_sessions")
+        .where("archiveStatus", "==", "FAILED")
+        .where("archiveError", "in", liveArchiveProcessingTimedOutMessages)
+        .limit(100)
+        .get(),
+    ]);
+    const recoverable: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+    for (const snapshot of timedOut.docs) {
+      const startedAtMs = liveArchiveProcessingStartedAtMs(snapshot.data() || {});
+      if (startedAtMs > 0 && Date.now() - startedAtMs < LIVE_ARCHIVE_LATE_UPLOAD_RECOVERY_MS) {
+        recoverable.push(snapshot);
+      } else {
+        // Leaving the recovery query keeps stale rows from crowding out recent ones.
+        await updateLiveArchiveFields(snapshot.ref, {archiveError: liveArchiveRecoveryExpiredMessage});
+      }
+    }
     let promoted = 0;
+    let recovered = 0;
 
-    for (const snapshot of pending.docs) {
+    for (const snapshot of [...pending.docs, ...recoverable]) {
       const session = (snapshot.data() || {}) as Record<string, unknown>;
-      const primaryFile = String(session.archivePrimaryFile || "").trim();
-      const primaryFileExists = primaryFile && await liveArchivePrimaryFileExists(primaryFile);
-      if (!primaryFileExists) {
-        if (liveArchiveProcessingHasExpired(session)) {
+      const isLateRecovery = String(session.archiveStatus || "").trim().toUpperCase() === "FAILED";
+      let primaryFile = String(session.archivePrimaryFile || "").trim();
+      if (!primaryFile) {
+        primaryFile = (await discoverLiveArchivePrimaryFile(snapshot.id, session)) || "";
+        if (primaryFile) {
+          await updateLiveArchiveFields(snapshot.ref, {archivePrimaryFile: primaryFile});
+        }
+      }
+      const primaryFileBucket = primaryFile ?
+        await findLiveArchivePrimaryFileBucket(session, primaryFile) :
+        undefined;
+      if (!primaryFileBucket) {
+        if (!isLateRecovery && liveArchiveProcessingHasExpired(session)) {
           await updateLiveArchiveFields(snapshot.ref, {
             archiveStatus: "FAILED",
             archiveError: liveArchiveProcessingTimedOutMessage,
@@ -8771,6 +9479,7 @@ export const reconcilePendingLiveReplayArchives = functions.pubsub
       try {
         await updateLiveArchiveFields(snapshot.ref, {
           archiveStatus: "READY",
+          archiveBucket: primaryFileBucket,
           archiveReadyAt: admin.firestore.FieldValue.serverTimestamp(),
           archiveError: admin.firestore.FieldValue.delete(),
         });
@@ -8780,11 +9489,15 @@ export const reconcilePendingLiveReplayArchives = functions.pubsub
         );
         await promoteMindLoomLivePostToReplay(snapshot.id, session);
         await restrictLiveArchiveObjectsToServerAccess({
-          bucketName: recordingConfig.storage.bucket,
+          bucketName: primaryFileBucket,
           objectPaths: [primaryFile],
           objectPrefix: String(session.archiveObjectPrefix || "").trim(),
         });
         promoted += 1;
+        if (isLateRecovery) {
+          recovered += 1;
+          functions.logger.info("Timed-out live replay recovered after a late upload.", {sessionId: snapshot.id});
+        }
       } catch (error) {
         functions.logger.warn("Could not reconcile pending live replay archive.", {
           sessionId: snapshot.id,
@@ -8794,7 +9507,7 @@ export const reconcilePendingLiveReplayArchives = functions.pubsub
     }
 
     if (promoted > 0) {
-      functions.logger.info("Pending live replay archives promoted.", {promoted});
+      functions.logger.info("Pending live replay archives promoted.", {promoted, recovered});
     }
     return undefined;
   });
@@ -8823,15 +9536,16 @@ const resolveLiveHostHeartbeatMs = async (
 
 /** Ends abandoned live sessions so discovery and host relaunch do not stay stuck on ghost streams. */
 export const reconcileStaleLiveSessions = functions.pubsub
-  .schedule("every 5 minutes")
+  .schedule("every 2 minutes")
   .onRun(async () => {
+    // Host heartbeat is every 25s; ~7 missed beats means the broadcaster is gone.
     const staleAfterMs = Math.max(
       120_000,
-      Number(process.env.LIVE_STALE_SESSION_AFTER_MS || 5 * 60 * 1000)
+      Number(process.env.LIVE_STALE_SESSION_AFTER_MS || 3 * 60 * 1000)
     );
     const startupGraceMs = Math.max(
       60_000,
-      Number(process.env.LIVE_STALE_SESSION_STARTUP_GRACE_MS || 3 * 60 * 1000)
+      Number(process.env.LIVE_STALE_SESSION_STARTUP_GRACE_MS || 2 * 60 * 1000)
     );
     const cutoffMs = Date.now() - staleAfterMs;
     const seenSessionIds = new Set<string>();
@@ -8891,7 +9605,29 @@ export const reconcileStaleLiveSessions = functions.pubsub
     return undefined;
   });
 
-export const onLiveSessionStartedNotifyFollowers = functions.firestore
+/**
+ * Two triggers (this onWrite and the recovery onUpdate) observe the same go-live transition;
+ * a create-only lock guarantees followers get exactly one "is live now" push per session.
+ */
+const claimLiveFollowerNotification = async (sessionId: string): Promise<boolean> => {
+  try {
+    await db.collection("live_sessions")
+      .doc(sessionId)
+      .collection("server_archive")
+      .doc("follower_notification")
+      .create({claimedAt: admin.firestore.FieldValue.serverTimestamp()});
+    return true;
+  } catch (error) {
+    const code = (error as {code?: unknown})?.code;
+    if (code === 6 || code === "already-exists") return false;
+    throw error;
+  }
+};
+
+// The notification lock is claimed before fan-out and the trigger isn't retried, so a
+// timeout on a large follower list would silently drop the remaining pushes.
+export const onLiveSessionStartedNotifyFollowers = functions.runWith({timeoutSeconds: 540, memory: "512MB"})
+  .firestore
   .document("live_sessions/{sessionId}")
   .onWrite(async (change) => {
     const after = change.after.exists ? change.after.data() : undefined;
@@ -8904,10 +9640,21 @@ export const onLiveSessionStartedNotifyFollowers = functions.firestore
     const wasAlreadyLive = ["live", "active", "started"].includes(beforeStatus);
 
     if (!isAfterLive || wasAlreadyLive) return undefined;
-    if (after.notifyFollowers === false) return undefined;
 
     const actorId = typeof after.hostId === "string" ? after.hostId.trim() : "";
     if (!actorId) return undefined;
+
+    const session = after as Record<string, unknown>;
+    const viewAccessMode = normalizeLiveViewAccessMode(session.viewAccessMode);
+    const isOwnedEventStream = await sessionHostOwnsOrganizerEventSource(session, actorId);
+    const eventGuestIds = isOwnedEventStream ?
+      await fetchApprovedEventGuestIds(String(session.sourceId || "").trim()) :
+      [];
+    // Followers can only open public/followers streams; invite and event-only rooms would just deny them.
+    const followersCanWatch = viewAccessMode === "public" || viewAccessMode === "followers_only";
+    const notifyFollowersEnabled = after.notifyFollowers !== false && followersCanWatch;
+    if (!notifyFollowersEnabled && eventGuestIds.length === 0) return undefined;
+    if (!(await claimLiveFollowerNotification(change.after.id))) return undefined;
 
     const title = typeof after.title === "string" && after.title.trim().length > 0
       ? after.title.trim()
@@ -8918,15 +9665,29 @@ export const onLiveSessionStartedNotifyFollowers = functions.firestore
 
     await notifyFollowers({
       actorId,
-      title: `${hostName} is live now`,
+      title: isOwnedEventStream ? `${hostName} started the event live stream` : `${hostName} is live now`,
       body: title,
       type: "liveStream",
       referenceId: change.after.id,
       settingsField: "liveStreams",
+      additionalRecipientIds: eventGuestIds,
+      skipFollowers: !notifyFollowersEnabled,
     });
 
     return undefined;
   });
+
+/**
+ * Accepted guests of an organizer event. Watch access is checked at events/{id}/applications/{uid},
+ * so the document id is the guest uid that can actually open the stream.
+ */
+const fetchApprovedEventGuestIds = async (eventId: string): Promise<string[]> => {
+  if (!eventId) return [];
+  const snapshot = await db.collection("events").doc(eventId).collection("applications").limit(1000).get();
+  return snapshot.docs
+    .filter((doc) => APPROVED_EVENT_APPLICATION_STATUSES.has(String(doc.data()?.status || "").trim().toLowerCase()))
+    .map((doc) => doc.id);
+};
 
 
 // =============================================================================
@@ -11529,7 +12290,12 @@ const normalizeEventTicketFundingPreference = (
   const normalized = String(value || "").trim().toUpperCase();
   // Existing released clients used card checkout. New clients make this choice explicit.
   if (!normalized || normalized === "STRIPE_CARD") return "STRIPE_CARD";
-  if (normalized === "AFRIEX_MOBILE_MONEY") return "AFRIEX_MOBILE_MONEY";
+  if (normalized === "AFRIEX_MOBILE_MONEY") {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Mobile money checkout is not available for seller or organizer payments right now. Use a card so the recipient is paid through Stripe Connect."
+    );
+  }
   throw new functions.https.HttpsError(
     "invalid-argument",
     "Select a supported event-ticket payment method."
@@ -11888,7 +12654,6 @@ export const applyForEvent = functions.runWith({enforceAppCheck: true})
         recipientUserData: organizerUserData,
         flowName: "Event ticket payout",
         requestedFundingPreference,
-        afriexPayoutPlan: organizerAfriexPayoutPlan,
       });
       if (settlementDecision.provider === "AFRIEX" && settlementDecision.executionMode === "LIVE") {
         const afriexRuntime = await resolveAfriexCommerceRuntime({
@@ -12152,7 +12917,6 @@ export const applyForEvent = functions.runWith({enforceAppCheck: true})
               fundingPaymentMethodId: chargeResult.fundingPaymentMethodDocId,
               stripeConnectedAccountId: chargeResult.connectedAccountId,
               platformFee: ownerFeeAmount,
-              afriexPayoutPlan: organizerAfriexPayoutPlan,
               extraContext: {
                 eventId,
                 eventTitle,
@@ -12223,11 +12987,6 @@ export const applyForEvent = functions.runWith({enforceAppCheck: true})
           stripeChargeId: chargeResult?.latestChargeId || null,
           stripeConnectedAccountId: chargeResult?.connectedAccountId || null,
           commercePayoutRequestId: commercePayoutRef?.id || null,
-          afriexPayoutProvider: organizerAfriexPayoutPlan ? "AFRIEX" : null,
-          afriexPreferredPayoutRoute: organizerAfriexPayoutPlan ?
-            (asNonEmptyString(organizerAfriexPayoutPlan.preferredRoute) || null) :
-            null,
-          afriexPayoutSelectionRequired: organizerAfriexPayoutPlan?.selectionRequired === true,
           appliedDate: timestamp,
           paymentProcessedAt: shouldChargeEventFee ? timestamp : null,
         });

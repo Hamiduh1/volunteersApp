@@ -1,253 +1,906 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Volunteer opportunities and role portal for Volunteers App.">
-    <title>Volunteers App | Opportunities Portal</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-      :root {
-        --ink: #11253a;
-        --muted: #527084;
-        --paper: #f4f6ed;
-        --panel: rgba(255, 255, 255, .82);
-        --line: rgba(17, 37, 58, .14);
-        --orange: #ff6d38;
-        --teal: #007b73;
-        --gold: #f6c94c;
-        --danger: #b42318;
-        --shadow: 0 20px 50px rgba(17, 37, 58, .12);
-      }
-      * { box-sizing: border-box; }
-      html { scroll-behavior: smooth; }
-      body {
-        margin: 0;
-        min-width: 320px;
-        color: var(--ink);
-        background:
-          radial-gradient(circle at 8% 0%, rgba(246, 201, 76, .34), transparent 26rem),
-          radial-gradient(circle at 91% 11%, rgba(0, 123, 115, .18), transparent 31rem),
-          var(--paper);
-        font-family: "Space Grotesk", sans-serif;
-      }
-      button, input { font: inherit; }
-      button { cursor: pointer; }
-      .shell { width: min(1160px, calc(100% - 32px)); margin: 0 auto; }
-      .masthead { padding: 18px 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-      .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; color: var(--ink); }
-      .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: var(--teal); clip-path: polygon(50% 0, 100% 26%, 100% 74%, 50% 100%, 0 74%, 0 26%); }
-      .mono { font-family: "DM Mono", monospace; letter-spacing: .02em; }
-      .session { display: flex; align-items: center; gap: 12px; font-size: .9rem; }
-      .hero { display: grid; grid-template-columns: 1.2fr .8fr; gap: 24px; padding: 52px 0 35px; align-items: stretch; }
-      .hero-copy { padding: 30px 0; }
-      .eyebrow { color: var(--teal); font: 500 .78rem/1.3 "DM Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
-      h1 { margin: 12px 0 16px; max-width: 760px; font-size: clamp(2.5rem, 6vw, 5.5rem); line-height: .94; letter-spacing: -.07em; }
-      h1 em { color: var(--orange); font-style: normal; }
-      .lead { max-width: 650px; font-size: 1.12rem; line-height: 1.6; color: var(--muted); }
-      .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
-      .button { border: 1px solid transparent; border-radius: 999px; padding: 11px 17px; font-weight: 700; text-decoration: none; transition: transform .18s ease, box-shadow .18s ease; }
-      .button:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(17, 37, 58, .16); }
-      .button-primary { color: white; background: var(--teal); }
-      .button-secondary { color: var(--ink); background: rgba(255,255,255,.58); border-color: var(--line); }
-      .portal-card, .listing-card, .role-card, .notice { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); backdrop-filter: blur(10px); }
-      .portal-card { padding: 24px; border-radius: 20px; display: flex; flex-direction: column; justify-content: space-between; }
-      .portal-card h2, .section-heading h2 { margin: 7px 0; letter-spacing: -.04em; }
-      .portal-card p { color: var(--muted); line-height: 1.5; }
-      .form { display: grid; gap: 10px; margin-top: 18px; }
-      label { font-size: .82rem; font-weight: 700; }
-      input { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; color: var(--ink); background: rgba(255,255,255,.72); }
-      .hidden { display: none !important; }
-      .status { min-height: 1.5em; margin: 13px 0 0; color: var(--muted); font-size: .88rem; }
-      .status.error { color: var(--danger); }
-      .status.success { color: var(--teal); }
-      .roles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 25px 0 50px; }
-      .role-card { min-height: 182px; padding: 20px; border-radius: 16px; }
-      .role-card:nth-child(1) { border-top: 5px solid var(--gold); }
-      .role-card:nth-child(2) { border-top: 5px solid var(--teal); }
-      .role-card:nth-child(3) { border-top: 5px solid var(--orange); }
-      .role-card h3 { margin: 9px 0; }
-      .role-card p { margin: 0; color: var(--muted); line-height: 1.5; }
-      .opportunities { padding: 31px 0 64px; }
-      .section-heading { display: flex; gap: 18px; justify-content: space-between; align-items: end; margin-bottom: 18px; }
-      .section-heading p { margin: 0; max-width: 580px; color: var(--muted); }
-      .tabs { display: inline-flex; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.55); }
-      .tab { border: 0; border-radius: 999px; padding: 9px 14px; background: transparent; color: var(--muted); font-weight: 700; }
-      .tab.active { color: white; background: var(--ink); }
-      .listings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-      .listing-card { padding: 19px; border-radius: 16px; }
-      .listing-meta { color: var(--teal); font: 500 .74rem/1.35 "DM Mono", monospace; text-transform: uppercase; }
-      .listing-card h3 { margin: 9px 0 4px; font-size: 1.25rem; letter-spacing: -.03em; }
-      .listing-owner, .listing-copy { color: var(--muted); line-height: 1.45; }
-      .listing-copy { margin: 12px 0; }
-      .listing-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; }
-      .badge { padding: 6px 9px; border-radius: 999px; color: #075a55; background: #d8f4ed; font: 500 .7rem "DM Mono", monospace; text-transform: uppercase; }
-      .managed { margin-top: 20px; padding: 17px; border-radius: 14px; background: rgba(17, 37, 58, .05); }
-      .managed ul { margin: 9px 0 0; padding-left: 18px; color: var(--muted); }
-      footer { padding: 26px 0 38px; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); }
-      footer a { color: inherit; }
-      @media (max-width: 760px) {
-        .hero { grid-template-columns: 1fr; padding-top: 22px; }
-        .roles, .listings { grid-template-columns: 1fr; }
-        .section-heading { align-items: start; flex-direction: column; }
-        .session { font-size: .78rem; }
-      }
-    </style>
-  </head>
-  <body>
-    <main class="shell">
-      <header class="masthead">
-        <a class="brand" href="/" aria-label="Volunteers App home"><span class="brand-mark">V</span> Volunteers App</a>
-        <div class="session"><span id="session-label">Explore as a visitor</span><button id="sign-out" class="button button-secondary hidden" type="button">Sign out</button></div>
-      </header>
 
-      <section class="hero" aria-labelledby="hero-title">
-        <div class="hero-copy">
-          <div class="eyebrow">One shared opportunity network</div>
-          <h1 id="hero-title">Find people,<br>do <em>useful</em> work.</h1>
-          <p class="lead">Browse current volunteer events and jobs on the same Firebase-backed network used by the iOS and Android apps. Sign in to apply, manage your opportunities, and keep every application in sync.</p>
-          <div class="hero-actions"><a class="button button-primary" href="#opportunities">Browse opportunities</a><a class="button button-secondary" href="#portal">Open your portal</a></div>
-        </div>
-        <aside id="portal" class="portal-card" aria-labelledby="portal-title">
-          <div>
-            <div class="eyebrow">Member portal</div>
-            <h2 id="portal-title">Your work, in one place.</h2>
-            <p id="portal-copy">Sign in with the same account you use in Volunteers App.</p>
+<head>
+  <meta charset="utf-8">
+  <meta content="width=device-width, initial-scale=1.0" name="viewport">
+
+  <title>SoftSolutions Technologies LLC | Modern IT &amp; Software Engineering</title>
+
+  <meta name="description" content="SoftSolutions Technologies LLC helps teams move faster with modern web development, custom software, AI automation, and VolunteersApp, our volunteer management platform for events and secure payments.">
+  <meta name="keywords" content="SoftSolutions Technologies LLC, software development, IT consulting, web development, cloud migration, AI automation, enterprise software">
+  <meta name="author" content="SoftSolutions Technologies LLC">
+  <meta name="theme-color" content="#1b55ff">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://www.softsolutionstech.com/index.html">
+
+  <meta property="og:title" content="SoftSolutions Technologies LLC - Innovative Software Solutions">
+  <meta property="og:description" content="We deliver modern web development, software development, AI services, IT consulting, and VolunteersApp for volunteer operations and secure payment workflows.">
+  <meta property="og:image" content="https://www.softsolutionstech.com/assets/img/softsolutions-preview.png">
+  <meta property="og:url" content="https://www.softsolutionstech.com">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="SoftSolutions Technologies LLC - Innovative Software Solutions">
+  <meta name="twitter:description" content="We deliver modern web development, software development, AI services, IT consulting, and VolunteersApp for volunteer operations and secure payment workflows.">
+  <meta name="twitter:image" content="https://www.softsolutionstech.com/assets/img/softsolutions-preview.png">
+
+  <link href="/assets/img/favicon.png" rel="icon">
+  <link href="/assets/img/apple-touch-icon.png" rel="apple-touch-icon">
+
+  <link href="https://fonts.googleapis.com" rel="preconnect">
+  <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+  <link href="/assets/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+  <link href="/assets/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
+  <link href="/assets/vendor/aos/aos.css" rel="stylesheet">
+  <link href="/assets/vendor/glightbox/css/glightbox.min.css" rel="stylesheet">
+  <link href="/assets/vendor/swiper/swiper-bundle.min.css" rel="stylesheet">
+
+  <link href="/assets/css/main.css" rel="stylesheet">
+</head>
+
+<body class="index-page modern-site" data-nav-active="home">
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+<div class="top-ribbon">
+  <div class="container">
+    New Release: <a href="/volunteersapp/" class="top-ribbon-link">VolunteersApp</a> now connects volunteers, events, and secure payments in one platform.
+  </div>
+</div>
+
+<header id="header" class="header d-flex align-items-center fixed-top">
+  <div class="header-container container-fluid container-xl position-relative d-flex align-items-center justify-content-between">
+    <a href="/index.html" class="logo d-flex align-items-center me-auto me-xl-0">
+      <span class="sitename">SoftSolutions</span>
+      <span>Technologies LLC</span>
+    </a>
+
+    <button type="button" class="mobile-nav-toggle bi bi-list" aria-label="Toggle navigation" aria-controls="navmenu" aria-expanded="false"></button>
+
+    <nav id="navmenu" class="navmenu">
+        <ul>
+          <li><a href="/#hero">Home</a></li>
+          <li><a href="/#about">About</a></li>
+          <li><a href="/wallet/">IMT</a></li>
+          <li><a href="/#services">Services</a></li>
+          <li><a href="/blog.html">Resources</a></li>
+          <li><a href="/careers.html">Careers</a></li>
+          <li><a href="/volunteersapp/">VolunteersApp</a></li>
+        </ul>
+      </nav>
+
+    <a class="btn-getstarted" href="/contact/">Get Started</a>
+  </div>
+</header>
+
+<main id="main-content" class="main">
+
+    <!-- Hero Section -->
+    <section id="hero" class="hero section">
+      <div class="container" data-aos="fade-up" data-aos-delay="100">
+        <div class="row align-items-center">
+          <div class="col-lg-6">
+            <div class="hero-content" data-aos="fade-up" data-aos-delay="200">
+              <div class="company-badge mb-4">
+                <i class="bi bi-gear-fill me-2"></i>
+                Empowering Businesses with Technology
+              </div>
+
+              <h1 class="mb-4">Build software your team can grow with <span class="accent-text">confidence</span></h1>
+
+              <p class="mb-3">
+                <strong>New Release:</strong> VolunteersApp is SoftSolutions Technologies' volunteer management platform that connects volunteers, events, and secure payments in one seamless experience.
+              </p>
+
+              <p class="mb-4 mb-md-5">
+                We partner with startups and established businesses to design, build, and ship software experiences
+                that are secure, scalable, and maintainable.
+              </p>
+
+              <div class="hero-buttons">
+                <a href="#services" class="btn btn-primary me-0 me-sm-2 mx-1">Explore Services</a>
+                <a href="/volunteersapp/" class="btn btn-outline-primary mt-2 mt-sm-0 mx-1">See VolunteersApp</a>
+                <a href="https://www.youtube.com/watch?v=Y7f98aduVJ8" class="btn btn-link mt-2 mt-sm-0 glightbox">
+                  <i class="bi bi-play-circle me-1"></i>
+                  Watch Demo
+                </a>
+              </div>
+            </div>
           </div>
-          <form id="login-form" class="form">
-            <label for="email">Email</label><input id="email" type="email" autocomplete="email" required>
-            <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
-            <button class="button button-primary" type="submit">Sign in</button>
-          </form>
-          <button id="portal-refresh" class="button button-secondary hidden" type="button">Refresh portal</button>
-          <p id="portal-status" class="status" role="status"></p>
-          <div id="managed-listings" class="managed hidden"></div>
-        </aside>
-      </section>
 
-      <section class="roles" aria-label="Portal roles">
-        <article class="role-card"><div class="eyebrow">Volunteer</div><h3>Discover and apply</h3><p>See active events and jobs only. Once an application is sent, every app shows the same status.</p></article>
-        <article class="role-card"><div class="eyebrow">Organizer</div><h3>Lead an event</h3><p>Sign in to see events tied to your account, then manage participants and history in the app.</p></article>
-        <article class="role-card"><div class="eyebrow">Employer</div><h3>Hire with purpose</h3><p>Sign in to see your job posts and keep applicants connected to the same shared records.</p></article>
-      </section>
+          <div class="col-lg-6">
+            <div class="hero-image" data-aos="zoom-out" data-aos-delay="300">
+              <img src="/assets/img/illustration-1.webp" alt="Software Solutions" class="img-fluid" decoding="async" loading="eager" fetchpriority="high">
+            </div>
+          </div>
+        </div>
 
-      <section id="opportunities" class="opportunities" aria-labelledby="opportunities-title">
-        <div class="section-heading"><div><div class="eyebrow">Live opportunity board</div><h2 id="opportunities-title">Open for good</h2><p>Past, closed, deleted, and undated listings are excluded by the server. The web page never decides what is eligible.</p></div><div class="tabs" role="tablist"><button class="tab active" id="events-tab" type="button" role="tab" aria-selected="true">Events</button><button class="tab" id="jobs-tab" type="button" role="tab" aria-selected="false">Jobs</button></div></div>
-        <p id="listings-status" class="status" role="status">Loading active opportunities…</p>
-        <div id="listings" class="listings" aria-live="polite"></div>
-      </section>
-    </main>
-    <footer class="shell">Volunteers App portal · <a href="/privacy.html">Privacy policy</a> · Configure browser App Check before production deployment.</footer>
-    <script src="/portal-config.js"></script>
-    <script type="module">
-      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
-      import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
-      import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-functions.js";
-      import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app-check.js";
+        <div class="row stats-row gy-4 mt-5" data-aos="fade-up" data-aos-delay="500">
+          <div class="col-lg-3 col-md-6">
+            <div class="stat-item">
+              <div class="stat-icon">
+                <i class="bi bi-trophy"></i>
+              </div>
+              <div class="stat-content">
+                <h4>Achievements</h4>
+                <p class="mb-0">Recognized for innovation & excellence</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-3 col-md-6">
+            <div class="stat-item">
+              <div class="stat-icon">
+                <i class="bi bi-briefcase"></i>
+              </div>
+              <div class="stat-content">
+                <h4>Successful Projects</h4>
+                <p class="mb-0">Delivered cutting-edge solutions</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-3 col-md-6">
+            <div class="stat-item">
+              <div class="stat-icon">
+                <i class="bi bi-graph-up"></i>
+              </div>
+              <div class="stat-content">
+                <h4>Satisfied Users</h4>
+                <p class="mb-0">Helping businesses grow</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-3 col-md-6">
+            <div class="stat-item">
+                <div class="stat-icon">
+                  <i class="bi bi-award"></i>
+                </div>
+              <div class="stat-content">
+                <h4>100% Client Satisfaction</h4>
+                <p class="mb-0">Your success is the only metric that matters</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section> <!-- Hero Section -->
 
-      const configured = window.VOLUNTEERS_PORTAL_CONFIG || {};
-      const firebaseOptions = {
-        apiKey: "AIzaSyAHOi58DQhQ-AIIPW-3EFHIbfLA7Zc7_tA",
-        authDomain: "volunteersapp-968b2.firebaseapp.com",
-        databaseURL: "https://volunteersapp-968b2-default-rtdb.firebaseio.com",
-        projectId: "volunteersapp-968b2",
-        storageBucket: "volunteersapp-968b2.firebasestorage.app",
-        messagingSenderId: "6677623239",
-      };
-      if (configured.firebaseAppId) firebaseOptions.appId = configured.firebaseAppId;
-      const app = initializeApp(firebaseOptions);
-      if (configured.appCheckSiteKey && configured.firebaseAppId) {
-        initializeAppCheck(app, { provider: new ReCaptchaV3Provider(configured.appCheckSiteKey), isTokenAutoRefreshEnabled: true });
-      }
+    <!-- VolunteersApp Spotlight Section -->
+    <section id="volunteersapp-spotlight" class="services section light-background">
+      <div class="container section-title" data-aos="fade-up">
+        <h2>VolunteersApp Access</h2>
+        <p>Use the VolunteersApp hub for organizer and employer portals, wallet access, compliance pages, and direct support links.</p>
+        <div class="d-flex flex-wrap justify-content-center gap-2 mt-3">
+          <a href="/volunteersapp/" class="btn btn-primary">Open VolunteersApp Hub</a>
+          <a href="/wallet/" class="btn btn-outline-primary">Open Wallet</a>
+        </div>
+      </div>
 
-      const auth = getAuth(app);
-      const functions = getFunctions(app, "us-central1");
-      const getListings = httpsCallable(functions, "getVolunteerListings");
-      const getPortalProfile = httpsCallable(functions, "getPortalProfile");
-      const applyForEvent = httpsCallable(functions, "applyForEvent");
-      const applyForJob = httpsCallable(functions, "applyForJob");
-      const elements = {
-        form: document.querySelector("#login-form"), email: document.querySelector("#email"), password: document.querySelector("#password"),
-        portalStatus: document.querySelector("#portal-status"), portalCopy: document.querySelector("#portal-copy"), portalRefresh: document.querySelector("#portal-refresh"),
-        managed: document.querySelector("#managed-listings"), session: document.querySelector("#session-label"), signOut: document.querySelector("#sign-out"),
-        eventsTab: document.querySelector("#events-tab"), jobsTab: document.querySelector("#jobs-tab"), listingsStatus: document.querySelector("#listings-status"), listings: document.querySelector("#listings"),
-      };
-      let activeTab = "events";
-      let listingData = { events: [], jobs: [] };
+      <div class="container" data-aos="fade-up" data-aos-delay="100">
+        <div class="row g-4">
+          <div class="col-lg-6" data-aos="fade-up" data-aos-delay="100">
+            <div class="service-card d-flex">
+              <div class="icon flex-shrink-0">
+                <i class="bi bi-grid-1x2"></i>
+              </div>
+              <div>
+                <h3>VolunteersApp Hub</h3>
+                <p>Start from one page for app access, help, compliance links, and live support routes.</p>
+                <a href="/volunteersapp/" class="read-more">Open Hub <i class="bi bi-arrow-right"></i></a>
+              </div>
+            </div>
+          </div>
 
-      const setStatus = (target, message = "", tone = "") => { target.textContent = message; target.className = `status ${tone}`.trim(); };
-      const escaped = (value) => String(value || "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
-      const formatDate = (millis) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(millis)));
-      const isSignedIn = () => Boolean(auth.currentUser);
+          <div class="col-lg-6" data-aos="fade-up" data-aos-delay="200">
+            <div class="service-card d-flex">
+              <div class="icon flex-shrink-0">
+                <i class="bi bi-calendar-event"></i>
+              </div>
+              <div>
+                <h3>Organizer Portal</h3>
+                <p>Create events, manage hosted listings, and review event applicants from a laptop.</p>
+                <a href="/organizer/" class="read-more">Open Organizer Portal <i class="bi bi-arrow-right"></i></a>
+              </div>
+            </div>
+          </div>
 
-      function renderListings() {
-        const listings = listingData[activeTab] || [];
-        if (!listings.length) { elements.listings.innerHTML = "<div class='notice listing-card'>No active opportunities are available right now. Please check again soon.</div>"; return; }
-        elements.listings.innerHTML = listings.map((listing) => {
-          const application = listing.applicationStatus ? "<span class='badge'>Application sent</span>" : `<button class='button button-primary' data-apply='${escaped(listing.id)}' data-kind='${escaped(listing.kind)}'>Apply</button>`;
-          return `<article class='listing-card'><div class='listing-meta'>${escaped(listing.category || listing.kind)} · ${escaped(listing.location || "Location shared in details")}</div><h3>${escaped(listing.title)}</h3><div class='listing-owner'>Hosted by ${escaped(listing.ownerName)}</div><p class='listing-copy'>${escaped(listing.description || "Open the app for full opportunity details.")}</p><div class='listing-owner'>${escaped(listing.dateTimeLabel)}: ${formatDate(listing.dateTimeMillis)}</div><div class='listing-footer'>${application}</div></article>`;
-        }).join("");
-      }
+          <div class="col-lg-6" data-aos="fade-up" data-aos-delay="300">
+            <div class="service-card d-flex">
+              <div class="icon flex-shrink-0">
+                <i class="bi bi-briefcase"></i>
+              </div>
+              <div>
+                <h3>Employer Portal</h3>
+                <p>Post opportunities, manage listings, and review volunteer applicants without wallet access.</p>
+                <a href="/employer/" class="read-more">Open Employer Portal <i class="bi bi-arrow-right"></i></a>
+              </div>
+            </div>
+          </div>
 
-      async function loadListings() {
-        setStatus(elements.listingsStatus, "Loading active opportunities…");
-        try {
-          const result = await getListings();
-          listingData = result.data || { events: [], jobs: [] };
-          setStatus(elements.listingsStatus, "");
-          renderListings();
-        } catch (error) {
-          const needsSetup = !configured.appCheckSiteKey || !configured.firebaseAppId ? " Browser App Check is not configured yet." : "";
-          setStatus(elements.listingsStatus, `We could not load opportunities. ${error.message || "Please retry."}${needsSetup}`, "error");
-        }
-      }
+          <div class="col-lg-6" data-aos="fade-up" data-aos-delay="400">
+            <div class="service-card d-flex">
+              <div class="icon flex-shrink-0">
+                <i class="bi bi-phone"></i>
+              </div>
+              <div>
+                <h3>SoftSolutionsTech Wallet</h3>
+                <p>See the international money transfer page, payout guidance, and direct transfer contact path.</p>
+                <a href="/wallet/" class="read-more">Open Wallet Page <i class="bi bi-arrow-right"></i></a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section><!-- /VolunteersApp Spotlight Section -->
 
-      async function loadPortal() {
-        if (!auth.currentUser) return;
-        setStatus(elements.portalStatus, "Loading your portal…");
-        try {
-          const profile = (await getPortalProfile()).data;
-          const roles = (profile.roles || ["VOLUNTEER"]).join(" · ");
-          elements.portalCopy.textContent = `${profile.name || "Member"} · ${roles}`;
-          elements.session.textContent = `Signed in as ${profile.email || auth.currentUser.email || "member"}`;
-          const managed = profile.managedListings || [];
-          elements.managed.innerHTML = managed.length ? `<strong>Your managed opportunities</strong><ul>${managed.map((item) => `<li>${escaped(item.title)} · ${escaped(item.status)}</li>`).join("")}</ul>` : "<strong>Your portal is ready.</strong><div>Use the app to create and manage your events or job posts.</div>";
-          elements.managed.classList.remove("hidden");
-          setStatus(elements.portalStatus, "Portal synced.", "success");
-        } catch (error) {
-          setStatus(elements.portalStatus, `Signed in, but your portal could not load. ${error.message || "Please retry."}`, "error");
-        }
-      }
+    <!-- About Section -->
+    <section id="about" class="about section">
+      <div class="container" data-aos="fade-up" data-aos-delay="100">
+        <div class="row gy-4 align-items-center justify-content-between">
+          <div class="col-xl-5" data-aos="fade-up" data-aos-delay="200">
+            <span class="about-meta">WHO WE ARE</span>
+            <h2 class="about-title">Innovative Software Solutions for Business Success</h2>
+            <p class="about-description">
+              VolunteersApp, built by SoftSolutions Technologies, is an integrated volunteer management platform for nonprofits, churches, community groups, and mission-driven organizations.
+            </p>
+            <p class="about-description">
+              The platform helps teams recruit and coordinate volunteers, manage events and communication, and process secure wallet and mobile money transactions from one place. By unifying operations, engagement, and payments, VolunteersApp reduces administrative overhead and helps organizations focus on community impact.
+            </p>
+            <a href="/wallet/" class="btn btn-primary mt-2">Explore SoftSolutionsTech Wallet</a>
 
-      async function apply(listingId, kind) {
-        if (!isSignedIn()) { elements.email.focus(); setStatus(elements.portalStatus, "Sign in before applying.", "error"); return; }
-        try {
-          const callable = kind === "EVENT" ? applyForEvent : applyForJob;
-          const payload = kind === "EVENT" ? { eventId: listingId } : { jobId: listingId };
-          await callable(payload);
-          setStatus(elements.listingsStatus, "Application sent.", "success");
-          await loadListings();
-        } catch (error) { setStatus(elements.listingsStatus, error.message || "Your application could not be sent.", "error"); }
-      }
+            <div class="row feature-list-wrapper">
+              <div class="col-md-6">
+                <ul class="feature-list">
+                  <li><i class="bi bi-check-circle-fill"></i> Custom software solutions</li>
+                  <li><i class="bi bi-check-circle-fill"></i> Database Design and Development</li>
+                  <li><i class="bi bi-check-circle-fill"></i> Web & mobile app development</li>
+                </ul>
+              </div>
+              <div class="col-md-6">
+                <ul class="feature-list">
+                  <li><i class="bi bi-check-circle-fill"></i> Cloud & cybersecurity services</li>
+                  <li><i class="bi bi-check-circle-fill"></i> AI-driven business automation</li>
+                  <li><i class="bi bi-check-circle-fill"></i> 24/7 technical support</li>
+                </ul>
+              </div>
+            </div>
 
-      elements.form.addEventListener("submit", async (event) => {
-        event.preventDefault(); setStatus(elements.portalStatus, "Signing in…");
-        try { await signInWithEmailAndPassword(auth, elements.email.value.trim(), elements.password.value); }
-        catch (error) { setStatus(elements.portalStatus, error.message || "Sign-in failed.", "error"); }
-      });
-      elements.signOut.addEventListener("click", () => signOut(auth));
-      elements.portalRefresh.addEventListener("click", loadPortal);
-      elements.eventsTab.addEventListener("click", () => { activeTab = "events"; elements.eventsTab.classList.add("active"); elements.jobsTab.classList.remove("active"); elements.eventsTab.setAttribute("aria-selected", "true"); elements.jobsTab.setAttribute("aria-selected", "false"); renderListings(); });
-      elements.jobsTab.addEventListener("click", () => { activeTab = "jobs"; elements.jobsTab.classList.add("active"); elements.eventsTab.classList.remove("active"); elements.jobsTab.setAttribute("aria-selected", "true"); elements.eventsTab.setAttribute("aria-selected", "false"); renderListings(); });
-      elements.listings.addEventListener("click", (event) => { const button = event.target.closest("[data-apply]"); if (button) apply(button.dataset.apply, button.dataset.kind); });
-      onAuthStateChanged(auth, async (user) => {
-        elements.form.classList.toggle("hidden", Boolean(user)); elements.signOut.classList.toggle("hidden", !user); elements.portalRefresh.classList.toggle("hidden", !user);
-        elements.managed.classList.add("hidden");
-        if (user) { await loadPortal(); } else { elements.session.textContent = "Explore as a visitor"; elements.portalCopy.textContent = "Sign in with the same account you use in Volunteers App."; setStatus(elements.portalStatus, ""); }
-        loadListings();
-      });
-    </script>
-  </body>
+            <div class="info-wrapper">
+              <div class="row gy-4">
+                <div class="col-lg-5">
+                  <div class="profile d-flex align-items-center gap-3">
+                    <img src="/assets/img/avatar-1.jpg" alt="CEO Profile" class="profile-image" decoding="async" loading="lazy"> 
+                    <div>
+                      <h4 class="profile-name">Hamiduh Mulindwa</h4>
+                      <p class="profile-position">CEO & Founder</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-lg-7">
+                  <div class="contact-info d-flex align-items-center gap-2">
+                    <i class="bi bi-telephone-fill"></i>
+                    <div>
+                      <p class="contact-label">Call us anytime</p>
+                  <p class="contact-number">+1 (614) 380-8065</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-xl-6" data-aos="fade-up" data-aos-delay="300">
+            <div class="image-wrapper">
+              <div class="images position-relative" data-aos="zoom-out" data-aos-delay="400">
+                <img src="/assets/img/about-5.webp" alt=" Software Development Team"
+                  class="img-fluid main-image rounded-4" decoding="async" loading="lazy">
+                <img src="/assets/img/about-2.jpg" alt="Strategy Meeting" class="img-fluid small-image rounded-4" decoding="async" loading="lazy">
+              </div>
+              <div class="experience-badge floating">
+                <!--<h3>15+ <span>Years</span></h3> -->
+                <p>Delivering innovative software solutions</p>
+              </div>
+            </div>
+          </div>  
+
+        </div>
+      </div>
+    </section><!-- About Section -->
+
+    <!-- Features Section -->
+    <section id="features" class="features section">
+
+      <!-- Section Title -->
+      <div class="container section-title" data-aos="fade-up">
+        <h2>Our Key Features</h2>
+        <p>Empowering businesses with innovative, scalable, and efficient technology solutions.</p>
+      </div><!-- End Section Title -->
+
+      <div class="container">
+        <div class="d-flex justify-content-center">
+          <ul class="nav nav-tabs" data-aos="fade-up" data-aos-delay="100">
+            <li class="nav-item">
+              <a class="nav-link active show" data-bs-toggle="tab" data-bs-target="#features-tab-1">
+                <h4>Custom Software</h4>
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" data-bs-toggle="tab" data-bs-target="#features-tab-2">
+                <h4>Web and Mobile Apps Development</h4>
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" data-bs-toggle="tab" data-bs-target="#features-tab-3">
+                <h4>Database Design and Development</h4>
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <div class="tab-content" data-aos="fade-up" data-aos-delay="200">
+
+          <div class="tab-pane fade active show" id="features-tab-1">
+            <div class="row">
+              <div class="col-lg-6 order-2 order-lg-1 mt-3 mt-lg-0 d-flex flex-column justify-content-center">
+                <h3>Tailored Software Solutions</h3>
+                <p class="fst-italic">
+                  We develop custom software that aligns perfectly with your business needs, ensuring seamless
+                  operations and scalability.
+                </p>
+                <ul>
+                  <li><i class="bi bi-check2-all"></i> <span>Fully customized applications built for your
+                      workflow.</span></li>
+                  <li><i class="bi bi-check2-all"></i> <span>Scalable solutions designed for future growth.</span></li>
+                  <li><i class="bi bi-check2-all"></i> <span>Seamless integration with your existing tools &
+                      platforms.</span></li>
+                </ul>
+              </div>
+              <div class="col-lg-6 order-1 order-lg-2 text-center">
+                <img src="/assets/img/features-illustration-1.webp" alt="Custom Software Development" class="img-fluid" decoding="async" loading="lazy">
+              </div>
+            </div>
+          </div><!-- End tab content item -->
+
+          <div class="tab-pane fade" id="features-tab-2">
+            <div class="row">
+              <div class="col-lg-6 order-2 order-lg-1 mt-3 mt-lg-0 d-flex flex-column justify-content-center">
+                <h3>Web and Mobile App Development</h3>
+                <p class="fst-italic">
+                  We offer cutting-edge cloud computing services to enhance business agility, security, and efficiency.
+                </p>
+                <ul>
+                  <li><i class="bi bi-check2-all"></i> <span> Develop apps that function smoothly across different devices and operating systems, ensuring a consistent user experience on both web and mobile platforms.</span></li>
+                  <li><i class="bi bi-check2-all"></i> <span>Create apps that adjust to various screen sizes and orientations, providing an optimal viewing experience on smartphones, tablets, and desktops.</span>
+                  </li>
+                  <li><i class="bi bi-check2-all"></i> <span>Enhance app usability and engagement with intuitive navigation, interactive elements, and personalized user interfaces.</span>
+                  </li>
+                  <li><i class="bi bi-check2-all"></i> <span> Develop fast and efficient apps with quick load times and smooth interactions, ensuring a positive user experience.</span>
+                  </li>
+                </ul>
+              </div>
+              <div class="col-lg-6 order-1 order-lg-2 text-center">
+                <img src="/assets/img/features-illustration-2.webp" alt="Cloud Solutions" class="img-fluid" decoding="async" loading="lazy">
+              </div>
+            </div>
+          </div><!-- End tab content item -->
+
+          <div class="tab-pane fade" id="features-tab-3">
+            <div class="row">
+              <div class="col-lg-6 order-2 order-lg-1 mt-3 mt-lg-0 d-flex flex-column justify-content-center">
+                <h3>Robust Database Design and Development Services</h3>
+                <ul>
+                  <li><i class="bi bi-check2-all"></i> <span>Ensure the database can grow and handle increasing amounts of data and users without compromising performance, supporting long-term business growth.</span></li>
+                  <li><i class="bi bi-check2-all"></i> <span> Implement robust security measures, including encryption, access controls, and regular audits, to protect sensitive data from breaches and unauthorized access.</span>
+                  </li>
+                  <li><i class="bi bi-check2-all"></i> <span> Enhance the speed and efficiency of data retrieval and processing through indexing, query optimization, and caching mechanisms.</span></li>
+                  <li><i class="bi bi-check2-all"></i> <span>Develop intuitive and easy-to-use interfaces for database management, making it accessible for users with varying levels of technical expertise.</span></li>
+                </ul>
+                <p class="fst-italic">
+                  Our Database Design Solutions protect your data, systems, and infrastructure from evolving threats.
+                </p>
+              </div>
+              <div class="col-lg-6 order-1 order-lg-2 text-center">
+                <img src="/assets/img/features-illustration-3.webp" alt="Cybersecurity Services" class="img-fluid" decoding="async" loading="lazy">
+              </div>
+            </div>
+          </div><!-- End tab content item -->
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Features Cards Section -->
+    <section id="features-cards" class="features-cards section">
+      <div class="container">
+        <div class="row gy-4">
+
+          <div class="col-xl-3 col-md-6" data-aos="zoom-in" data-aos-delay="100">
+            <div class="feature-box orange">
+              <i class="bi bi-award"></i>
+              <h4>Industry Expertise</h4>
+              <p>With many years of experience, we deliver top-tier IT solutions tailored to your business needs.</p>
+            </div>
+          </div><!-- End Feature Box -->
+
+          <div class="col-xl-3 col-md-6" data-aos="zoom-in" data-aos-delay="200">
+            <div class="feature-box blue">
+              <i class="bi bi-patch-check"></i>
+              <h4>Proven Reliability</h4>
+              <p>We ensure 99.9% uptime, secure operations, and seamless integration with your existing systems.</p>
+            </div>
+          </div><!-- End Feature Box -->
+
+          <div class="col-xl-3 col-md-6" data-aos="zoom-in" data-aos-delay="300">
+            <div class="feature-box green">
+              <i class="bi bi-cloud-arrow-up"></i>
+              <h4>Cloud Solutions</h4>
+              <p>Leverage scalable, secure, and cost-effective cloud infrastructure for your growing business needs.</p>
+            </div>
+          </div><!-- End Feature Box -->
+
+          <div class="col-xl-3 col-md-6" data-aos="zoom-in" data-aos-delay="400">
+            <div class="feature-box red">
+              <i class="bi bi-shield-lock"></i>
+              <h4>Robust Security</h4>
+              <p>Protect your business with advanced cybersecurity solutions, data encryption, and compliance standards.
+              </p>
+            </div>
+          </div><!-- End Feature Box -->
+
+        </div>
+      </div>
+    </section><!-- Features Cards Section -->
+
+    <!-- Call To Action Section -->
+    <section id="call-to-action" class="call-to-action section">
+      <div class="container" data-aos="fade-up" data-aos-delay="100">
+
+        <div class="row content justify-content-center align-items-center position-relative">
+          <div class="col-lg-8 mx-auto text-center">
+            <h2 class="display-4 mb-4">Empower Your Business with Cutting-Edge IT Solutions</h2>
+            <p class="mb-4">
+              Stay ahead of the competition with secure, scalable, and innovative technology solutions tailored for your
+              business needs.
+              Partner with us today and experience the future of IT.
+            </p>
+            <a href="/#contact" class="btn btn-cta">Get Started Now</a>
+          </div>
+
+          <!-- Abstract Background Elements -->
+          <div class="shape shape-1">
+            <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M47.1,-57.1C59.9,-45.6,68.5,-28.9,71.4,-10.9C74.2,7.1,71.3,26.3,61.5,41.1C51.7,55.9,35,66.2,16.9,69.2C-1.3,72.2,-21,67.8,-36.9,57.9C-52.8,48,-64.9,32.6,-69.1,15.1C-73.3,-2.4,-69.5,-22,-59.4,-37.1C-49.3,-52.2,-32.8,-62.9,-15.7,-64.9C1.5,-67,34.3,-68.5,47.1,-57.1Z"
+                transform="translate(100 100)"></path>
+            </svg>
+          </div>
+
+          <div class="shape shape-2">
+            <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M41.3,-49.1C54.4,-39.3,66.6,-27.2,71.1,-12.1C75.6,3,72.4,20.9,63.3,34.4C54.2,47.9,39.2,56.9,23.2,62.3C7.1,67.7,-10,69.4,-24.8,64.1C-39.7,58.8,-52.3,46.5,-60.1,31.5C-67.9,16.4,-70.9,-1.4,-66.3,-16.6C-61.8,-31.8,-49.7,-44.3,-36.3,-54C-22.9,-63.7,-8.2,-70.6,3.6,-75.1C15.4,-79.6,28.2,-58.9,41.3,-49.1Z"
+                transform="translate(100 100)"></path>
+            </svg>
+          </div>
+
+          <!-- Dot Pattern Groups -->
+          <div class="dots dots-1">
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+              <pattern id="dot-pattern" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+                <circle cx="2" cy="2" r="2" fill="currentColor"></circle>
+              </pattern>
+              <rect width="100" height="100" fill="url(#dot-pattern)"></rect>
+            </svg>
+          </div>
+
+          <div class="dots dots-2">
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+              <pattern id="dot-pattern-2" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+                <circle cx="2" cy="2" r="2" fill="currentColor"></circle>
+              </pattern>
+              <rect width="100" height="100" fill="url(#dot-pattern-2)"></rect>
+            </svg>
+          </div>
+
+          <div class="shape shape-3">
+            <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M43.3,-57.1C57.4,-46.5,71.1,-32.6,75.3,-16.2C79.5,0.2,74.2,19.1,65.1,35.3C56,51.5,43.1,65,27.4,71.7C11.7,78.4,-6.8,78.3,-23.9,72.4C-41,66.5,-56.7,54.8,-65.4,39.2C-74.1,23.6,-75.8,4,-71.7,-13.2C-67.6,-30.4,-57.7,-45.2,-44.3,-56.1C-30.9,-67,-15.5,-74,0.7,-74.9C16.8,-75.8,33.7,-70.7,43.3,-57.1Z"
+                transform="translate(100 100)"></path>
+            </svg>
+          </div>
+
+        </div>
+
+      </div>
+    </section><!-- /Call To Action Section -->
+
+    <!-- Clients Section -->
+    
+    <!-- Testimone section -->
+    
+    <!-- Services Section -->
+    <section id="services" class="services section light-background">
+      <!-- Section Title -->
+      <div class="container section-title" data-aos="fade-up">
+        <h2>Our Services</h2>
+        <p>Empowering businesses with cutting-edge technology solutions tailored to drive efficiency and growth.</p>
+        <div class="d-flex flex-wrap justify-content-center gap-2 mt-3">
+          <a href="/assets/docs/service-catalog.pdf" class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener">
+            <i class="bi bi-filetype-pdf me-1"></i>Service Catalog (PDF)
+          </a>
+          <a href="/assets/docs/service-catalog.doc" class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener">
+            <i class="bi bi-file-earmark-word me-1"></i>Service Catalog (DOC)
+          </a>
+        </div>
+      </div><!-- End Section Title -->
+    
+      <div class="container" data-aos="fade-up" data-aos-delay="100">
+    
+        <div class="row g-4">
+    
+          <div class="col-lg-6" data-aos="fade-up" data-aos-delay="100">
+            <div class="service-card d-flex">
+              <div class="icon flex-shrink-0">
+                <i class="bi bi-activity"></i>
+              </div>
+              <div>
+                <h3>IT Infrastructure & Cloud Solutions</h3>
+                <p>Optimize your business with scalable cloud solutions, network security, and IT infrastructure
+                  management to ensure seamless operations.</p>
+                <a href="/it.html" class="read-more">Learn More <i class="bi bi-arrow-right"></i></a>
+              </div>
+            </div>
+          </div><!-- End Service Card -->
+    
+          <div class="col-lg-6" data-aos="fade-up" data-aos-delay="200">
+            <div class="service-card d-flex">
+              <div class="icon flex-shrink-0">
+                <i class="bi bi-diagram-3"></i>
+              </div>
+              <div>
+                <h3>Database Design & Data Protection</h3>
+                <p>Protect your business database from cyber threats with our advanced security solutions, including risk
+                  assessments, encryption, and compliance management.</p>
+                <a href="/cybersecurity.html" class="read-more">Learn More <i class="bi bi-arrow-right"></i></a>
+              </div>
+            </div>
+          </div><!-- End Service Card -->
+    
+          <div class="col-lg-6" data-aos="fade-up" data-aos-delay="300">
+            <div class="service-card d-flex">
+              <div class="icon flex-shrink-0">
+                <i class="bi bi-easel"></i>
+              </div>
+              <div>
+                <h3>Custom Software Development</h3>
+                <p>From enterprise applications to AI-driven solutions, we build customized software that enhances
+                  productivity and innovation.</p>
+                <a href="/software.html" class="read-more">Learn More <i class="bi bi-arrow-right"></i></a>
+              </div>
+            </div>
+          </div><!-- End Service Card -->
+
+          <div class="col-lg-6" data-aos="fade-up" data-aos-delay="400">
+            <div class="service-card d-flex">
+              <div class="icon flex-shrink-0">
+                <i class="bi bi-clipboard-data"></i>
+              </div>
+              <div>
+                <h3>AI & Business Intelligence</h3>
+                <p>Leverage AI and data analytics to gain valuable insights, automate tasks, and make data-driven
+                  business decisions.</p>
+                <a href="/ai.html" class="read-more">Learn More <i class="bi bi-arrow-right"></i></a>
+              </div>
+            </div>
+          </div><!-- End Service Card -->
+
+        </div>
+
+      </div>
+    </section><!-- /Services Section -->
+
+    <!-- FAQ Section -->
+    <section class="faq-9 faq section light-background" id="faq">
+      <div class="container">
+        <div class="row">
+
+          <div class="col-lg-5" data-aos="fade-up">
+            <h2 class="faq-title">Frequently Asked Questions</h2>
+            <p class="faq-description">Find answers to common questions about our IT services, security, and cloud
+              solutions.</p>
+            <div class="faq-arrow d-none d-lg-block" data-aos="fade-up" data-aos-delay="200">
+              <svg class="faq-arrow" width="200" height="211" viewBox="0 0 200 211" fill="none"
+                xmlns="http://www.w3.org/2000/svg">
+                <path
+                  d="M198.804 194.488C189.279 189.596 179.529 185.52 169.407 182.07L169.384 182.049C169.227 181.994 169.07 181.939 168.912 181.884C166.669 181.139 165.906 184.546 167.669 185.615C174.053 189.473 182.761 191.837 189.146 195.695C156.603 195.912 119.781 196.591 91.266 179.049C62.5221 161.368 48.1094 130.695 56.934 98.891C84.5539 98.7247 112.556 84.0176 129.508 62.667C136.396 53.9724 146.193 35.1448 129.773 30.2717C114.292 25.6624 93.7109 41.8875 83.1971 51.3147C70.1109 63.039 59.63 78.433 54.2039 95.0087C52.1221 94.9842 50.0776 94.8683 48.0703 94.6608C30.1803 92.8027 11.2197 83.6338 5.44902 65.1074C-1.88449 41.5699 14.4994 19.0183 27.9202 1.56641C28.6411 0.625793 27.2862 -0.561638 26.5419 0.358501C13.4588 16.4098 -0.221091 34.5242 0.896608 56.5659C1.8218 74.6941 14.221 87.9401 30.4121 94.2058C37.7076 97.0203 45.3454 98.5003 53.0334 98.8449C47.8679 117.532 49.2961 137.487 60.7729 155.283C87.7615 197.081 139.616 201.147 184.786 201.155L174.332 206.827C172.119 208.033 174.345 211.287 176.537 210.105C182.06 207.125 187.582 204.122 193.084 201.144C193.346 201.147 195.161 199.887 195.423 199.868C197.08 198.548 193.084 201.144 195.528 199.81C196.688 199.192 197.846 198.552 199.006 197.935C200.397 197.167 200.007 195.087 198.804 194.488ZM60.8213 88.0427C67.6894 72.648 78.8538 59.1566 92.1207 49.0388C98.8475 43.9065 106.334 39.2953 114.188 36.1439C117.295 34.8947 120.798 33.6609 124.168 33.635C134.365 33.5511 136.354 42.9911 132.638 51.031C120.47 77.4222 86.8639 93.9837 58.0983 94.9666C58.8971 92.6666 59.783 90.3603 60.8213 88.0427Z"
+                  fill="currentColor"></path>
+              </svg>
+            </div>
+          </div>
+
+          <div class="col-lg-7" data-aos="fade-up" data-aos-delay="300">
+            <div class="faq-container">
+
+              <div class="faq-item faq-active">
+                <button type="button" class="faq-trigger" id="faq-trigger-1" aria-expanded="true" aria-controls="faq-panel-1">
+                  <span>What IT services does SoftSolutions Technologies offer?</span>
+                  <i class="faq-toggle bi bi-chevron-right" aria-hidden="true"></i>
+                </button>
+                <div class="faq-content" id="faq-panel-1" role="region" aria-labelledby="faq-trigger-1">
+                  <p>We provide cloud computing, Database Design, IT consulting, software development, and network
+                    management solutions tailored to businesses of all sizes.</p>
+                </div>
+              </div><!-- End FAQ item -->
+
+              <div class="faq-item">
+                <button type="button" class="faq-trigger" id="faq-trigger-2" aria-expanded="false" aria-controls="faq-panel-2">
+                  <span>How secure are your IT solutions?</span>
+                  <i class="faq-toggle bi bi-chevron-right" aria-hidden="true"></i>
+                </button>
+                <div class="faq-content" id="faq-panel-2" role="region" aria-labelledby="faq-trigger-2">
+                  <p>We implement industry-leading security measures, including encryption, multi-factor authentication,
+                    and proactive threat monitoring to protect your data and systems.</p>
+                </div>
+              </div><!-- End FAQ item -->
+
+              <div class="faq-item">
+                <button type="button" class="faq-trigger" id="faq-trigger-3" aria-expanded="false" aria-controls="faq-panel-3">
+                  <span>Can you help with cloud migration?</span>
+                  <i class="faq-toggle bi bi-chevron-right" aria-hidden="true"></i>
+                </button>
+                <div class="faq-content" id="faq-panel-3" role="region" aria-labelledby="faq-trigger-3">
+                  <p>Yes! We offer seamless cloud migration services, ensuring minimal downtime and enhanced scalability
+                    for your business operations.</p>
+                </div>
+              </div><!-- End FAQ item -->
+
+              <div class="faq-item">
+                <button type="button" class="faq-trigger" id="faq-trigger-4" aria-expanded="false" aria-controls="faq-panel-4">
+                  <span>Do you provide IT support and maintenance?</span>
+                  <i class="faq-toggle bi bi-chevron-right" aria-hidden="true"></i>
+                </button>
+                <div class="faq-content" id="faq-panel-4" role="region" aria-labelledby="faq-trigger-4">
+                  <p>Absolutely. Our IT support team offers 24/7 monitoring, troubleshooting, and maintenance to ensure
+                    your systems run smoothly without disruptions.</p>
+                </div>
+              </div><!-- End FAQ item -->
+
+              <div class="faq-item">
+                <button type="button" class="faq-trigger" id="faq-trigger-5" aria-expanded="false" aria-controls="faq-panel-5">
+                  <span>What industries do you serve?</span>
+                  <i class="faq-toggle bi bi-chevron-right" aria-hidden="true"></i>
+                </button>
+                <div class="faq-content" id="faq-panel-5" role="region" aria-labelledby="faq-trigger-5">
+                  <p>We work with businesses in healthcare, finance, retail, manufacturing, and other industries that
+                    require reliable IT infrastructure and security solutions.</p>
+                </div>
+              </div><!-- End FAQ item -->
+
+              <div class="faq-item">
+                <button type="button" class="faq-trigger" id="faq-trigger-6" aria-expanded="false" aria-controls="faq-panel-6">
+                  <span>How can I get started with your services?</span>
+                  <i class="faq-toggle bi bi-chevron-right" aria-hidden="true"></i>
+                </button>
+                <div class="faq-content" id="faq-panel-6" role="region" aria-labelledby="faq-trigger-6">
+                  <p>Contact us via email or phone, and our team will schedule a consultation to understand your needs
+                    and propose a tailored IT solution.</p>
+                </div>
+              </div><!-- End FAQ item -->
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section><!-- /FAQ Section -->
+
+    <!-- Call To Action Section -->
+    <section id="call-to-action-2" class="call-to-action-2 section dark-background">
+      <div class="container">
+        <div class="row justify-content-center" data-aos="zoom-in" data-aos-delay="100">
+          <div class="col-xl-10">
+            <div class="text-center">
+              <h3>Ready to Transform Your Business?</h3>
+              <p>Our team of experts is here to help you streamline operations, enhance security, and scale your
+                business with cutting-edge IT solutions.</p>
+              <a class="cta-btn" href="#contact">Get Started Today</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section><!-- /Call To Action Section -->
+
+    <!-- Contact Section -->
+    <section id="contact" class="contact section light-background">
+      <!-- Section Title -->
+      <div class="container section-title" data-aos="fade-up">
+        <h2>Contact Us</h2>
+        <p>Have questions or need a custom IT solution? Our team is here to assist you.</p>
+      </div><!-- End Section Title -->
+
+      <div class="container" data-aos="fade-up" data-aos-delay="100">
+        <div class="row g-4 g-lg-5">
+          <div class="col-lg-5">
+            <div class="info-box" data-aos="fade-up" data-aos-delay="200">
+              <h3>Start Your Project</h3>
+              <p>Tell us what you are building and we will respond with the right next step.</p>
+
+              <div class="info-item" data-aos="fade-up" data-aos-delay="300">
+                <div class="icon-box">
+                  <i class="bi bi-geo-alt"></i>
+                </div>
+                <div class="content">
+                  <h4>Office Address</h4>
+                  <p>2656 Natalia Drive</p>
+                  <p>Columbus, OH 43232</p>
+                </div>
+              </div>
+
+              <div class="info-item" data-aos="fade-up" data-aos-delay="400">
+                <div class="icon-box">
+                  <i class="bi bi-telephone"></i>
+                </div>
+                <div class="content">
+                  <h4>Call Us</h4>
+                  <p><a href="tel:+16143808065">+1 614 380-8065</a></p>
+                  <p><a href="mailto:support@softsolutionstech.com"><span><span><span><span><span><span><span><span><span><span>support@softsolutionstech.com</span></span></span></span></span></span></span></span></span></span></a></p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-7">
+            <div class="contact-form" data-aos="fade-up" data-aos-delay="300">
+              <h3>Book a Free Consultation</h3>
+              <p>Share your project details and our team will contact you within one business day.</p>
+              <div class="d-flex flex-wrap gap-2 mb-4" aria-label="Consultation highlights">
+                <span class="badge rounded-pill text-bg-light border">Fast response</span>
+                <span class="badge rounded-pill text-bg-light border">No obligation</span>
+                <span class="badge rounded-pill text-bg-light border">Tailored roadmap</span>
+              </div>
+
+            <form id="contact-form" action="https://us-central1-softsolutionstechwebsite.cloudfunctions.net/handleContactForm" method="post" class="php-email-form" data-aos="fade-up"
+                data-aos-delay="200" accept-charset="UTF-8" autocomplete="on">
+                <div class="row gy-4">
+
+                  <div class="col-md-6">
+                    <label for="contact-name" class="form-label">Full Name</label>
+                    <input id="contact-name" type="text" name="name" class="form-control" placeholder="Your Full Name" autocomplete="name" minlength="2" maxlength="80" required>
+                  </div>
+
+                  <div class="col-md-6">
+                    <label for="contact-email" class="form-label">Work Email</label>
+                    <input id="contact-email" type="email" class="form-control" name="email" placeholder="Your Email Address" autocomplete="email" maxlength="120" required>
+                  </div>
+
+                  <div class="col-12">
+                    <label for="contact-subject" class="form-label">What do you need help with?</label>
+                    <input id="contact-subject" type="text" class="form-control" name="subject" placeholder="Example: New website, cloud migration, automation" maxlength="120" required>
+                  </div>
+
+                  <div class="col-12">
+                    <label for="contact-message" class="form-label">Project Details</label>
+                    <textarea id="contact-message" class="form-control" name="message" rows="6" placeholder="Share goals, timeline, and any technical requirements." minlength="20" maxlength="2000"
+                      required></textarea>
+                  </div>
+
+                  <div class="col-12 d-none">
+                    <label for="contact-company-site" class="visually-hidden">Company Site</label>
+                    <input id="contact-company-site" type="text" class="form-control" name="company_site" tabindex="-1" autocomplete="off">
+                  </div>
+
+                  <div class="col-12">
+                    <div class="cf-turnstile" data-sitekey="0x4AAAAAACqFm_xYqPu4CRXk" data-theme="auto"></div>
+                  </div>
+
+                  <div class="col-12 text-center" aria-live="polite">
+                    <!-- These divs are for user feedback and will need JavaScript to be activated -->
+                    <div class="loading">Processing...</div>
+                    <div class="error-message"></div>
+                    <div class="sent-message">Thank you! Your message has been received.</div>
+
+                    <button type="submit" class="btn btn-primary w-100">Send Request</button>
+                    <p class="small text-muted mt-3 mb-0">By submitting this form, you agree to be contacted about your request.</p>
+                  </div>
+
+                </div>
+              </form>
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section><!-- /Contact Section -->
+
+  </main>
+
+<footer id="footer" class="footer">
+  <div class="container footer-top">
+    <div class="row gy-4">
+      <div class="col-lg-4 col-md-6 footer-about">
+        <a href="/index.html" class="logo d-flex align-items-center">
+          <span class="sitename">SoftSolutions Technologies LLC</span>
+        </a>
+        <div class="footer-contact pt-3">
+          <p>2656 Natalia Drive</p>
+          <p>Columbus, OH 43232</p>
+          <p class="mt-3"><strong>Phone:</strong> <a href="tel:+16143808065">+1 (614) 380-8065</a></p>
+          <p><strong>Email:</strong> <a href="mailto:support@softsolutionstech.com"><span><span><span><span><span><span><span><span><span><span>support@softsolutionstech.com</span></span></span></span></span></span></span></span></span></span></a></p>
+        </div>
+        <div class="social-links d-flex mt-4">
+          <a href="mailto:support@softsolutionstech.com" aria-label="Email support"><i class="bi bi-envelope"></i></a>
+          <a href="tel:+16143808065" aria-label="Call support"><i class="bi bi-telephone"></i></a>
+          <a href="/blog.html" aria-label="Read our blog"><i class="bi bi-journal-text"></i></a>
+          <a href="/careers.html" aria-label="View careers"><i class="bi bi-briefcase"></i></a>
+        </div>
+      </div>
+
+      <div class="col-lg-2 col-md-3 footer-links">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="/#hero">Home</a></li>
+          <li><a href="/#about">About Us</a></li>
+          <li><a href="/#services">Services</a></li>
+          <li><a href="/careers.html">Careers</a></li>
+          <li><a href="/volunteersapp/">VolunteersApp</a></li>
+          <li><a href="/privacy/">Privacy Policy</a></li>
+          <li><a href="/terms/">Terms</a></li>
+          <li><a href="/aml-cft-guide/">AML/CFT</a></li>
+          <li><a href="/how-to-use/">How To Use</a></li>
+          <li><a href="/contact/">Contact</a></li>
+        </ul>
+      </div>
+
+      <div class="col-lg-2 col-md-3 footer-links">
+        <h4>Our Services</h4>
+        <ul>
+          <li><a href="/software.html">Custom Software Development</a></li>
+          <li><a href="/it.html">Cloud Solutions</a></li>
+          <li><a href="/cybersecurity.html">Database Management</a></li>
+          <li><a href="/it.html">IT Consulting</a></li>
+          <li><a href="/ai.html">AI and Automation</a></li>
+        </ul>
+      </div>
+
+      <div class="col-lg-2 col-md-3 footer-links">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="/blog.html">Blog</a></li>
+          <li><a href="/case-studies.html">Case Studies</a></li>
+          <li><a href="/whitepapers.html">Whitepapers</a></li>
+          <li><a href="/#faq">FAQs</a></li>
+          <li><a href="/contact/">Support</a></li>
+        </ul>
+      </div>
+
+      <div class="col-lg-2 col-md-3 footer-links">
+        <h4>Connect</h4>
+        <ul>
+          <li><a href="/contact/">Contact Us</a></li>
+          <li><a href="/#contact">Schedule a Demo</a></li>
+          <li><a href="/client-portal.html">Client Portal</a></li>
+          <li><a href="/partnerships.html">Partnerships</a></li>
+          <li><a href="/events.html">Events</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="container copyright text-center mt-4">
+    <p>&copy; 2026 <span>Copyright</span> <strong class="px-1 sitename">SoftSolutions Technologies LLC</strong>
+      <span>All Rights Reserved</span>
+    </p>
+  </div>
+</footer>
+
+<button type="button" id="scroll-top" class="scroll-top d-flex align-items-center justify-content-center" aria-label="Scroll to top">
+  <i class="bi bi-arrow-up-short"></i>
+</button>
+
+  <script src="/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+<script src="/assets/vendor/php-email-form/validate.js"></script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><script src="/assets/vendor/aos/aos.js"></script><script src="/assets/vendor/glightbox/js/glightbox.min.js"></script>  <script src="/assets/js/main.js"></script>
+</body>
+
 </html>

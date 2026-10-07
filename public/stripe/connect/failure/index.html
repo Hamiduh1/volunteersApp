@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stripe Setup Incomplete</title>
+</head>
+<body>
+  <main class="card" style="max-width:520px;margin:40px auto;padding:28px;font-family:system-ui,sans-serif;">
+    <h1>Stripe setup needs attention</h1>
+    <p>Return to Volunteers App to review payout status and continue setup if needed.</p>
+    <p><a id="open-app" href="#">Open Volunteers App</a></p>
+    <p id="status" style="color:#5f7287;font-size:0.95rem;"></p>
+  </main>
+  <script id="stripe-connect-return-config" type="application/json">
+    {"flow":"connect_onboarding","result":"failure"}
+  </script>
+  <script src="/stripe/connect/stripe-connect-return.js"></script>
+</body>
+</html>
