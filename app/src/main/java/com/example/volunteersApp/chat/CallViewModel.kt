@@ -34,6 +34,7 @@ import java.util.UUID
 import kotlin.math.abs
 import com.example.volunteersApp.notifications.IncomingCallNotifications
 import com.example.volunteersApp.notifications.OutgoingCallRingbackHelper
+import com.example.volunteersApp.notifications.CallRingingReceipt
 import com.example.volunteersApp.firebase.FirestoreCollection
 import com.example.volunteersApp.firebase.FirestoreSubcollection
 
@@ -79,6 +80,7 @@ class CallViewModel(
     private var callActivityHeartbeatJob: Job? = null
     private var appContext: Context? = null
     private var callHasFinished = false
+    private var calleeDeviceRinging = false
 
     private val _uiState = MutableStateFlow(CallUiState())
     val uiState = _uiState.asStateFlow()
@@ -93,6 +95,7 @@ class CallViewModel(
             }
             val label = when {
                 !isCaller -> "Connecting"
+                calleeDeviceRinging -> "Ringing…"
                 else -> "Calling…"
             }
             _uiState.update { it.copy(isLoading = false, statusLabel = label) }
@@ -161,6 +164,7 @@ class CallViewModel(
         }
 
         if (!isCaller) {
+            CallRingingReceipt.mark(activeCallId)
             attachCallSessionMetadataListener()
             _uiState.update {
                 it.copy(
@@ -232,7 +236,6 @@ class CallViewModel(
                     step = "createCallSession"
                     createCallSession()
                     createdSessionThisAttempt = true
-                    OutgoingCallRingbackHelper.start(context.applicationContext)
                 }
                 step = "listenSessionMeta"
                 attachCallSessionMetadataListener()
@@ -553,6 +556,16 @@ class CallViewModel(
                     _uiState.update { prev ->
                         if (prev.statusLabel == "Connected") prev
                         else prev.copy(statusLabel = "Answered, connecting…")
+                    }
+                    return@addSnapshotListener
+                }
+                val ringingIds = (snapshot.get("ringingParticipantIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
+                val otherRinging = ringingIds.any { it.isNotBlank() && it != currentUser?.uid }
+                if (isCaller && !remoteJoined && !calleeDeviceRinging && otherRinging) {
+                    calleeDeviceRinging = true
+                    appContext?.let { OutgoingCallRingbackHelper.start(it) }
+                    _uiState.update { prev ->
+                        if (prev.statusLabel == "Calling…") prev.copy(statusLabel = "Ringing…") else prev
                     }
                 }
             }

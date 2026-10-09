@@ -160,6 +160,7 @@ object IncomingCallNotifications {
         val notification = notificationBuilder.build()
 
         notificationManager.notify(notificationId, notification)
+        CallRingingReceipt.mark(callId)
         runCatching {
             IncomingCallRingtoneService.start(context, callId, chatId)
         }.onFailure { error ->

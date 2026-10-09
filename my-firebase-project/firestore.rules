@@ -1181,6 +1181,13 @@ service cloud.firestore {
         : [];
     }
 
+    // Callee devices add themselves when the incoming call reaches them (caller UI: Calling → Ringing).
+    function ringingCallParticipantsFrom(data) {
+      return (('ringingParticipantIds' in data) && (data.ringingParticipantIds is list))
+        ? data.ringingParticipantIds
+        : [];
+    }
+
     function declinedCallParticipantsFrom(data) {
       return (('declinedParticipantIds' in data) && (data.declinedParticipantIds is list))
         ? data.declinedParticipantIds
@@ -1317,9 +1324,13 @@ service cloud.firestore {
           'endedParticipantIds',
           'answeredAt',
           'endedAt',
-          'updatedAt'
+          'updatedAt',
+          'ringingParticipantIds',
+          'ringingAt'
         ])
         && (!changed.hasAny(['status']) || isValidCallSessionStatusTransition())
+        && callParticipantListUnchangedOrSelfAdded(ringingCallParticipantsFrom(resource.data), ringingCallParticipantsFrom(request.resource.data))
+        && (!changed.hasAny(['ringingAt']) || request.resource.data.ringingAt == request.time)
         && callParticipantListUnchangedOrSelfAdded(acceptedCallParticipantsFrom(resource.data), acceptedCallParticipantsFrom(request.resource.data))
         && callParticipantListUnchangedOrSelfAdded(declinedCallParticipantsFrom(resource.data), declinedCallParticipantsFrom(request.resource.data))
         && callParticipantListUnchangedOrSelfAdded(endedCallParticipantsFrom(resource.data), endedCallParticipantsFrom(request.resource.data))

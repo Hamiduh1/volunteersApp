@@ -1,45 +1,39 @@
 package com.example.volunteersApp.notifications
 
 import android.content.Context
-import android.media.AudioAttributes
-import android.media.MediaPlayer
-import android.media.RingtoneManager
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.util.Log
 
 /**
- * Plays a looping ringback tone for the caller while waiting for the callee to answer.
+ * Plays the standard in-call ringback ("ring… ring…") for the caller once the callee's device
+ * reports it is ringing. Uses the voice-call stream so it stays at call volume in the earpiece
+ * (or speaker on video calls) instead of the phone's loud ringtone.
  */
 object OutgoingCallRingbackHelper {
     private const val TAG = "OutgoingCallRingback"
-    private var mediaPlayer: MediaPlayer? = null
+    private const val RINGBACK_VOLUME = 60
+    private var toneGenerator: ToneGenerator? = null
 
+    @Suppress("UNUSED_PARAMETER")
     fun start(context: Context) {
-        if (mediaPlayer?.isPlaying == true) return
-        stop()
-        val appContext = context.applicationContext
-        val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        mediaPlayer = MediaPlayer().apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build(),
-            )
-            setDataSource(appContext, ringtoneUri)
-            isLooping = true
-            setVolume(0.55f, 0.55f)
-            prepare()
-            start()
-        }
+        if (toneGenerator != null) return
+        toneGenerator = runCatching {
+            ToneGenerator(AudioManager.STREAM_VOICE_CALL, RINGBACK_VOLUME).apply {
+                startTone(ToneGenerator.TONE_SUP_RINGTONE)
+            }
+        }.onFailure { e ->
+            Log.w(TAG, "Failed to start outgoing ringback", e)
+        }.getOrNull()
     }
 
     fun stop() {
-        mediaPlayer?.runCatching {
-            if (isPlaying) stop()
+        toneGenerator?.runCatching {
+            stopTone()
             release()
         }?.onFailure { e ->
             Log.w(TAG, "Failed to stop outgoing ringback", e)
         }
-        mediaPlayer = null
+        toneGenerator = null
     }
 }

@@ -244,6 +244,7 @@ class CallActivity : ComponentActivity() {
         if (!state.error.isNullOrBlank() && state.remoteUid == null) return false
         return state.remoteUid != null ||
             state.statusLabel.equals("Calling…", ignoreCase = true) ||
+            state.statusLabel.equals("Ringing…", ignoreCase = true) ||
             state.statusLabel.equals("Connecting", ignoreCase = true) ||
             state.statusLabel.equals("Connected", ignoreCase = true) ||
             state.statusLabel.equals("Reconnecting", ignoreCase = true)
