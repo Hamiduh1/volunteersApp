@@ -7,6 +7,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.example.volunteersApp.R
 import com.example.volunteersApp.models.EventModel
+import com.example.volunteersApp.models.toEventModelOrNull
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
@@ -65,7 +66,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             .addOnSuccessListener { querySnapshot ->
                 // Use addOnSuccessListener for the happy path
                 // Use toObjects with KTX for a clean conversion to a non-nullable list
-                val events = querySnapshot.toObjects(EventModel::class.java)
+                val events = querySnapshot.documents.mapNotNull { it.toEventModelOrNull() }
                 _upcomingEvents.value = events
                 if (events.isEmpty()) {
                     Log.d(TAG, "No upcoming events found.")

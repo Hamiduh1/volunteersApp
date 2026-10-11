@@ -325,6 +325,7 @@ class InvitationsViewModel : ViewModel() {
                     if (existingChatId == null) {
                         val chatData = mapOf(
                             "chatId" to targetChatRef.id,
+                            "chatType" to "direct",
                             "participants" to listOf(currentUserId, otherUserId),
                             "lastMessageText" to "Chat started! Say hi.",
                             "lastMessage" to "Chat started! Say hi.",

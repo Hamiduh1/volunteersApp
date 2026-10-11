@@ -3,13 +3,11 @@ package com.example.volunteersApp.organizer
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.volunteersApp.models.EventModel
 import com.example.volunteersApp.models.OpportunityStatus
 import com.example.volunteersApp.models.OpportunityType
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.firestore
 import com.google.firebase.storage.StorageException
 import com.google.firebase.storage.StorageMetadata
@@ -122,20 +120,33 @@ class CreateEventViewModel : ViewModel() {
                     finalImageUrl = ref.downloadUrl.await().toString()
                 }
 
-                val eventModel = EventModel(
-                    eventId = eventId,
-                    title = cleanTitle,
-                    description = cleanDescription,
-                    locationName = cleanLocation,
-                    category = cleanCategory,
-                    volunteerLimit = volunteerLimit,
-                    eventDateTime = com.google.firebase.Timestamp(eventDate),
-                    imageUrl = finalImageUrl,
-                    organizerId = user.uid,
-                    organizerName = user.displayName?.trim()?.ifBlank { null } ?: user.email,
-                    status = OpportunityStatus.UPCOMING,
-                    opportunityType = OpportunityType.EVENT,
-                    eventFee = eventFee
+                val eventTimestamp = com.google.firebase.Timestamp(eventDate)
+                val organizerName = user.displayName?.trim()?.ifBlank { null } ?: user.email
+                // Event create rules require participantsCount == 0, an int volunteerLimit, and a
+                // numeric payment that equals eventFee; iOS reads organizerUid/eventTimestamp.
+                val eventData = hashMapOf<String, Any?>(
+                    "eventId" to eventId,
+                    "title" to cleanTitle,
+                    "description" to cleanDescription,
+                    "locationName" to cleanLocation,
+                    "category" to cleanCategory,
+                    "volunteerLimit" to volunteerLimit,
+                    "participantsCount" to 0,
+                    "eventDateTime" to eventTimestamp,
+                    "eventTimestamp" to eventTimestamp,
+                    "imageUrl" to finalImageUrl,
+                    "organizerId" to user.uid,
+                    "organizerUid" to user.uid,
+                    "organizerName" to organizerName,
+                    "status" to OpportunityStatus.UPCOMING.name,
+                    "opportunityType" to OpportunityType.EVENT.name,
+                    "payment" to eventFee,
+                    "eventFee" to eventFee,
+                    "skills" to emptyList<String>(),
+                    "isActive" to true,
+                    "closeEntries" to false,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "lastUpdatedAt" to FieldValue.serverTimestamp(),
                 )
 
                 db.runBatch { batch ->
@@ -143,16 +154,7 @@ class CreateEventViewModel : ViewModel() {
                     val userSummaryRef = db.collection(FirestoreCollection.USERS).document(user.uid)
                         .collection(FirestoreSubcollection.HOSTED_EVENTS).document(eventId)
 
-                    batch.set(mainDocRef, eventModel)
-                    batch.set(
-                        mainDocRef,
-                        mapOf(
-                            "isActive" to true,
-                            "status" to OpportunityStatus.UPCOMING.name,
-                            "opportunityType" to OpportunityType.EVENT.name
-                        ),
-                        SetOptions.merge()
-                    )
+                    batch.set(mainDocRef, eventData)
                     batch.set(userSummaryRef, mapOf(
                         "eventName" to cleanTitle,
                         "location" to cleanLocation,

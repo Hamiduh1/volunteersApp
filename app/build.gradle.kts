@@ -68,8 +68,8 @@ android {
         applicationId = "com.volunteersapp.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        versionName = "1.0.15"
+        versionCode = 20
+        versionName = "1.0.16"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // --- Improvement 2: Set manifest placeholders here ---

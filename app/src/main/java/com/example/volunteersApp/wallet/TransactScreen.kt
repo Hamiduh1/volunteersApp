@@ -454,6 +454,8 @@ fun TransactScreen(
     var showReviewSheet by remember { mutableStateOf(false) }
     var showSourcePicker by remember { mutableStateOf(false) }
     var showRegistrationSheet by remember { mutableStateOf(false) }
+    var pendingReverifyBeneficiary by remember { mutableStateOf<Beneficiary?>(null) }
+    var isReverifyingBeneficiary by remember { mutableStateOf(false) }
     var showAddCardSheet by remember { mutableStateOf(false) }
     var showAppUserRecipientSheet by remember { mutableStateOf(false) }
     var showAppUserHistorySheet by remember { mutableStateOf(false) }
@@ -743,11 +745,7 @@ fun TransactScreen(
         viewModel.clearRecipientSelectionError()
         if (viewModel.requiresBeneficiaryReRegistration(beneficiary)) {
             selectedRecipient = null
-            showRegistrationSheet = true
-            flowBanner = FlowBannerState(
-                "This saved recipient needs to be verified again. Add it with the current details to verify and save it securely.",
-                FlowBannerTone.Info,
-            )
+            pendingReverifyBeneficiary = beneficiary
         } else {
             selectedRecipient = beneficiary
         }
@@ -1559,6 +1557,58 @@ fun TransactScreen(
                 }
             )
         }
+    }
+
+    pendingReverifyBeneficiary?.let { beneficiary ->
+        val destination = (beneficiary.mobileNumber ?: beneficiary.accountNumber ?: beneficiary.phone).orEmpty()
+        val provider = (beneficiary.bankName ?: beneficiary.network).orEmpty()
+        AlertDialog(
+            onDismissRequest = { if (!isReverifyingBeneficiary) pendingReverifyBeneficiary = null },
+            title = { Text("Confirm saved recipient") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Confirm these details are still correct so we can re-check this recipient with the provider.")
+                    Text(beneficiary.name.ifBlank { "Recipient" }, fontWeight = FontWeight.Bold)
+                    if (destination.isNotBlank()) Text(destination)
+                    if (provider.isNotBlank()) Text(provider)
+                    if (beneficiary.country.isNotBlank()) Text(beneficiary.country)
+                    if (isReverifyingBeneficiary) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isReverifyingBeneficiary,
+                    onClick = {
+                        isReverifyingBeneficiary = true
+                        viewModel.refreshSavedBeneficiaryVerification(beneficiary) { refreshed, error ->
+                            isReverifyingBeneficiary = false
+                            pendingReverifyBeneficiary = null
+                            if (refreshed != null) {
+                                selectedRecipient = refreshed
+                                flowBanner = FlowBannerState("Recipient verified.", FlowBannerTone.Success)
+                            } else {
+                                showRegistrationSheet = true
+                                flowBanner = FlowBannerState(
+                                    error ?: "This saved recipient needs to be added again with the current details.",
+                                    FlowBannerTone.Info,
+                                )
+                            }
+                        }
+                    },
+                ) { Text("Confirm & verify") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isReverifyingBeneficiary,
+                    onClick = {
+                        pendingReverifyBeneficiary = null
+                        showRegistrationSheet = true
+                    },
+                ) { Text("Add again") }
+            },
+        )
     }
 
     if (showRegistrationSheet) {

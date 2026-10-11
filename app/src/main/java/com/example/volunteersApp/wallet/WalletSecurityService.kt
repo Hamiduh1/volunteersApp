@@ -220,23 +220,55 @@ object WalletSecurityService {
         }
     }
 
+    @Volatile
+    private var cachedSecurePrefs: SharedPreferences? = null
+
     private fun securePrefsOrNull(context: Context): SharedPreferences? {
-        val appContext = context.applicationContext
-        return runCatching {
-            val masterKey = MasterKey.Builder(appContext)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                appContext,
-                PREFS_FILE,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-        }.getOrElse { error ->
-            Log.w(TAG, "Encrypted preferences unavailable", error)
-            null
+        cachedSecurePrefs?.let { return it }
+        return synchronized(this) {
+            cachedSecurePrefs ?: openSecurePrefsWithRecovery(context.applicationContext)
+                ?.also { cachedSecurePrefs = it }
         }
+    }
+
+    /**
+     * The Keystore master key never leaves the device, so a prefs file restored from a backup or
+     * device transfer (or left behind by a Keystore reset) can no longer be decrypted. Its contents
+     * are unrecoverable on this device, so discard it and start clean; the user sets a new passcode.
+     */
+    private fun openSecurePrefsWithRecovery(appContext: Context): SharedPreferences? {
+        runCatching { createSecurePrefs(appContext) }
+            .onSuccess { return it }
+            .onFailure { Log.w(TAG, "Encrypted preferences unreadable; resetting wallet security store", it) }
+
+        appContext.deleteSharedPreferences(PREFS_FILE)
+        runCatching { createSecurePrefs(appContext) }
+            .onSuccess { return it }
+            .onFailure { Log.w(TAG, "Encrypted preferences still unavailable; regenerating master key", it) }
+
+        runCatching {
+            java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                .deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
+        }.onFailure { Log.w(TAG, "Unable to delete wallet master key", it) }
+        appContext.deleteSharedPreferences(PREFS_FILE)
+        return runCatching { createSecurePrefs(appContext) }
+            .getOrElse { error ->
+                Log.e(TAG, "Encrypted preferences unavailable", error)
+                null
+            }
+    }
+
+    private fun createSecurePrefs(appContext: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(appContext)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            appContext,
+            PREFS_FILE,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
     }
 
     private fun randomSalt(): String {

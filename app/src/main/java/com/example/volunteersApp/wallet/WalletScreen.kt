@@ -224,12 +224,10 @@ fun WalletScreen(
                         else onNavigateToAgentPortal()
                     },
                     calculatorCard = {
-                        if (!transactionOnly) {
-                            GlobalCalculatorCard(
-                                state = uiState,
-                                onInputsChanged = viewModel::onCalculatorInputsChanged
-                            )
-                        }
+                        GlobalCalculatorCard(
+                            state = uiState,
+                            onInputsChanged = viewModel::onCalculatorInputsChanged
+                        )
                     }
                 )
             }
@@ -1456,9 +1454,7 @@ private fun UserWalletContent(
                 )
             }
 
-            if (!transactionOnly && state.isProviderWalletReady) {
-                calculatorCard()
-            }
+            calculatorCard()
             if (!transactionOnly) {
                 LocalCurrencySummaryCard(
                     state = state,

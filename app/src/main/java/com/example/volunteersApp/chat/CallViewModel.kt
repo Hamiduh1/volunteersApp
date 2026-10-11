@@ -248,8 +248,11 @@ class CallViewModel(
                 if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                     logFirestorePermissionDeniedDiagnostics(TAG, "call_sessions create ($step)")
                 }
-                val msg = when (e.code) {
-                    FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+                val msg = when {
+                    e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED && step == "acceptCallSession" ->
+                        "We couldn't answer this call because Firestore denied access to the call session. " +
+                            "Ask the caller to try again, and confirm you're still a participant in this chat."
+                    e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED ->
                         "We couldn't start this call because Firestore denied access when creating the call session. " +
                             "Sign out and back in, register your App Check debug token (debug builds), and confirm " +
                             "you're still a participant in this chat."

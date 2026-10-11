@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.volunteersApp.models.EventModel
 import com.example.volunteersApp.models.EventRegistration
+import com.example.volunteersApp.models.OpportunityStatus
+import com.example.volunteersApp.models.OpportunityType
+import com.example.volunteersApp.models.toEventModelOrNull
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.DocumentSnapshot
@@ -67,25 +70,16 @@ class MyEventsViewModel : ViewModel() {
         val filtered = items.filter { item ->
             val status = item.registration.status.trim().lowercase()
             val eventDate = item.event.eventDateObject
-            val isUpcoming = eventDate?.after(now) == true
             val isPast = eventDate?.before(now) == true
+            val isApproved = status == "approved" || status == "accepted"
+            val isFinished = status in setOf("attended", "completed") || (isApproved && isPast)
 
             when (_uiState.value.filter) {
-                // Keep pending, declined, and withdrawn records visible as activity
-                // history instead of allowing a closed event to hide them entirely.
-                EventFilter.APPLIED -> status in setOf(
-                    "pending",
-                    "pending_payment",
-                    "pending_checkout",
-                    "viewed",
-                    "waitlisted",
-                    "rejected",
-                    "rejected_by_employer",
-                    "withdrawn"
-                )
-                EventFilter.UPCOMING -> (status == "approved" || status == "accepted") && isUpcoming
-                EventFilter.PAST -> status in setOf("attended", "completed") ||
-                    (status in setOf("approved", "accepted") && isPast)
+                // Keep pending, declined, withdrawn, cancelled, refunded, and expired records
+                // visible as activity history instead of allowing a closed event to hide them.
+                EventFilter.APPLIED -> !isApproved && !isFinished
+                EventFilter.UPCOMING -> isApproved && !isPast
+                EventFilter.PAST -> isFinished
             }
         }
         return when (_uiState.value.filter) {
@@ -162,11 +156,12 @@ class MyEventsViewModel : ViewModel() {
                         .await()
                         .documents
                 }.mapNotNull { doc ->
-                    doc.toObject(EventModel::class.java)?.copy(eventId = doc.id)
+                    doc.toEventModelOrNull()
                 }.associateBy { event -> event.eventId }
 
-                val eventItems = latestRegistrationByEventId.mapNotNull { (eventId, registration) ->
-                    eventDocsById[eventId]?.let { event -> MyEventItem(event, registration) }
+                // An event removed after the volunteer applied still belongs in their history.
+                val eventItems = latestRegistrationByEventId.map { (eventId, registration) ->
+                    MyEventItem(eventDocsById[eventId] ?: registration.toFallbackEvent(eventId), registration)
                 }
 
                 if (refreshId == refreshGeneration) {
@@ -184,9 +179,25 @@ class MyEventsViewModel : ViewModel() {
     }
 
     private fun isEventApplicationDocument(doc: DocumentSnapshot): Boolean {
-        val rootCollection = doc.reference.parent.parent?.parent?.id
-        return rootCollection == "events"
+        val parentDoc = doc.reference.parent.parent
+        if (parentDoc == null) {
+            // Legacy root `applications` records for events carry an eventId and no jobId.
+            return !doc.getString("eventId").isNullOrBlank() && doc.getString("jobId").isNullOrBlank()
+        }
+        return parentDoc.parent.id == FirestoreCollection.EVENTS
     }
+
+    private fun EventRegistration.toFallbackEvent(eventId: String) = EventModel(
+        eventId = eventId,
+        title = eventTitle.ifBlank { "Event no longer available" },
+        eventDateTime = eventTimestamp,
+        locationName = eventLocation.ifBlank { null },
+        organizerId = organizerUid.ifBlank { null },
+        organizerName = organizerName.ifBlank { null },
+        closeEntries = true,
+        status = OpportunityStatus.CLOSED,
+        opportunityType = OpportunityType.EVENT
+    )
 
     private fun toEventRegistration(doc: DocumentSnapshot): EventRegistration? {
         val eventId = normalizeEventId(doc.getString("eventId"), doc)

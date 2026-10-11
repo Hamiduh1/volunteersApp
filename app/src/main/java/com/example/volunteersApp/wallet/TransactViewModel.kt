@@ -1192,6 +1192,69 @@ class TransactViewModel : ViewModel() {
         return !beneficiary.hasReusableProviderVerificationProof()
     }
 
+    /**
+     * Upgrades an older saved recipient in place through the server (shared with iOS) instead of
+     * forcing the sender to add it again. The server returns its stored proof unchanged when it is
+     * already complete, and otherwise re-verifies the route with the provider and rewrites the proof.
+     */
+    fun refreshSavedBeneficiaryVerification(
+        beneficiary: Beneficiary,
+        onComplete: (Beneficiary?, String?) -> Unit,
+    ) {
+        if (beneficiary.id.isBlank()) {
+            onComplete(null, "Select the saved recipient again.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val result = FunctionsClient.callMap(
+                    CallableFunction.REFRESH_SAVED_BENEFICIARY_VERIFICATION,
+                    mapOf(
+                        "beneficiaryId" to beneficiary.id,
+                        "recipientDetailsConfirmed" to true,
+                    ),
+                ) ?: throw IllegalStateException("The recipient could not be verified. Try again.")
+                fun text(key: String): String? = (result[key] as? String)?.trim()?.takeIf { it.isNotEmpty() }
+                fun millis(key: String): Long? = (result[key] as? Number)?.toLong()?.takeIf { it > 0L }
+                val refreshed = beneficiary.copy(
+                    name = text("recipientName") ?: beneficiary.name,
+                    phone = text("phone") ?: beneficiary.phone,
+                    network = text("institutionName") ?: beneficiary.network,
+                    country = text("country") ?: beneficiary.country,
+                    type = text("type") ?: beneficiary.type,
+                    mobileNumber = text("mobileNumber") ?: beneficiary.mobileNumber,
+                    accountNumber = text("accountNumber") ?: beneficiary.accountNumber,
+                    institutionCode = text("institutionCode") ?: beneficiary.institutionCode,
+                    bankName = text("bankName") ?: beneficiary.bankName,
+                    swiftCode = text("swiftCode") ?: beneficiary.swiftCode,
+                    routingCode = text("routingCode") ?: beneficiary.routingCode,
+                    verificationStatus = text("verificationStatus") ?: beneficiary.verificationStatus,
+                    providerResolvedName = text("providerResolvedName") ?: beneficiary.providerResolvedName,
+                    recipientDetailsConfirmed = result["recipientDetailsConfirmed"] as? Boolean
+                        ?: beneficiary.recipientDetailsConfirmed,
+                    recipientNameConfirmationSource = text("recipientNameConfirmationSource")
+                        ?: beneficiary.recipientNameConfirmationSource,
+                    recipientNameConfirmedAtMs = millis("recipientNameConfirmedAtMs")
+                        ?: beneficiary.recipientNameConfirmedAtMs,
+                    accountNameVerified = result["accountNameVerified"] as? Boolean ?: beneficiary.accountNameVerified,
+                    accountRouteVerified = result["accountRouteVerified"] as? Boolean ?: beneficiary.accountRouteVerified,
+                    isVerified = result["isVerified"] as? Boolean ?: beneficiary.isVerified,
+                    providerVerifiedAtMs = millis("providerVerifiedAtMs") ?: beneficiary.providerVerifiedAtMs,
+                    recipientIdentityKey = text("recipientIdentityKey") ?: beneficiary.recipientIdentityKey,
+                )
+                if (!refreshed.hasReusableProviderVerificationProof()) {
+                    throw IllegalStateException(
+                        "This saved recipient could not be verified. Add it again with the current details."
+                    )
+                }
+                onComplete(refreshed, null)
+            } catch (e: Exception) {
+                Log.e("TransactVM", "Saved recipient verification refresh failed", e)
+                onComplete(null, e.message ?: "We could not verify this saved recipient. Add it again.")
+            }
+        }
+    }
+
     fun onBeneficiarySelected(beneficiary: Beneficiary) {
         recipientSelectionVersion += 1
         clearTransferQuote()

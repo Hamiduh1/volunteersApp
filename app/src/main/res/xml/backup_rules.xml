@@ -6,6 +6,8 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
+    <!-- Encrypted with a device-bound Keystore key; a restored copy can never be decrypted. -->
+    <exclude domain="sharedpref" path="wallet_security_secure_v1.xml"/>
     <!--
    <include domain="sharedpref" path="."/>
    <exclude domain="sharedpref" path="device.xml"/>

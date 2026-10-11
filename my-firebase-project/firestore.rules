@@ -1269,11 +1269,15 @@ service cloud.firestore {
       return (('status' in data) && (data.status is string)) ? data.status : "";
     }
 
+    // createCallSession stores the caller inside participantIds and sets an explicit isGroup flag,
+    // so a 1:1 server session has two participantIds; only infer from the list when the flag is absent.
     function isGroupCallSession(data) {
       let participantIds = (('participantIds' in data) && (data.participantIds is list))
         ? data.participantIds
         : [];
-      return (('isGroup' in data) && data.isGroup == true) || participantIds.size() > 1;
+      return (('isGroup' in data) && (data.isGroup is bool))
+        ? data.isGroup
+        : participantIds.size() > 1;
     }
 
     function isValidCallSessionStatusTransition() {
@@ -1432,6 +1436,12 @@ service cloud.firestore {
           && !hasUserBlocked(recipientId, request.auth.uid)
           && !hasUserBlocked(request.auth.uid, recipientId);
         allow update, delete: if false;
+      }
+
+      // Incoming call signaling mirror maintained by Cloud Functions; Android CallSessionViewModel listens here.
+      match /incoming_call_sessions/{sessionId} {
+        allow read: if isOwner(userId);
+        allow create, update, delete: if false;
       }
 
       // Denormalized call history for Social Inbox (synced from `chats/{chatId}/call_logs/*` via Cloud Functions).
@@ -1791,7 +1801,7 @@ service cloud.firestore {
           'title', 'titleLowercase', 'description', 'category', 'locationName', 'locationAddress',
           'eventDateTime', 'eventTimestamp', 'volunteerLimit', 'payment', 'eventFee',
           'requirements', 'contactInfo', 'isActive', 'closeEntries', 'opportunityType',
-          'status', 'organizerName', 'isDeleted', 'lastUpdatedAt', 'updatedAt'
+          'status', 'organizerName', 'isDeleted', 'lastUpdatedAt', 'updatedAt', 'imageUrl'
         ])
         && organizerEventIdentityIsStable()
         && organizerEventTermsAreSafe()
@@ -1887,7 +1897,7 @@ service cloud.firestore {
             && request.resource.data.volunteersNeeded > 0
             && request.resource.data.totalSlots is int
             && request.resource.data.totalSlots == request.resource.data.volunteersNeeded
-            && request.resource.data.totalSlots >= resource.data.slotsFilled
+            && (!('slotsFilled' in resource.data) || request.resource.data.totalSlots >= resource.data.slotsFilled)
             && request.resource.data.isActive is bool
             && request.resource.data.status in ['OPEN', 'open', 'CLOSED', 'closed', 'ARCHIVED', 'archived', 'CANCELLED', 'cancelled']
             && (!('isDeleted' in request.resource.data) || request.resource.data.isDeleted != false)

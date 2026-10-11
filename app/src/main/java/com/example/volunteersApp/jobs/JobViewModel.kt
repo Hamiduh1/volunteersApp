@@ -81,9 +81,7 @@ class JobViewModel : ViewModel() {
 
                 // Do not order in Firestore to avoid excluding docs that don't have the same timestamp field.
                 val snapshot = query.get().await()
-                val allJobs = snapshot.documents.mapNotNull { doc ->
-                    doc.toObject(JobPosting::class.java)?.copy(postingId = doc.id)
-                }
+                val allJobs = snapshot.documents.mapNotNull { doc -> doc.toJobPostingOrNull() }
                 val visibleJobs = allJobs.filter { job ->
                     !job.status.equals("closed", ignoreCase = true) &&
                         !job.status.equals("completed", ignoreCase = true)

@@ -8,6 +8,7 @@ import com.example.volunteersApp.firebase.FunctionsClient
 import com.example.volunteersApp.jobs.JobDetailViewModel.ApplicationStatus
 import com.example.volunteersApp.models.EventModel
 import com.example.volunteersApp.models.Resource
+import com.example.volunteersApp.models.toEventModelOrNull
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.firestore
@@ -66,7 +67,7 @@ class EventDetailViewModel : ViewModel() {
                 val eventDoc = eventDocDeferred.await()
                 val applicationDoc = applicationDocDeferred.await()
 
-                val event = eventDoc.toObject(EventModel::class.java)
+                val event = eventDoc.toEventModelOrNull()
                 if (event == null) {
                     _uiState.update { it.copy(isLoading = false, error = "Event not found.") }
                     return@launch

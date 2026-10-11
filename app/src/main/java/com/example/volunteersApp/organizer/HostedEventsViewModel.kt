@@ -6,11 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.volunteersApp.firebase.CallableFunction
 import com.example.volunteersApp.firebase.FunctionsClient
 import com.example.volunteersApp.models.EventModel
+import com.example.volunteersApp.models.toEventModelOrNull
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
-import com.google.firebase.firestore.toObjects
 import com.google.firebase.storage.storage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,29 +35,46 @@ class HostedEventsViewModel : ViewModel() {
     val uiState = _uiState.asStateFlow()
 
     private var listenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+    private var organizerUidListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private val hostedEventsByField = mutableMapOf<String, List<EventModel>>()
 
     init {
         fetchHostedEvents()
     }
 
+    // iOS and older events may carry only `organizerUid`, and an orderBy would drop events without
+    // `eventDateTime`, so listen on both owner fields unordered and sort on the device.
     fun fetchHostedEvents() {
         val userId = auth.currentUser?.uid ?: return
         _uiState.update { it.copy(isLoading = true, error = null, message = null) }
 
         listenerRegistration?.remove()
-        listenerRegistration = db.collection(FirestoreCollection.EVENTS)
-            .whereEqualTo("organizerId", userId)
-            .orderBy("eventDateTime", Query.Direction.DESCENDING)
+        organizerUidListener?.remove()
+        hostedEventsByField.clear()
+        listenerRegistration = listenForHostedEvents("organizerId", userId)
+        organizerUidListener = listenForHostedEvents("organizerUid", userId)
+    }
+
+    private fun listenForHostedEvents(ownerField: String, userId: String) =
+        db.collection(FirestoreCollection.EVENTS)
+            .whereEqualTo(ownerField, userId)
             .addSnapshotListener { snapshots, error ->
                 if (error != null) {
-                    _uiState.update { it.copy(isLoading = false, error = error.localizedMessage) }
+                    Log.w("HostedEventsViewModel", "Hosted events listener ($ownerField) failed", error)
+                    hostedEventsByField[ownerField] = emptyList()
+                    if (hostedEventsByField.values.all { it.isEmpty() }) {
+                        _uiState.update { it.copy(isLoading = false, error = error.localizedMessage) }
+                    }
                     return@addSnapshotListener
                 }
-
-                val events = snapshots?.toObjects<EventModel>() ?: emptyList()
-                _uiState.update { it.copy(events = events, isLoading = false) }
+                hostedEventsByField[ownerField] = snapshots?.documents
+                    ?.mapNotNull { it.toEventModelOrNull() }
+                    .orEmpty()
+                val events = hostedEventsByField.values.flatten()
+                    .distinctBy { it.eventId }
+                    .sortedByDescending { it.eventDateTime?.toDate()?.time ?: it.createdAt?.toDate()?.time ?: 0L }
+                _uiState.update { it.copy(events = events, isLoading = false, error = null) }
             }
-    }
 
     fun publishEvent(eventId: String) = viewModelScope.launch {
         try {
@@ -122,5 +138,6 @@ class HostedEventsViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         listenerRegistration?.remove()
+        organizerUidListener?.remove()
     }
 }

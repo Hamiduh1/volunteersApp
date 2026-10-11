@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.volunteersApp.models.EventModel
 import com.example.volunteersApp.models.Resource
+import com.example.volunteersApp.models.toEventModelOrNull
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.firestore
@@ -57,7 +58,7 @@ class OrganizerEventDetailsViewModel : ViewModel() {
                 }
 
                 if (snapshot != null && snapshot.exists()) {
-                    val event = snapshot.toObject(EventModel::class.java)
+                    val event = snapshot.toEventModelOrNull()
                     _uiState.update { it.copy(event = event, isLoading = false) }
                 } else {
                     _uiState.update { it.copy(isLoading = false, error = "Event not found.") }

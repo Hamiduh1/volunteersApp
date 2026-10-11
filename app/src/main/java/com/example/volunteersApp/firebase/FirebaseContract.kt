@@ -125,6 +125,7 @@ object CallableFunction {
     const val RESOLVE_AFRIEX_ACCOUNT = "resolveAfriexAccount"
     const val SEARCH_RECIPIENT_ADDRESS = "searchRecipientAddress"
     const val SAVE_VERIFIED_BENEFICIARY = "saveVerifiedBeneficiary"
+    const val REFRESH_SAVED_BENEFICIARY_VERIFICATION = "refreshSavedBeneficiaryVerification"
     const val CREATE_BANK_RECIPIENT_VERIFICATION = "createBankRecipientVerification"
     const val APPLY_APPROVED_BANK_RECIPIENT_VERIFICATION = "applyApprovedBankRecipientVerification"
     const val GET_AFRIEX_RATES = "getAfriexRates"

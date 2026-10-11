@@ -45,9 +45,7 @@ class JobPostDetailViewModel : ViewModel() {
                     _uiState.update { it.copy(jobPost = null, isLoading = false, error = "This opportunity is no longer available.") }
                     return@launch
                 }
-                val jobPost = doc.toObject(JobPosting::class.java)?.let { job ->
-                    if (job.postingId.isBlank()) job.copy(postingId = doc.id) else job
-                }
+                val jobPost = doc.toJobPostingOrNull()
                 if (jobPost == null) {
                     _uiState.update { it.copy(jobPost = null, isLoading = false, error = "This opportunity could not be loaded.") }
                     return@launch

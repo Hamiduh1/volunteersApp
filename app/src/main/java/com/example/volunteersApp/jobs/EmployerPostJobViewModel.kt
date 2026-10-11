@@ -95,8 +95,9 @@ class EmployerPostJobViewModel : ViewModel() {
             _uiState.update { it.copy(isLoading = true, isEditMode = true, postingId = id) }
             try {
                 val doc = db.collection(FirestoreCollection.JOBS).document(id).get().await()
-                val job = doc.toObject(JobPosting::class.java)
-                if (job == null || job.employerUid != userId) {
+                val job = doc.toJobPostingOrNull()
+                val ownsJob = job != null && (job.employerUid == userId || doc.getString("employerId") == userId)
+                if (!ownsJob) {
                     _uiState.update { it.copy(isLoading = false, isEditMode = false, postingId = null) }
                     _actionResult.emit(Resource.Error("You can only edit jobs posted by your organization."))
                     return@launch
@@ -188,8 +189,11 @@ class EmployerPostJobViewModel : ViewModel() {
                 }
 
                 val collectionRef = db.collection(FirestoreCollection.JOBS)
+                val volunteersNeeded = state.volunteersNeeded.toIntOrNull() ?: 0
+                val scheduledTimestamp = Timestamp(scheduledAt)
                 val jobPayload = hashMapOf<String, Any>(
                     "employerUid" to userId,
+                    "employerId" to userId,
                     "organizationName" to state.organizationName.trim().ifBlank {
                         auth.currentUser?.displayName?.trim().orEmpty()
                     },
@@ -200,9 +204,13 @@ class EmployerPostJobViewModel : ViewModel() {
                     "time" to state.timeInput.trim(),
                     "locationName" to state.location.trim(),
                     "category" to state.category.trim(),
-                    "volunteersNeeded" to (state.volunteersNeeded.toIntOrNull() ?: 0),
+                    "volunteersNeeded" to volunteersNeeded,
+                    "totalSlots" to volunteersNeeded,
+                    "isActive" to true,
                     "status" to state.currentStatus.trim().ifBlank { "OPEN" },
-                    "applicationDeadline" to Timestamp(scheduledAt),
+                    "applicationDeadline" to scheduledTimestamp,
+                    "eventDateTime" to scheduledTimestamp,
+                    "eventTimestamp" to scheduledTimestamp,
                     "lastUpdatedAt" to FieldValue.serverTimestamp(),
                 )
                 if (state.isEditMode && state.postingId != null) {
@@ -212,7 +220,9 @@ class EmployerPostJobViewModel : ViewModel() {
                 } else {
                     val newJobRef = collectionRef.document()
                     jobPayload["postingId"] = newJobRef.id
-                    jobPayload["isActive"] = true
+                    jobPayload["createdBy"] = userId
+                    jobPayload["slotsFilled"] = 0
+                    jobPayload["applicantsCount"] = 0
                     jobPayload["closeEntries"] = false
                     jobPayload["retainedForHistory"] = false
                     jobPayload["timestamp"] = FieldValue.serverTimestamp()

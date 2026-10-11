@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,35 +32,48 @@ class EmployerPostedJobsViewModel : ViewModel() {
     val uiState = _uiState.asStateFlow()
 
     private var listenerRegistration: ListenerRegistration? = null
+    private var employerIdListener: ListenerRegistration? = null
+    private val jobsByOwnerField = mutableMapOf<String, List<JobPosting>>()
 
     init {
         startListeningForJobs()
     }
 
+    // Older and iOS-created jobs may carry only `employerId`, so listen on both owner fields.
     private fun startListeningForJobs() {
         val currentUserId = auth.currentUser?.uid ?: return
         _uiState.update { it.copy(isLoading = true) }
 
-        val query = db.collection(FirestoreCollection.JOBS)
-            .whereEqualTo("employerUid", currentUserId)
-
-        listenerRegistration = query.addSnapshotListener { snapshots, e ->
-            if (e != null) {
-                _uiState.update {
-                    it.copy(isLoading = false, error = "Could not load your posted jobs. Please try again.")
-                }
-                return@addSnapshotListener
-            }
-
-            val jobList = snapshots?.documents?.mapNotNull { doc ->
-                doc.toObject(JobPosting::class.java)?.let { job ->
-                    if (job.postingId.isBlank()) job.copy(postingId = doc.id) else job
-                }
-            } ?: emptyList()
-
-            _uiState.update { it.copy(jobs = jobList, isLoading = false, error = null) }
-        }
+        listenerRegistration = listenForJobs("employerUid", currentUserId)
+        employerIdListener = listenForJobs("employerId", currentUserId)
     }
+
+    private fun listenForJobs(ownerField: String, userId: String): ListenerRegistration =
+        db.collection(FirestoreCollection.JOBS)
+            .whereEqualTo(ownerField, userId)
+            .addSnapshotListener { snapshots, e ->
+                if (e != null) {
+                    Log.w(TAG, "Posted jobs listener ($ownerField) failed", e)
+                    jobsByOwnerField[ownerField] = emptyList()
+                    if (jobsByOwnerField.values.all { it.isEmpty() }) {
+                        _uiState.update {
+                            it.copy(isLoading = false, error = "Could not load your posted jobs. Please try again.")
+                        }
+                    }
+                    return@addSnapshotListener
+                }
+
+                jobsByOwnerField[ownerField] = snapshots?.documents
+                    ?.mapNotNull { it.toJobPostingOrNull() }
+                    .orEmpty()
+                val jobList = jobsByOwnerField.values.flatten()
+                    .distinctBy { it.postingId }
+                    .sortedByDescending {
+                        it.applicationDeadline?.toDate()?.time ?: it.timestamp?.toDate()?.time ?: 0L
+                    }
+
+                _uiState.update { it.copy(jobs = jobList, isLoading = false, error = null) }
+            }
 
     fun deleteJob(job: JobPosting) {
         viewModelScope.launch {
@@ -88,9 +102,20 @@ class EmployerPostedJobsViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val newStatus = if (job.status?.lowercase() == "open") "closed" else "open"
-                // CORRECTED: Use 'postingId' to match the data class
+                val ownerId = auth.currentUser?.uid ?: throw IllegalStateException("Sign in again.")
+                // Job rules validate the full post-update document, so older jobs need the shared
+                // owner and slot fields filled in alongside the status change.
                 db.collection(FirestoreCollection.JOBS).document(job.postingId)
-                    .update("status", newStatus).await()
+                    .update(
+                        mapOf(
+                            "status" to newStatus,
+                            "isActive" to (newStatus == "open"),
+                            "employerUid" to ownerId,
+                            "employerId" to ownerId,
+                            "totalSlots" to job.volunteersNeeded,
+                            "lastUpdatedAt" to FieldValue.serverTimestamp(),
+                        )
+                    ).await()
             } catch (e: Exception) {
                 Log.e(TAG, "Status update failed", e)
                 _uiState.update { it.copy(error = "Could not update this job. Please try again.") }
@@ -101,5 +126,6 @@ class EmployerPostedJobsViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         listenerRegistration?.remove()
+        employerIdListener?.remove()
     }
 }

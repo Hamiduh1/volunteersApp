@@ -47,6 +47,7 @@ object FunctionsClient {
         CallableFunction.APPLY_APPROVED_BENEFICIARY_VERIFICATION,
         CallableFunction.RESOLVE_AFRIEX_ACCOUNT,
         CallableFunction.SAVE_VERIFIED_BENEFICIARY,
+        CallableFunction.REFRESH_SAVED_BENEFICIARY_VERIFICATION,
         CallableFunction.CREATE_BANK_RECIPIENT_VERIFICATION,
         CallableFunction.APPLY_APPROVED_BANK_RECIPIENT_VERIFICATION,
         CallableFunction.ADMIN_LIST_PAYOUT_REQUESTS,

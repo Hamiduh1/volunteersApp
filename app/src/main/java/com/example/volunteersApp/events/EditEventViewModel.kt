@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.volunteersApp.models.EventModel
+import com.example.volunteersApp.models.toEventModelOrNull
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FieldValue
@@ -43,7 +44,7 @@ class EditEventViewModel : ViewModel() {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
                 val doc = db.collection(FirestoreCollection.EVENTS).document(eventId).get().await()
-                val event = doc.toObject(EventModel::class.java)
+                val event = doc.toEventModelOrNull()
                 _uiState.update { it.copy(initialEvent = event, isLoading = false) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = "Failed to load event data: ${e.localizedMessage}") }
@@ -82,7 +83,13 @@ class EditEventViewModel : ViewModel() {
                 }
 
                 val finalUpdates = updates.toMutableMap()
-                finalUpdates["imageUrl"] = finalImageUrl
+                if (newImageUri != null) {
+                    finalUpdates["imageUrl"] = finalImageUrl
+                }
+                // Keep the shared iOS/Android mirror fields consistent with the edited values.
+                finalUpdates["payment"]?.let { finalUpdates["eventFee"] = it }
+                finalUpdates["eventDateTime"]?.let { finalUpdates["eventTimestamp"] = it }
+                finalUpdates["lastUpdatedAt"] = FieldValue.serverTimestamp()
 
                 // 2. Perform Batch Write
                 db.runBatch { batch ->

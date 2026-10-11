@@ -3,6 +3,7 @@ package com.example.volunteersApp.events
 import android.util.Log
 import com.example.volunteersApp.models.EventModel
 import com.example.volunteersApp.models.Resource
+import com.example.volunteersApp.models.toEventModelOrNull
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
@@ -52,7 +53,7 @@ class EventRepository {
                     trySend(Resource.Error(error.localizedMessage ?: "Error"))
                     return@addSnapshotListener
                 }
-                val event = snapshot?.toObject(EventModel::class.java)?.copy(eventId = snapshot.id)
+                val event = snapshot?.toEventModelOrNull()
                 trySend(Resource.Success(event))
             }
         awaitClose { listener.remove() }
@@ -64,22 +65,30 @@ class EventRepository {
      */
     fun getEventsByOrganizerId(organizerId: String): Flow<Resource<List<EventModel>>> = callbackFlow {
         trySend(Resource.Loading())
-        val query = eventsCollection
-            .whereEqualTo("organizerId", organizerId)
+        // Older and iOS-created events may only carry `organizerUid`, so merge both owner fields.
+        val eventsByOwnerField = mutableMapOf<String, List<EventModel>>()
+        val listeners = listOf("organizerId", "organizerUid").map { ownerField ->
+            eventsCollection.whereEqualTo(ownerField, organizerId)
+                .addSnapshotListener { snapshots, error ->
+                    if (error != null) {
+                        eventsByOwnerField[ownerField] = emptyList()
+                        if (eventsByOwnerField.size == 2 && eventsByOwnerField.values.all { it.isEmpty() }) {
+                            trySend(Resource.Error(error.localizedMessage ?: "Error"))
+                        }
+                        return@addSnapshotListener
+                    }
 
-        val listener = query.addSnapshotListener { snapshots, error ->
-            if (error != null) {
-                trySend(Resource.Error(error.localizedMessage ?: "Error"))
-                return@addSnapshotListener
-            }
+                    eventsByOwnerField[ownerField] = snapshots?.documents
+                        ?.mapNotNull { it.toEventModelOrNull() }
+                        .orEmpty()
+                    val list = eventsByOwnerField.values.flatten()
+                        .distinctBy { it.eventId }
+                        .sortedByDescending { it.eventDateTime?.toDate() }
 
-            val list = snapshots?.documents?.mapNotNull { doc ->
-                doc.toObject(EventModel::class.java)?.copy(eventId = doc.id)
-            }?.sortedByDescending { it.eventDateTime?.toDate() } ?: emptyList()
-
-            trySend(Resource.Success(list))
+                    trySend(Resource.Success(list))
+                }
         }
-        awaitClose { listener.remove() }
+        awaitClose { listeners.forEach { it.remove() } }
     }
 
     /**

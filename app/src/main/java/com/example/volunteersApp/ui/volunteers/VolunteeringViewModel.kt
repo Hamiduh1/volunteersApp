@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.volunteersApp.firebase.CallableFunction
 import com.example.volunteersApp.models.EventModel
+import com.example.volunteersApp.models.toEventModelOrNull
 import com.example.volunteersApp.firebase.FunctionsClient
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -52,7 +53,7 @@ class VolunteeringViewModel : ViewModel() {
                     .await()
 
                 // Keep filtering local so older documents without a consistent isActive field still show up.
-                fullEventsList = snapshot.toObjects(EventModel::class.java)
+                fullEventsList = snapshot.documents.mapNotNull { it.toEventModelOrNull() }
                     .filter { it.isActive }
                     .sortedBy { it.eventDateTime }
                 applyFilters()
