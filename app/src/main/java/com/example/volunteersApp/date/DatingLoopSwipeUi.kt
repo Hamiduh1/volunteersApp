@@ -60,15 +60,22 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -154,6 +161,7 @@ internal fun DatingSwipeDeck(
     val visible = profiles.filter { it.uid !in inFlightIds }
     val top = visible.firstOrNull()
     val next = visible.getOrNull(1)
+    var topDragFraction by remember { mutableFloatStateOf(0f) }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (top == null) {
@@ -181,9 +189,9 @@ internal fun DatingSwipeDeck(
                         .fillMaxSize()
                         .padding(bottom = 76.dp)
                         .graphicsLayer {
-                            scaleX = 0.95f
-                            scaleY = 0.95f
-                            translationY = 18f
+                            scaleX = 0.95f + 0.05f * topDragFraction
+                            scaleY = 0.95f + 0.05f * topDragFraction
+                            translationY = 18f * (1f - topDragFraction)
                         }
                 )
             }
@@ -201,6 +209,7 @@ internal fun DatingSwipeDeck(
                     canUndo = canUndo,
                     onUndo = onUndo,
                     onComment = onComment?.let { comment -> { comment(top) } },
+                    onDragFraction = { topDragFraction = it },
                 )
             }
         }
@@ -221,11 +230,14 @@ private fun SwipeableTopCard(
     canUndo: Boolean = false,
     onUndo: () -> Unit = {},
     onComment: (() -> Unit)? = null,
+    onDragFraction: (Float) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
     val offsetY = remember { Animatable(0f) }
     var showSuperLikeLimit by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+    val velocityTracker = remember { VelocityTracker() }
 
     if (showSuperLikeLimit) {
         AlertDialog(
@@ -241,8 +253,15 @@ private fun SwipeableTopCard(
         val widthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
         val threshold = widthPx * 0.28f
 
+        LaunchedEffect(threshold) {
+            snapshotFlow {
+                (maxOf(kotlin.math.abs(offsetX.value), -offsetY.value) / threshold).coerceIn(0f, 1f)
+            }.collect { onDragFraction(it) }
+        }
+
         // If the action is rejected (no profile yet, network error) the card is still here: bring it back.
         fun flingOut(targetX: Float, targetY: Float, action: () -> Unit) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             scope.launch {
                 launch { offsetY.animateTo(targetY, tween(220)) }
                 offsetX.animateTo(targetX, tween(220))
@@ -271,23 +290,37 @@ private fun SwipeableTopCard(
                     .offset { IntOffset(offsetX.value.roundToInt(), offsetY.value.roundToInt()) }
                     .graphicsLayer { rotationZ = offsetX.value / 22f }
                     .pointerInput(profile.uid, allowSwipeUp, superLikesLeft) {
+                        val flickVelocity = 900.dp.toPx()
+                        // The card moves with the finger, so local positions stay put; track the drag total instead.
+                        var dragTotal = Offset.Zero
                         if (allowSwipeUp) {
                             detectDragGestures(
+                                onDragStart = {
+                                    dragTotal = Offset.Zero
+                                    velocityTracker.resetTracking()
+                                },
                                 onDragEnd = {
-                                    val swipedUp = -offsetY.value > threshold && kotlin.math.abs(offsetX.value) < threshold
+                                    val velocity = velocityTracker.calculateVelocity()
+                                    val flickRight = velocity.x > flickVelocity && offsetX.value > 0f
+                                    val flickLeft = velocity.x < -flickVelocity && offsetX.value < 0f
+                                    val flickUp = velocity.y < -flickVelocity && offsetY.value < 0f &&
+                                        kotlin.math.abs(velocity.y) > kotlin.math.abs(velocity.x)
+                                    val swipedUp = (-offsetY.value > threshold || flickUp) && kotlin.math.abs(offsetX.value) < threshold
                                     when {
                                         swipedUp && superLikesLeft > 0 -> flingOut(0f, -widthPx * 2.2f, onSuperLike)
                                         swipedUp -> {
                                             showSuperLikeLimit = true
                                             springBack()
                                         }
-                                        offsetX.value > threshold -> flingOut(widthPx * 1.6f, 0f, onLike)
-                                        offsetX.value < -threshold -> flingOut(-widthPx * 1.6f, 0f, onPass)
+                                        offsetX.value > threshold || flickRight -> flingOut(widthPx * 1.6f, 0f, onLike)
+                                        offsetX.value < -threshold || flickLeft -> flingOut(-widthPx * 1.6f, 0f, onPass)
                                         else -> springBack()
                                     }
                                 },
                                 onDragCancel = { springBack() },
                             ) { change, dragAmount ->
+                                dragTotal += dragAmount
+                                velocityTracker.addPosition(change.uptimeMillis, dragTotal)
                                 change.consume()
                                 scope.launch {
                                     offsetX.snapTo(offsetX.value + dragAmount.x)
@@ -296,15 +329,24 @@ private fun SwipeableTopCard(
                             }
                         } else {
                             detectHorizontalDragGestures(
+                                onDragStart = {
+                                    dragTotal = Offset.Zero
+                                    velocityTracker.resetTracking()
+                                },
                                 onDragEnd = {
+                                    val velocityX = velocityTracker.calculateVelocity().x
                                     when {
-                                        offsetX.value > threshold -> flingOut(widthPx * 1.6f, 0f, onLike)
-                                        offsetX.value < -threshold -> flingOut(-widthPx * 1.6f, 0f, onPass)
+                                        offsetX.value > threshold ||
+                                            (velocityX > flickVelocity && offsetX.value > 0f) -> flingOut(widthPx * 1.6f, 0f, onLike)
+                                        offsetX.value < -threshold ||
+                                            (velocityX < -flickVelocity && offsetX.value < 0f) -> flingOut(-widthPx * 1.6f, 0f, onPass)
                                         else -> scope.launch { offsetX.animateTo(0f, spring()) }
                                     }
                                 },
                                 onDragCancel = { scope.launch { offsetX.animateTo(0f, spring()) } },
                             ) { change, dragAmount ->
+                                dragTotal += Offset(dragAmount, 0f)
+                                velocityTracker.addPosition(change.uptimeMillis, dragTotal)
                                 change.consume()
                                 scope.launch { offsetX.snapTo(offsetX.value + dragAmount) }
                             }

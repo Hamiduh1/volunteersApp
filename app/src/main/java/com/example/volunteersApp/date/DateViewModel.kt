@@ -1582,7 +1582,7 @@ class DateEvaViewModel(
                 onOutcome?.invoke(DatingLikeOutcome.Sent)
                 onComplete(
                     true,
-                    if (superLike) "Super Like sent to ${profile.name}." else "Chat invitation sent to ${profile.name}."
+                    if (superLike) "Super Like sent to ${profile.name}." else "You liked ${profile.name}."
                 )
             } catch (e: Exception) {
                 Log.e("DateEvaViewModel", "Failed to send invitation.", e)

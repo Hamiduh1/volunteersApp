@@ -148,6 +148,7 @@ import com.example.volunteersApp.wallet.PlatformFeePaymentChoice
 import com.example.volunteersApp.wallet.PlatformFeePaymentSelector
 import com.example.volunteersApp.wallet.globalCountries
 import com.google.firebase.appcheck.FirebaseAppCheck
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -394,6 +395,15 @@ fun DateEvaScreen(
                     }
                 }
             )
+        }
+
+        BackHandler(enabled = uiState.route != DateHubRoute.DASHBOARD) {
+            viewModel.navigateBack()
+        }
+        LaunchedEffect(uiState.route, uiState.matchCelebration) {
+            if (uiState.route != DateHubRoute.DATING_LOOP && uiState.matchCelebration != null) {
+                viewModel.dismissMatchCelebration()
+            }
         }
 
         when (uiState.route) {
@@ -1334,6 +1344,13 @@ private fun DatingLoopScreen(
     BackHandler(enabled = uiState.datingLoopTab != DatingLoopTab.Discover) {
         onTabChange(DatingLoopTab.Discover)
     }
+    LaunchedEffect(localBanner) {
+        val banner = localBanner ?: return@LaunchedEffect
+        if (banner.tone != DateHubBannerTone.Error) {
+            delay(4_000)
+            if (localBanner == banner) localBanner = null
+        }
+    }
     // A match celebration replaces any open profile page, like iOS.
     LaunchedEffect(uiState.matchCelebration) {
         if (uiState.matchCelebration != null) selectedProfile = null
@@ -1363,7 +1380,12 @@ private fun DatingLoopScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(
+                            onClick = {
+                                if (uiState.datingLoopTab != DatingLoopTab.Discover) onTabChange(DatingLoopTab.Discover)
+                                else onBack()
+                            }
+                        ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     },
@@ -1506,6 +1528,7 @@ private fun DatingLoopScreen(
                                             openChatWith(profile.uid, profile.name, profile.resolvedImageUrls().firstOrNull().orEmpty())
                                         },
                                         matchChatId = uiState.matches.firstOrNull { it.uid == profile.uid }?.chatId,
+                                        likedYou = uiState.likesYou.any { it.senderId == profile.uid },
                                     )
                                 }
                             }
@@ -1681,6 +1704,10 @@ private fun DatingLoopScreen(
                     }
                     items(discoverableProfiles, key = { it.uid }) { profile ->
                         val isInviteInFlight = profile.uid in uiState.invitingUserIds
+                        val relationStatus = uiState.relationStatusFor(profile.uid)
+                        val messageProfile = {
+                            openChatWith(profile.uid, profile.name, profile.resolvedImageUrls().firstOrNull().orEmpty())
+                        }
                         if (uiState.browseLayout == DatingBrowseLayout.People) {
                         DatingDiscoveryCard(
                             profile = profile,
@@ -1691,7 +1718,9 @@ private fun DatingLoopScreen(
                                 onInvite(profile) { banner ->
                                     localBanner = banner
                                 }
-                            }
+                            },
+                            status = relationStatus,
+                            onMessage = messageProfile,
                         )
                         } else {
                             DatingDiscoveryQuickViewCard(
@@ -1703,7 +1732,9 @@ private fun DatingLoopScreen(
                                     onInvite(profile) { banner ->
                                         localBanner = banner
                                     }
-                                }
+                                },
+                                status = relationStatus,
+                                onMessage = messageProfile,
                             )
                         }
                     }
@@ -1730,7 +1761,7 @@ private fun DatingLoopScreen(
             filters = filters,
             showGenderFilter = uiState.lookingFor == null || uiState.lookingFor == LookingFor.EVERYONE,
             availableCountries = availableCountries,
-            visibleCount = discoverableProfiles.size,
+            visibleCount = if (uiState.browseLayout == DatingBrowseLayout.Swipe) uiState.swipeDeck.size else discoverableProfiles.size,
             onSearchQueryChange = onSearchQueryChange,
             onGenderFilterChange = onGenderFilterChange,
             onCountryFilterChange = onCountryFilterChange,
@@ -1773,7 +1804,15 @@ private fun DatingLoopScreen(
                 selectedProfile = null
                 blockTarget = profile
             },
-            onReport = { reason -> onReportUser(profile, reason) { banner -> localBanner = banner } },
+            onReport = { reason ->
+                onReportUser(profile, reason) { banner ->
+                    localBanner = banner
+                    if (banner.tone != DateHubBannerTone.Error) {
+                        selectedProfile = null
+                        blockTarget = profile
+                    }
+                }
+            },
             isReporting = profile.uid in uiState.reportingUserIds,
             matchChatId = uiState.matches.firstOrNull { it.uid == profile.uid }?.chatId,
             likedYou = uiState.likesYou.any { it.senderId == profile.uid },
@@ -2104,7 +2143,9 @@ private fun DatingDiscoveryCard(
     inviterHasProfile: Boolean,
     isInviteInFlight: Boolean,
     onOpen: () -> Unit,
-    onInvite: () -> Unit
+    onInvite: () -> Unit,
+    status: DatingRelationStatus = DatingRelationStatus.None,
+    onMessage: () -> Unit = {},
 ) {
     val photos = remember(profile.uid, profile.imageUrls) { profile.resolvedImageUrls() }
     val interactionSource = remember { MutableInteractionSource() }
@@ -2246,17 +2287,27 @@ private fun DatingDiscoveryCard(
                     Text("View", fontWeight = FontWeight.SemiBold)
                 }
                 Button(
-                    onClick = onInvite,
+                    onClick = if (status == DatingRelationStatus.Matched) onMessage else onInvite,
                     modifier = Modifier.weight(1f),
-                    enabled = inviterHasProfile && !isInviteInFlight,
+                    enabled = status == DatingRelationStatus.Matched ||
+                        (inviterHasProfile && !isInviteInFlight && status != DatingRelationStatus.Liked),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = DateA11yPalette.accentDiscover,
                         contentColor = Color.White
                     )
                 ) {
-                    Icon(Icons.Default.MailOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(
+                        if (status == DatingRelationStatus.Matched) Icons.AutoMirrored.Filled.Chat else Icons.Default.Favorite,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
                     Spacer(Modifier.width(6.dp))
-                    Text(if (isInviteInFlight) "Sending..." else "Invite", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (status == DatingRelationStatus.Matched) "Message" else datingInviteLabel(status, isInviteInFlight),
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
             if (!inviterHasProfile) {
@@ -2278,7 +2329,9 @@ private fun DatingDiscoveryQuickViewCard(
     inviterHasProfile: Boolean,
     isInviteInFlight: Boolean,
     onOpen: () -> Unit,
-    onInvite: () -> Unit
+    onInvite: () -> Unit,
+    status: DatingRelationStatus = DatingRelationStatus.None,
+    onMessage: () -> Unit = {},
 ) {
     val firstPhoto = remember(profile.uid, profile.imageUrls) {
         profile.resolvedImageUrls().firstOrNull().orEmpty()
@@ -2331,10 +2384,15 @@ private fun DatingDiscoveryQuickViewCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = onOpen) { Text("View") }
                     TextButton(
-                        onClick = onInvite,
-                        enabled = inviterHasProfile && !isInviteInFlight
+                        onClick = if (status == DatingRelationStatus.Matched) onMessage else onInvite,
+                        enabled = status == DatingRelationStatus.Matched ||
+                            (inviterHasProfile && !isInviteInFlight && status != DatingRelationStatus.Liked)
                     ) {
-                        Text(if (isInviteInFlight) "Sending..." else "Invite")
+                        Text(
+                            if (status == DatingRelationStatus.Matched) "Message" else datingInviteLabel(status, isInviteInFlight),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
@@ -2735,6 +2793,15 @@ private fun DatingProfileEditorScreen(
                             Text(if (existingProfile == null) "Save Dating Profile" else "Update Dating Profile")
                         }
                     }
+                    uiState.bannerMessage?.takeIf { it.tone == DateHubBannerTone.Error }?.let { saveError ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            saveError.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                        )
+                    }
                     if (existingProfile != null) {
                         Spacer(Modifier.height(10.dp))
                         OutlinedButton(
@@ -2912,13 +2979,13 @@ private fun BlindDateScreen(
         uiState.isLoading -> "Joining..."
         uiState.isPaymentCollectionPending -> "Payment Pending"
         uiState.isStaffExempt -> "Confirm & Join"
-        else -> "Continue to Payment ${formatCurrency(uiState.entryFeeUsd, "USD")}"
+        else -> "Continue to Payment $priceLabel"
     }
     val rejoinCtaLabel = when {
         uiState.isLoading -> "Rejoining..."
         uiState.isPaymentCollectionPending -> "Payment Pending"
         uiState.isStaffExempt -> "Rejoin Blind Date"
-        else -> "Pay ${formatCurrency(uiState.entryFeeUsd, "USD")} to Rejoin"
+        else -> "Pay $priceLabel to Rejoin"
     }
 
     LaunchedEffect(event) {
@@ -3058,8 +3125,8 @@ private fun BlindDateScreen(
                     Text(
                         when {
                             uiState.isStaffExempt -> "Staff exemption detected. Your pass is free."
-                            isRejoin -> "One pass covers one match. Get a new pass for ${formatCurrency(uiState.entryFeeUsd, "USD")} to chat with ${pairing.match.name.ifBlank { "your match" }}."
-                            else -> "Get a Blind Date pass for ${formatCurrency(uiState.entryFeeUsd, "USD")}. We use your Dating Loop photos and bio. Once you both have a pass, you can start the chat."
+                            isRejoin -> "One pass covers one match. Get a new pass for $priceLabel to chat with ${pairing.match.name.ifBlank { "your match" }}."
+                            else -> "Get a Blind Date pass for $priceLabel. We use your Dating Loop photos and bio. Once you both have a pass, you can start the chat."
                         }
                     )
                     if (!uiState.isStaffExempt) {
@@ -3081,7 +3148,8 @@ private fun BlindDateScreen(
                             payment = if (uiState.isStaffExempt) PlatformFeePaymentChoice.Stripe else passPayment,
                         )
                     },
-                    enabled = !uiState.isLoading && !uiState.isPaymentCollectionPending
+                    enabled = !uiState.isLoading && !uiState.isPaymentCollectionPending &&
+                        (uiState.isStaffExempt || uiState.isEntryFeeLoaded)
                 ) {
                     Text(if (uiState.isStaffExempt) "Get my pass" else "Confirm & Pay")
                 }
@@ -3133,6 +3201,19 @@ private fun BlindDateScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    if (!isFree && !uiState.isEntryFeeLoaded) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "Loading the current price…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = viewModel::refreshPublicFee) { Text("Retry") }
+                        }
+                    }
                     if (!isFree) {
                         PlatformFeePaymentSelector(
                             kind = if (isRejoin) PlatformFeeKind.BLIND_DATE_REJOIN else PlatformFeeKind.BLIND_DATE_JOIN,
@@ -3181,13 +3262,33 @@ private fun BlindDateScreen(
     }
 
     poolDetail?.let { profile ->
+        val incomingInvite = uiState.receivedInvitations.firstOrNull { it.senderId == profile.userId }
+        val alreadyInvited = uiState.sentInvitations.any {
+            it.recipientId == profile.userId &&
+                it.status.trim().ifBlank { "pending" }.equals("pending", ignoreCase = true)
+        }
         BlindDateProfileDetailDialog(
             profile = profile,
             onDismiss = { poolDetail = null },
             onInvite = {
                 poolDetail = null
+                if (incomingInvite != null) viewModel.acceptInvitation(incomingInvite)
+                else
                 viewModel.sendInvitation(profile.userId)
-            }
+            },
+            inviteLabel = when {
+                incomingInvite != null -> "Accept"
+                alreadyInvited -> "Invited"
+                else -> "Invite to chat"
+            },
+            inviteEnabled = !uiState.isLoading && (incomingInvite != null || !alreadyInvited) &&
+                profile.userId !in uiState.pendingInviteRecipientIds,
+            onDecline = incomingInvite?.let { invite ->
+                {
+                    poolDetail = null
+                    viewModel.declineInvitation(invite)
+                }
+            },
         )
     }
 
@@ -3270,7 +3371,10 @@ private fun BlindDateScreen(
                         priceLabel = priceLabel,
                         unlockLabel = if (uiState.isStaffExempt || (uiState.isEntryFeeLoaded && uiState.entryFeeUsd <= 0.0)) "Unlock"
                             else "Unlock \u00B7 $priceLabel",
-                        onGetPass = { if (!uiState.isPaymentCollectionPending) showPassPaywall = true },
+                        onGetPass = {
+                            if (!uiState.isEntryFeeLoaded) viewModel.refreshPublicFee()
+                            if (!uiState.isPaymentCollectionPending) showPassPaywall = true
+                        },
                         onCheckPayment = viewModel::refreshOverview,
                         onOpenMatchedChat = openMatchedChat,
                         onUseCustomPhotos = {
@@ -3335,8 +3439,8 @@ private fun BlindDateScreen(
                         datingState = datingState,
                         blindState = uiState,
                         focusPartnerId = focusPartnerId,
-                        unlockLabel = if (uiState.isStaffExempt || uiState.entryFeeUsd <= 0.0) "Unlock"
-                            else "Unlock \u00B7 ${formatCurrency(uiState.entryFeeUsd, "USD")}",
+                        unlockLabel = if (uiState.isStaffExempt || (uiState.isEntryFeeLoaded && uiState.entryFeeUsd <= 0.0)) "Unlock"
+                            else "Unlock \u00B7 $priceLabel",
                         onPairAction = { pairing ->
                             viewModel.startPairChat(pairing.match.uid, pairing.match.name, pairing.match.chatId)
                         },
@@ -3394,7 +3498,8 @@ private fun BlindDateScreen(
                                 isPaymentPending = uiState.isPaymentCollectionPending,
                                 paymentDetail = uiState.paymentCollectionDetail,
                                 ctaLabel = joinCtaLabel,
-                                canSubmit = providerCheckoutReady && !uiState.isLoading && !uiState.isPaymentCollectionPending,
+                                canSubmit = providerCheckoutReady && !uiState.isLoading && !uiState.isPaymentCollectionPending &&
+                                    (uiState.isStaffExempt || uiState.isEntryFeeLoaded),
                                 onBack = { joinStep = BlindDateJoinStep.DETAILS },
                                 onSubmit = { showJoinConfirm = true }
                             )
@@ -3416,7 +3521,8 @@ private fun BlindDateScreen(
                             rawFee = uiState.entryFeeUsd,
                             isProviderCollectionAvailable = providerCheckoutReady,
                             ctaLabel = rejoinCtaLabel,
-                            canRejoin = providerCheckoutReady && !uiState.isLoading && !uiState.isPaymentCollectionPending,
+                            canRejoin = providerCheckoutReady && !uiState.isLoading && !uiState.isPaymentCollectionPending &&
+                                (uiState.isStaffExempt || uiState.isEntryFeeLoaded),
                             onOpenChat = {
                                 val chatId = uiState.matchedChatId
                                 val otherUserId = uiState.matchedOtherUserId
@@ -4069,7 +4175,10 @@ private fun BlindDateProfileCard(
 private fun BlindDateProfileDetailDialog(
     profile: BlindDateProfile,
     onDismiss: () -> Unit,
-    onInvite: () -> Unit
+    onInvite: () -> Unit,
+    inviteLabel: String = "Invite",
+    inviteEnabled: Boolean = true,
+    onDecline: (() -> Unit)? = null,
 ) {
     val mediaItems = remember(profile.media, profile.mediaUrls) {
         profile.media.ifEmpty { profile.mediaUrls }
@@ -4101,9 +4210,12 @@ private fun BlindDateProfileDetailDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onInvite) { Text("Invite") }
+            Button(onClick = onInvite, enabled = inviteEnabled) { Text(inviteLabel) }
         },
         dismissButton = {
+            if (onDecline != null) {
+                TextButton(onClick = onDecline) { Text("Decline") }
+            } else
             TextButton(onClick = onDismiss) { Text("Close") }
         }
     )

@@ -551,6 +551,7 @@ internal fun DatingPeopleRow(
     onInvite: () -> Unit,
     onMessage: () -> Unit,
     matchChatId: String? = null,
+    likedYou: Boolean = false,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -615,7 +616,10 @@ internal fun DatingPeopleRow(
                     enabled = canInvite && !inFlight && status != DatingRelationStatus.Liked,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(datingInviteLabel(status, inFlight))
+                    Text(
+                        if (!inFlight && status == DatingRelationStatus.None && (likedYou || superLikedYou)) "Like back"
+                        else datingInviteLabel(status, inFlight)
+                    )
                 }
             }
         }

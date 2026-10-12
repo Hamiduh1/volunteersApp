@@ -4,6 +4,8 @@ import android.text.format.DateUtils
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -650,7 +652,9 @@ private fun BlindDateHeroCard(
 ) {
     val isFree = blindState.isStaffExempt || (blindState.isEntryFeeLoaded && blindState.entryFeeUsd <= 0.0)
     val passBusy = blindState.isLoading || blindState.isPaymentCollectionPending
-    val (pillLabel, pillColor) = statusPill(blindState.status)
+    val (pillLabel, pillColor) = statusPill(
+        if (blindState.isPaymentCollectionPending) BlindDateUserStatus.AwaitingPayment else blindState.status
+    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -772,6 +776,13 @@ private fun BlindDateHeroCard(
                             onClick = onOpenMatchedChat
                         )
                     }
+                    if (blindState.isPaymentCollectionPending) {
+                        HeroSecondaryButton(
+                            label = "Check payment status",
+                            icon = Icons.Default.Refresh,
+                            onClick = onCheckPayment
+                        )
+                    } else
                     HeroSecondaryButton(
                         label = if (isFree) "Meet someone new" else "Meet someone new \u00B7 $priceLabel",
                         icon = Icons.Default.Autorenew,
@@ -915,7 +926,10 @@ private fun PoolFilters(
             singleLine = true,
             shape = RoundedCornerShape(999.dp)
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             listOf(null to "Everyone", Gender.FEMALE to "Women", Gender.MALE to "Men", Gender.OTHER to "Other").forEach { (value, label) ->
                 FilterChip(
                     selected = gender == value,

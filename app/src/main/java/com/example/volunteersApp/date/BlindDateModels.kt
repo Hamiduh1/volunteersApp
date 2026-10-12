@@ -49,6 +49,7 @@ sealed class BlindDatePairStage(val sortRank: Int) {
 fun BlindDateUiState.pairStage(uid: String, datingLoopChatId: String?): BlindDatePairStage {
     chatIdsByPartner[uid]?.let { return BlindDatePairStage.ChatReady(it) }
     datingLoopChatId?.takeIf { it.isNotBlank() }?.let { return BlindDatePairStage.ChatReady(it) }
+    if (isPaymentCollectionPending && status != BlindDateUserStatus.Active) return BlindDatePairStage.MyPaymentProcessing
     when (status) {
         BlindDateUserStatus.Active -> Unit
         BlindDateUserStatus.AwaitingPayment -> return BlindDatePairStage.MyPaymentProcessing
