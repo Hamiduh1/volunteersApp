@@ -12,8 +12,8 @@ compatible. All new fields are optional; profiles without them keep working on b
 | --- | --- | --- |
 | `age` | int | Derived from the private birthdate (section 2). 18–120 enforced by rules. Never store `birthDate` here. |
 | `relationshipGoal` | string | One of `LONG_TERM`, `LONG_TERM_OPEN_TO_SHORT`, `SHORT_TERM_OPEN_TO_LONG`, `SHORT_TERM`, `NEW_FRIENDS`, `FIGURING_OUT`. Parse case-insensitively; ignore unknown values. |
-| `interests` | list of strings | iOS caps at 5 (rules allow 10). Free text, picked from a fixed catalog on iOS. |
-| `prompts` | list of maps `{question, answer}` | iOS caps at 3 (rules allow 5), answers ≤ 150 chars. Skip entries with an empty answer. |
+| `interests` | list of strings | iOS caps at 5 (rules allow 10). Picked from the fixed catalog in section 4. |
+| `prompts` | list of maps `{question, answer}` | iOS caps at 3 (rules allow 5), answers ≤ 150 chars. `question` is one of the catalog questions (section 4). Skip entries with an empty answer. |
 | `jobTitle` | string | ≤ 60 chars on iOS (rules allow 80). |
 | `school` | string | ≤ 60 chars on iOS (rules allow 80). |
 | `updatedAt` | timestamp | Written on every save. |
@@ -62,3 +62,16 @@ A "like" is still the existing Dating Loop chat invitation:
   sides and a matches strip with "Send a message".
 - **Likes You** = pending Dating Loop invitations received by the user, excluding passed/blocked/already matched
   people, Super Likes first.
+
+## 4) Catalog: interests, prompt questions and relationship goals
+
+Android must use exactly the same strings as iOS; they are compared as plain text (shared interests, prompt questions).
+
+- Kotlin: `app/src/main/java/com/example/volunteersApp/date/DatingProfileCatalog.kt` (`DatingRelationshipGoal`,
+  `DatingProfileCatalog.INTERESTS`, `DatingProfileCatalog.PROMPT_QUESTIONS`, limits).
+- iOS source of truth: `VolunteersAppiOS/Features/Shared/Date/DatingProfileCatalog.swift`.
+- Readable list: [`docs/DATING_LOOP_CATALOG.md`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/main/docs/DATING_LOOP_CATALOG.md)
+  and JSON: [`docs/dating_loop_catalog.json`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/main/docs/dating_loop_catalog.json)
+  in the iOS repo.
+
+If either platform adds or renames an entry, update all three in the same change.
