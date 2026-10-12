@@ -142,6 +142,25 @@ Accepting the invite creates the chat and sets both profiles to `matched`, which
 - iOS listens to `blindDateProfiles/{me}` and both Blind Date invitation inboxes so payments and partner actions show up
   live.
 
+### iOS reference code
+
+These links are pinned to VolunteersAppiOS commit `249bab1`, so they keep showing this version.
+
+| What | iOS file |
+| --- | --- |
+| Blind Date screen and paywall sheet | [`BlindDateHomeView.swift`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/BlindDateHomeView.swift) |
+| Per-match state (table above) | [`DateHubViewModel.blindPairStage`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DateHubViewModel.swift#L170), [`BlindDatePairStage`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DatingLoopInviteState.swift) |
+| Pay (join vs rejoin), start or accept a chat | [`payForBlindDate`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DateHubViewModel.swift#L1020), [`startBlindDateChat`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DateHubViewModel.swift#L1116) |
+| Mutual like without a chat | [`acceptMutualDatingLike`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DateHubViewModel.swift#L472), [`DateRepository.acceptDatingLoopLike`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/DateRepository.swift#L561) |
+| Social Inbox accept without a chat | [`ChatRepository.isDatingLoopInvitation`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/ChatRepository.swift#L1807) and its use in `acceptInvitation` |
+| Comments: send, observe, dismiss | [`DateRepository.sendDatingComment`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/DateRepository.swift#L495), [`observeReceivedDatingComments`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/DateRepository.swift#L525), [`DateHubViewModel.sendDatingComment`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DateHubViewModel.swift#L1148) |
+| Comment composer and comment card | [`DatingCommentViews.swift`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DatingCommentViews.swift) |
+| Comment button on the swipe deck and profile | [`DatingSwipeDeckView.swift`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DatingSwipeDeckView.swift), [`DatingMemberProfileView.swift`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DatingMemberProfileView.swift) |
+| Match screen "Chat on Blind Date" | [`DatingMatchViews.swift`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DatingMatchViews.swift) |
+| Payment requests and mobile money options | [`joinBlindDate`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/DateRepository.swift#L695), [`rejoinBlindDate`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/DateRepository.swift#L733), [`fetchBlindDatePaymentPreview`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/DateRepository.swift#L627) |
+| Overview, live listeners, partner statuses | [`fetchBlindDateOverview`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/DateRepository.swift#L356), [`observeBlindDateChanges`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/DateRepository.swift#L459), [`fetchBlindDateStatuses`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Core/Repositories/DateRepository.swift#L480) |
+| Limits (comment length 300) and catalog | [`DatingProfileCatalog.swift`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/VolunteersAppiOS/Features/Shared/Date/DatingProfileCatalog.swift), [`DATING_LOOP_CATALOG.md`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/docs/DATING_LOOP_CATALOG.md), [`dating_loop_catalog.json`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/249bab1/docs/dating_loop_catalog.json) |
+
 ### Server changes in this commit (not deployed yet)
 
 - `acceptBlindDateInvitation` also writes `matchedChatId`, `matchedPartnerId`, `matchedAt`, and `updatedAt` on both
