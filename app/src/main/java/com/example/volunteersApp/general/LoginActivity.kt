@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import com.example.volunteersApp.streams.LiveLaunchIntent
 import com.example.volunteersApp.streams.LiveLaunchTarget
 import com.example.volunteersApp.streams.LiveShareRouter
+import com.example.volunteersApp.ui.main.DateHubNav
 import com.example.volunteersApp.ui.main.MainActivity
 import com.example.volunteersApp.ui.theme.VolunteersAppTheme
 import kotlinx.coroutines.launch
@@ -208,8 +209,15 @@ class LoginActivity : ComponentActivity() {
             return
         }
 
+        // Background notification taps land on this launcher with the FCM data as extras.
+        val pushType = this.intent?.getStringExtra("type")
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            if (DateHubNav.isDatingPushType(pushType)) {
+                putExtra("type", pushType)
+                this@LoginActivity.intent?.getStringExtra("actorId")?.let { putExtra("actorId", it) }
+                this@LoginActivity.intent?.getStringExtra("referenceId")?.let { putExtra("referenceId", it) }
+            }
         }
         startActivity(intent)
         finish()

@@ -22,6 +22,7 @@ import com.example.volunteersApp.firebase.CallableFunction
 import com.example.volunteersApp.firebase.FunctionsClient
 import com.example.volunteersApp.firebase.FirestoreCollection
 import com.example.volunteersApp.firebase.FirestoreSubcollection
+import com.example.volunteersApp.date.isDatingLoopInvitationContext
 
 /**
  * Represents a single chat invitation.
@@ -311,6 +312,11 @@ class InvitationsViewModel : ViewModel() {
                 return@launch
             }
 
+            if (invitation.source != "legacy_chat" && isDatingLoopInvitationContext(invitation.context)) {
+                acceptDatingLoopInvitation(currentUserId, otherUserId, invitation, invitationDocId)
+                return@launch
+            }
+
             try {
                 val existingChatId = resolveLinkedChatId(
                     currentUserId = currentUserId,
@@ -359,6 +365,37 @@ class InvitationsViewModel : ViewModel() {
                 }
                 _events.value = InvitationEvent.ShowToast(msg)
             }
+        }
+    }
+
+    /**
+     * Dating Loop likes are a match, not a free chat: chatting happens on (paid) Blind Date.
+     * Only reopen a chat that already exists between the two.
+     */
+    private suspend fun acceptDatingLoopInvitation(
+        currentUserId: String,
+        otherUserId: String,
+        invitation: Invitation,
+        invitationDocId: String,
+    ) {
+        try {
+            markInvitationAccepted(currentUserId, invitation, invitationDocId)
+            val existingChatId = runCatching {
+                resolveLinkedChatId(currentUserId, otherUserId, invitation)
+            }.getOrNull()
+            _statusMessage.value = "It's a match!"
+            _events.value = if (existingChatId != null) {
+                InvitationEvent.NavigateToChat(
+                    chatId = existingChatId,
+                    otherUserId = otherUserId,
+                    successMessage = "It's a match!"
+                )
+            } else {
+                InvitationEvent.ShowToast("It's a match! Open Date Hub > Blind Date to chat.")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error accepting Dating Loop like", e)
+            _events.value = InvitationEvent.ShowToast("Failed to accept invitation.")
         }
     }
 

@@ -36,6 +36,9 @@ class OrganizerMainActivity : ComponentActivity() {
         if (DateHubNav.shouldOpenBlindDateFromIntent(intent)) {
             viewModel.offerComposeNavigation("date_eva")
             viewModel.offerPendingBlindDateDeepLink()
+        } else if (DateHubNav.shouldOpenDatingLoopFromIntent(intent)) {
+            viewModel.offerComposeNavigation("date_eva")
+            viewModel.offerPendingDatingLoopDeepLink()
         }
     }
 

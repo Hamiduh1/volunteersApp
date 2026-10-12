@@ -224,6 +224,7 @@ class MainViewModel : ViewModel() {
         auth.signOut()
         clearPendingComposeNavigation()
         clearPendingBlindDateDeepLink()
+        clearPendingDatingLoopDeepLink()
         _uiState.update { it.copy(isLoggedIn = false, isLoading = false) }
     }
 
@@ -248,6 +249,18 @@ class MainViewModel : ViewModel() {
 
     fun clearPendingBlindDateDeepLink() {
         _pendingBlindDateDeepLink.value = false
+    }
+
+    /** Dating Loop push taps (likes, matches, comments) open Date Hub on the Dating Loop. */
+    private val _pendingDatingLoopDeepLink = MutableStateFlow(false)
+    val pendingDatingLoopDeepLink = _pendingDatingLoopDeepLink.asStateFlow()
+
+    fun offerPendingDatingLoopDeepLink() {
+        _pendingDatingLoopDeepLink.value = true
+    }
+
+    fun clearPendingDatingLoopDeepLink() {
+        _pendingDatingLoopDeepLink.value = false
     }
 
     private fun publishPresence(state: String) {

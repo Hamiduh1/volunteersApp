@@ -64,6 +64,19 @@ A "like" is still the existing Dating Loop chat invitation:
 - **Likes You** = pending Dating Loop invitations received by the user, excluding passed/blocked/already matched
   people, Super Likes first.
 
+## 4) Catalog: interests, prompt questions and relationship goals
+
+Android must use exactly the same strings as iOS; they are compared as plain text (shared interests, prompt questions).
+
+- Kotlin: `app/src/main/java/com/example/volunteersApp/date/DatingProfileCatalog.kt` (`DatingRelationshipGoal`,
+  `DatingProfileCatalog.INTERESTS`, `DatingProfileCatalog.PROMPT_QUESTIONS`, limits).
+- iOS source of truth: `VolunteersAppiOS/Features/Shared/Date/DatingProfileCatalog.swift`.
+- Readable list: [`docs/DATING_LOOP_CATALOG.md`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/main/docs/DATING_LOOP_CATALOG.md)
+  and JSON: [`docs/dating_loop_catalog.json`](https://github.com/Hamiduh1/VolunteersAppiOS/blob/main/docs/dating_loop_catalog.json)
+  in the iOS repo.
+
+If either platform adds or renames an entry, update all three in the same change.
+
 ## 5) Blind Date is the paid chat for Dating Loop matches
 
 Section 4 (shared catalog) lives on branch `feature/dating-loop-ios-parity`.

@@ -88,6 +88,8 @@ object FirestoreSubcollection {
     const val BLOCKED_USERS = "blocked_users"
     /** Android jokes “saved” list; not declared on iOS starter contract — keep path stable. */
     const val SAVED_JOKES = "saved_jokes"
+    /** Server-written in-app notification rows at `users/{uid}/notifications` (owner may only flip `read`). */
+    const val USER_NOTIFICATIONS = "notifications"
 }
 
 object FirestoreCollectionGroup {
@@ -108,6 +110,7 @@ object CallableFunction {
     const val DECLINE_BLIND_DATE_INVITATION = "declineBlindDateInvitation"
     const val REJOIN_BLIND_DATE = "rejoinBlindDate"
     const val GET_PLATFORM_FEE_MOBILE_MONEY_OPTIONS = "getPlatformFeeMobileMoneyOptions"
+    const val GET_PUBLIC_COMMERCE_FEE_SETTINGS = "getPublicCommerceFeeSettings"
     const val GET_SECURE_EXCHANGE_RATE = "getSecureExchangeRate"
     const val CREATE_BENEFICIARY_VERIFICATION = "createBeneficiaryVerification"
     const val APPLY_APPROVED_BENEFICIARY_VERIFICATION = "applyApprovedBeneficiaryVerification"

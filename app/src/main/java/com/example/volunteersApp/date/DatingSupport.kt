@@ -3,7 +3,9 @@ package com.example.volunteersApp.date
 import java.util.Locale
 
 enum class DatingBrowseLayout(val label: String) {
-    People("Cards"),
+    Swipe("Swipe"),
+    People("People"),
+    Photos("Photos"),
     Discover("Quick view"),
 }
 
@@ -12,7 +14,41 @@ data class DatingLoopFilters(
     val genderFilter: Gender? = null,
     val countryFilter: String? = null,
     val hasPhotosOnly: Boolean = false,
-)
+    val minAge: Int = DATING_FILTER_MIN_AGE,
+    val maxAge: Int = DATING_FILTER_MAX_AGE,
+) {
+    val hasAgeRange: Boolean get() = minAge > DATING_FILTER_MIN_AGE || maxAge < DATING_FILTER_MAX_AGE
+
+    val activeCount: Int
+        get() = listOf(
+            searchQuery.isNotBlank(),
+            genderFilter != null,
+            !countryFilter.isNullOrBlank(),
+            hasPhotosOnly,
+            hasAgeRange,
+        ).count { it }
+}
+
+data class DatingCompletenessStep(val label: String, val done: Boolean)
+
+/** iOS 8-step meter: the 4 Blind Date basics plus birthday, goal, an interest and an answered prompt. */
+fun datingProfileCompletenessSteps(profile: DatingProfile?, hasBirthDate: Boolean = profile?.age != null): List<DatingCompletenessStep> =
+    listOf(
+        DatingCompletenessStep("Display name", profile?.name?.isNotBlank() == true),
+        DatingCompletenessStep("Bio ($DATING_BIO_MIN_LENGTH+ characters)", (profile?.bio?.trim()?.length ?: 0) >= DATING_BIO_MIN_LENGTH),
+        DatingCompletenessStep("Country", profile?.country?.isNotBlank() == true),
+        DatingCompletenessStep("At least 2 photos", (profile?.resolvedImageUrls()?.size ?: 0) >= 2),
+        DatingCompletenessStep("Birthday", hasBirthDate),
+        DatingCompletenessStep("Relationship goal", DatingRelationshipGoal.fromRaw(profile?.relationshipGoal) != null),
+        DatingCompletenessStep("At least 1 interest", profile?.interests?.isNotEmpty() == true),
+        DatingCompletenessStep("At least 1 answered prompt", profile?.visiblePrompts()?.isNotEmpty() == true),
+    )
+
+fun datingProfileRichCompletenessPercent(profile: DatingProfile?, hasBirthDate: Boolean = profile?.age != null): Int {
+    if (profile == null) return 0
+    val steps = datingProfileCompletenessSteps(profile, hasBirthDate)
+    return steps.count { it.done } * 100 / steps.size
+}
 
 const val DATING_LOOP_MAX_PHOTOS = 6
 const val BLIND_DATE_MAX_MEDIA = 12
@@ -84,6 +120,11 @@ fun applyDatingLoopFilters(
         }
         .filter { profile ->
             !filters.hasPhotosOnly || profile.resolvedImageUrls().isNotEmpty()
+        }
+        .filter { profile ->
+            // Profiles without a shared age only drop out once the user narrows the range.
+            val age = profile.age
+            !filters.hasAgeRange || (age != null && age in filters.minAge..filters.maxAge)
         }
         .toList()
 }

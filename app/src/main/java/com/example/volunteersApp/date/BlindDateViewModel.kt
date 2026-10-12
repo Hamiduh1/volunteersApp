@@ -65,11 +65,119 @@ class BlindDateViewModel : ViewModel() {
 
     init {
         listenForFeeSettings()
+        refreshPublicFee()
         listenForSystemConfig()
         refreshBlockedUsers()
         checkUserStatus()
         listenForInvitations()
         listenForSentInvitations()
+        listenForMyBlindProfileChanges()
+    }
+
+    private var lastSeenBlindProfileKey: String? = null
+
+    /** Payments settle and partners accept from another device, so re-check my pass whenever my doc changes. */
+    private fun listenForMyBlindProfileChanges() {
+        val uid = currentUserId ?: return
+        val registration = db.collection(FirestoreCollection.BLIND_DATE_PROFILES).document(uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("BlindDateVM", "My blind date profile listen failed.", error)
+                    return@addSnapshotListener
+                }
+                val key = listOf(
+                    snapshot?.exists()?.toString(),
+                    snapshot?.getString("status"),
+                    snapshot?.getString("paymentStatus"),
+                    snapshot?.getString("paymentCollectionStatus"),
+                    snapshot?.getString("matchedChatId"),
+                ).joinToString("|")
+                val previous = lastSeenBlindProfileKey
+                lastSeenBlindProfileKey = key
+                if (previous != null && previous != key) checkUserStatus()
+            }
+        listenerRegistrations += registration
+    }
+
+    /** Partner passes decide whether a Dating Loop match can start a Blind Date chat. */
+    fun refreshPartnerStatuses(partnerIds: Collection<String>) {
+        val ids = partnerIds.filter { it.isNotBlank() && it != currentUserId }.distinct()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val statuses = mutableMapOf<String, BlindDateUserStatus>()
+            ids.chunked(10).forEach { chunk ->
+                runCatching {
+                    db.collection(FirestoreCollection.BLIND_DATE_PROFILES)
+                        .whereIn(FieldPath.documentId(), chunk)
+                        .get()
+                        .await()
+                }.onSuccess { snapshot ->
+                    snapshot.documents.forEach { doc ->
+                        statuses[doc.id] = normalizeBlindDateBackendStatus(doc.getString("status"))
+                    }
+                }.onFailure { Log.w("BlindDateVM", "Partner Blind Date status lookup failed.", it) }
+            }
+            ids.forEach { id -> if (id !in statuses) statuses[id] = BlindDateUserStatus.NotJoined }
+            _uiState.update { it.copy(partnerBlindStatuses = it.partnerBlindStatuses + statuses) }
+        }
+    }
+
+    /**
+     * One pass covers one match: members whose last pass was used rejoin, everyone else joins
+     * with their Dating Loop photos and bio so they don't have to fill the Blind Date form again.
+     */
+    fun payForMatchPass(datingProfile: DatingProfile?, payment: PlatformFeePaymentChoice) {
+        if (_uiState.value.status == BlindDateUserStatus.Matched) {
+            rejoinLoop(payment)
+            return
+        }
+        val profile = datingProfile
+        val gender = profile?.let { Gender.fromRaw(it.gender) }
+        val lookingFor = profile?.let { LookingFor.fromRaw(it.lookingFor) }
+        val photos = profile?.resolvedImageUrls().orEmpty().take(BLIND_DATE_MAX_MEDIA)
+        val message = when {
+            profile == null || gender == null || lookingFor == null -> "Finish your dating profile first."
+            photos.isEmpty() -> "Add at least one photo to your dating profile first."
+            profile.bio.isBlank() -> "Add a short bio to your dating profile first."
+            else -> null
+        }
+        if (message != null || profile == null || gender == null || lookingFor == null) {
+            _events.value = BlindDateEvent.ShowToast(message ?: "Finish your dating profile first.", DateHubBannerTone.Error)
+            return
+        }
+        startProviderCollectionAndJoin(
+            mediaUris = emptyList(),
+            bio = profile.bio.trim(),
+            gender = gender,
+            lookingFor = lookingFor,
+            payment = payment,
+            existingMediaUrls = photos,
+        )
+    }
+
+    /** Opens the chat if it exists, accepts their Blind Date invite, or invites them. */
+    fun startPairChat(uid: String, name: String, datingLoopChatId: String?) {
+        val state = _uiState.value
+        if (uid in state.startingChatIds) return
+        when (val stage = state.pairStage(uid, datingLoopChatId)) {
+            is BlindDatePairStage.ChatReady -> {
+                _events.value = BlindDateEvent.NavigateToChat(stage.chatId, uid)
+            }
+            BlindDatePairStage.PartnerInvitedYou -> {
+                state.receivedInvitations.firstOrNull { it.senderId == uid }?.let(::acceptInvitation)
+            }
+            BlindDatePairStage.ReadyToStart -> {
+                sendInvitation(uid) {
+                    _events.value = BlindDateEvent.ShowToast(
+                        "Chat request sent. ${name.ifBlank { "Your match" }} opens it from Blind Date."
+                    )
+                }
+            }
+            BlindDatePairStage.InvitedPartner,
+            BlindDatePairStage.WaitingForPartnerPass,
+            BlindDatePairStage.MyPaymentProcessing,
+            BlindDatePairStage.NeedsMyPass -> Unit
+        }
     }
 
     fun refreshBlockedUsers() {
@@ -114,6 +222,7 @@ class BlindDateViewModel : ViewModel() {
         gender: Gender,
         lookingFor: LookingFor,
         payment: PlatformFeePaymentChoice = PlatformFeePaymentChoice.Stripe,
+        existingMediaUrls: List<String> = emptyList(),
     ) {
         if (currentUserId == null) {
             viewModelScope.launch { _events.value = BlindDateEvent.ShowToast("You must be logged in.", DateHubBannerTone.Error) }
@@ -123,11 +232,11 @@ class BlindDateViewModel : ViewModel() {
             viewModelScope.launch { _events.value = BlindDateEvent.ShowToast("Blind Date is currently disabled.", DateHubBannerTone.Error) }
             return
         }
-        if (mediaUris.isEmpty()) {
+        if (mediaUris.isEmpty() && existingMediaUrls.isEmpty()) {
             viewModelScope.launch { _events.value = BlindDateEvent.ShowToast("Add at least one photo or video.", DateHubBannerTone.Error) }
             return
         }
-        if (mediaUris.size > BLIND_DATE_MAX_MEDIA) {
+        if (mediaUris.size + existingMediaUrls.size > BLIND_DATE_MAX_MEDIA) {
             viewModelScope.launch {
                 _events.value = BlindDateEvent.ShowToast("You can attach up to $BLIND_DATE_MAX_MEDIA files.", DateHubBannerTone.Error)
             }
@@ -138,7 +247,7 @@ class BlindDateViewModel : ViewModel() {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
             try {
-                val uploadedMediaUrls = mutableListOf<String>()
+                val uploadedMediaUrls = existingMediaUrls.toMutableList()
                 for (uri in mediaUris) {
                     val fileName = StorageFolder.blindDateMedia(
                         currentUserId,
@@ -222,9 +331,21 @@ class BlindDateViewModel : ViewModel() {
                 val fee = snapshot?.getDouble("blindDateFeeUsd")
                     ?: snapshot?.getDouble("blindDateFee")
                     ?: _uiState.value.entryFeeUsd
-                _uiState.update { it.copy(entryFeeUsd = fee) }
+                _uiState.update { it.copy(entryFeeUsd = fee, isEntryFeeLoaded = snapshot?.exists() == true || it.isEntryFeeLoaded) }
             }
         listenerRegistrations += registration
+    }
+
+    /** Only admins can read fee_settings directly; everyone else gets the customer price from this callable. */
+    fun refreshPublicFee() {
+        viewModelScope.launch {
+            val fee = runCatching {
+                FunctionsClient.callMap(CallableFunction.GET_PUBLIC_COMMERCE_FEE_SETTINGS)
+            }.onFailure {
+                Log.w("BlindDateVM", "Failed to load the public Blind Date fee.", it)
+            }.getOrNull()?.get("blindDateFeeUsd") as? Number ?: return@launch
+            _uiState.update { it.copy(entryFeeUsd = fee.toDouble().coerceAtLeast(0.0), isEntryFeeLoaded = true) }
+        }
     }
 
     private fun checkUserStatus() {
@@ -418,7 +539,7 @@ class BlindDateViewModel : ViewModel() {
         val uid = currentUserId ?: return null
         val doc = db.collection(FirestoreCollection.DATING_PROFILES).document(uid).get().await()
         if (!doc.exists()) return null
-        val parsed = doc.toObject(DatingProfile::class.java) ?: return null
+        val parsed = doc.toDatingProfileOrNull() ?: return null
         return parsed.copy(uid = uid, phone = "")
     }
 
@@ -599,11 +720,24 @@ class BlindDateViewModel : ViewModel() {
             else -> match.senderName.ifBlank { "Your match" }
         }
 
+        val chatIdsByPartner = history
+            .filter {
+                val status = normalizeInvitationStatus(it.status)
+                it.matchedChatId.isNotBlank() && (status == "matched" || status == "accepted")
+            }
+            .sortedBy { it.updatedAt ?: it.respondedAt ?: it.sentAt ?: Date(0) }
+            .mapNotNull { invitation ->
+                val partnerId = if (invitation.senderId == currentUserId) invitation.recipientId else invitation.senderId
+                partnerId.takeIf { it.isNotBlank() }?.let { it to invitation.matchedChatId }
+            }
+            .toMap()
+
         _uiState.update {
             it.copy(
                 matchedChatId = match?.matchedChatId?.takeIf(String::isNotBlank),
                 matchedOtherUserId = otherUserId,
-                matchedOtherUserName = otherUserName
+                matchedOtherUserName = otherUserName,
+                chatIdsByPartner = chatIdsByPartner,
             )
         }
     }
@@ -644,6 +778,7 @@ class BlindDateViewModel : ViewModel() {
                         matchedChatId = chatId,
                         matchedOtherUserId = resolvedOtherUserId,
                         matchedOtherUserName = invitation.senderName.ifBlank { "Your match" },
+                        chatIdsByPartner = it.chatIdsByPartner + (resolvedOtherUserId to chatId),
                         error = null
                     )
                 }
@@ -675,7 +810,7 @@ class BlindDateViewModel : ViewModel() {
         }
     }
 
-    fun sendInvitation(recipientId: String) {
+    fun sendInvitation(recipientId: String, onSent: (() -> Unit)? = null) {
         if (currentUserId == null) {
             viewModelScope.launch {
                 _events.value = BlindDateEvent.ShowToast("You must be logged in to send invitations.", DateHubBannerTone.Error)
@@ -760,6 +895,7 @@ class BlindDateViewModel : ViewModel() {
                 }.await()
 
                 _events.value = BlindDateEvent.ShowToast("Invitation sent. Waiting for their response.")
+                onSent?.invoke()
             } catch (e: Exception) {
                 Log.e("BlindDateVM", "Failed to send invitation.", e)
                 _uiState.update { it.copy(error = "Failed to send invitation.") }

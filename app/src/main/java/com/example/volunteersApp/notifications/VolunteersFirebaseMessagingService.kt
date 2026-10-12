@@ -10,6 +10,8 @@ import com.google.firebase.messaging.RemoteMessage
 
 import com.example.volunteersApp.ui.main.SocialInboxNav
 
+import com.example.volunteersApp.ui.main.DateHubNav
+
 import com.example.volunteersApp.ui.main.MainActivity
 
 import android.app.NotificationChannel
@@ -67,6 +69,8 @@ class VolunteersFirebaseMessagingService : FirebaseMessagingService() {
             "jokesPost" -> showMindLoomPostNotification(data, message)
 
             "afriex_transaction", "wallet_transfer" -> showWalletTransferNotification(data, message)
+
+            else -> if (DateHubNav.isDatingPushType(data["type"])) showDatingActivityNotification(data, message)
 
         }
 
@@ -322,6 +326,54 @@ class VolunteersFirebaseMessagingService : FirebaseMessagingService() {
             .build()
 
         notificationManager.notify(("wallet_" + (payoutRequestId ?: transactionId ?: "history")).hashCode(), notification)
+    }
+
+    private fun showDatingActivityNotification(data: Map<String, String>, message: RemoteMessage) {
+        val type = data["type"]?.trim().orEmpty()
+        val actorId = data["actorId"]?.trim().orEmpty()
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra("type", type)
+            if (actorId.isNotBlank()) putExtra("actorId", actorId)
+            data["referenceId"]?.trim()?.takeIf { it.isNotBlank() }?.let { putExtra("referenceId", it) }
+            if (DateHubNav.BLIND_DATE_PUSH_TYPES.contains(type)) {
+                putExtra(DateHubNav.EXTRA_OPEN_BLIND_DATE, true)
+            } else {
+                putExtra(DateHubNav.EXTRA_OPEN_DATING_LOOP, true)
+            }
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val notificationKey = "${type}_$actorId"
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            notificationKey.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channelId = "dating_activity"
+        ensureChannel(
+            notificationManager = notificationManager,
+            channelId = channelId,
+            channelName = "Dating Activity",
+            importance = NotificationManager.IMPORTANCE_DEFAULT
+        )
+
+        val title = message.notification?.title ?: data["title"] ?: "Dating Loop"
+        val body = message.notification?.body ?: data["body"] ?: "Open Date Hub to see what's new"
+
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_SOCIAL)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        notificationManager.notify(("dating_$notificationKey").hashCode(), notification)
     }
 
     private fun ensureChannel(

@@ -12,6 +12,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -24,11 +26,14 @@ fun NotificationSettingsScreen(
     viewModel: NotificationSettingsViewModel
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val inboxViewModel: UserNotificationsViewModel = viewModel()
+    val inboxState by inboxViewModel.uiState.collectAsState()
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Notification Permissions") },
+                title = { Text("Notifications") },
                 navigationIcon = {
                     IconButton(onClick = { navController.navigateUp() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -36,9 +41,29 @@ fun NotificationSettingsScreen(
                 }
             )
         }
-    ) { innerPadding ->
+    ) { scaffoldPadding ->
+      Column(
+          modifier = Modifier
+              .fillMaxSize()
+              .padding(scaffoldPadding)
+      ) {
+        PrimaryTabRow(selectedTabIndex = selectedTab) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = { Text(if (inboxState.unreadCount > 0) "Inbox (${inboxState.unreadCount})" else "Inbox") }
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = { Text("Settings") }
+            )
+        }
+        val innerPadding = PaddingValues(0.dp)
         val settings = uiState
-        if (settings == null) {
+        if (selectedTab == 0) {
+            UserNotificationsInbox(viewModel = inboxViewModel, modifier = Modifier.weight(1f))
+        } else if (settings == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
@@ -82,6 +107,13 @@ fun NotificationSettingsScreen(
                 )
 
                 NotificationPermissionGroup(
+                    title = "Dating Activity",
+                    description = "Likes, matches and comments on Dating Loop, plus Blind Date invites.",
+                    isSelected = settings.datingActivity,
+                    onPermissionChanged = { viewModel.onSettingToggled(NotificationSettingsViewModel.FIELD_DATING_ACTIVITY, it) }
+                )
+
+                NotificationPermissionGroup(
                     title = "App Updates",
                     description = "Get information about new features and improvements.",
                     isSelected = settings.appUpdates,
@@ -89,6 +121,7 @@ fun NotificationSettingsScreen(
                 )
             }
         }
+      }
     }
 }
 

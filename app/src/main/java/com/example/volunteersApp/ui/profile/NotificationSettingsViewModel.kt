@@ -21,7 +21,8 @@ data class NotificationSettings(
     val jokesPosts: Boolean = true,
     val liveStreams: Boolean = true,
     val eventReminders: Boolean = true,
-    val appUpdates: Boolean = false
+    val appUpdates: Boolean = false,
+    val datingActivity: Boolean = true
 )
 
 class NotificationSettingsViewModel : ViewModel() {
@@ -98,5 +99,6 @@ class NotificationSettingsViewModel : ViewModel() {
         const val FIELD_LIVE_STREAMS = "liveStreams"
         const val FIELD_EVENT_REMINDERS = "eventReminders"
         const val FIELD_APP_UPDATES = "appUpdates"
+        const val FIELD_DATING_ACTIVITY = "datingActivity"
     }
 }

@@ -21,5 +21,20 @@ data class DatingProfile(
     val imageUrls: List<String> = emptyList(),
     
     @ServerTimestamp
-    val createdAt: Date? = null
+    val createdAt: Date? = null,
+
+    // Shared iOS Dating Loop fields (docs/IOS_ANDROID_DATING_LOOP.md); all optional.
+    val age: Int? = null,
+    val relationshipGoal: String = "",
+    val interests: List<String> = emptyList(),
+    val prompts: List<DatingPrompt> = emptyList(),
+    val jobTitle: String = "",
+    val school: String = "",
+    val updatedAt: Date? = null,
+)
+
+@Keep
+data class DatingPrompt(
+    val question: String = "",
+    val answer: String = "",
 )
