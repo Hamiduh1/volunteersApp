@@ -628,7 +628,10 @@ class DateEvaViewModel(
                     }
                 }
 
-                val profileData = hashMapOf(
+                val profileRef = profilesCollection.document(user.uid)
+                val hasCreatedAt = runCatching { profileRef.get().await().get("createdAt") != null }
+                    .getOrDefault(existingProfile?.createdAt != null)
+                val profileData = hashMapOf<String, Any>(
                     "uid" to user.uid,
                     "name" to normalizedName,
                     "bio" to normalizedBio,
@@ -636,10 +639,13 @@ class DateEvaViewModel(
                     "gender" to gender.name,
                     "lookingFor" to lookingFor.name,
                     "imageUrls" to uploadedImageUrls,
-                    "createdAt" to FieldValue.serverTimestamp()
+                    "updatedAt" to FieldValue.serverTimestamp()
                 )
+                if (!hasCreatedAt) {
+                    profileData["createdAt"] = FieldValue.serverTimestamp()
+                }
 
-                profilesCollection.document(user.uid).set(profileData, SetOptions.merge()).await()
+                profileRef.set(profileData, SetOptions.merge()).await()
 
                 if (normalizedPhone.isNotBlank()) {
                     db.collection(FirestoreCollection.USERS).document(user.uid)
@@ -655,7 +661,7 @@ class DateEvaViewModel(
                         DateHubRoute.DATING_PROFILE -> DateHubRoute.DATING_LOOP
                         else -> profileReturnRoute
                     }
-                    val savedProfile = DatingProfile(
+                    val savedProfile = (existingProfile ?: DatingProfile()).copy(
                         uid = user.uid,
                         name = normalizedName,
                         bio = normalizedBio,
@@ -706,6 +712,11 @@ class DateEvaViewModel(
             _uiState.update { it.copy(isLoading = true) }
             try {
                 profilesCollection.document(currentUserId).delete().await()
+                runCatching {
+                    db.collection(FirestoreCollection.USERS).document(currentUserId)
+                        .collection(FirestoreSubcollection.DATING_PRIVATE).document("swipes")
+                        .delete().await()
+                }.onFailure { Log.w("DateEvaViewModel", "Failed to clear synced dating passes", it) }
                 profileReturnRoute = DateHubRoute.DASHBOARD
                 _uiState.update { state ->
                     recomputeLoopProfiles(
@@ -787,6 +798,18 @@ class DateEvaViewModel(
                     onComplete(false, "This profile is no longer available for invitations.")
                     return@launch
                 }
+                val incomingInviteRef = db.collection(FirestoreCollection.USERS).document(inviterId)
+                    .collection(FirestoreSubcollection.INVITATIONS).document(recipientId)
+                val incomingInvite = incomingInviteRef.get().await()
+                if (isPendingDatingLoopInvitation(incomingInvite)) {
+                    acceptMutualDatingLike(inviterId, recipientId, incomingInviteRef)
+                    onComplete(
+                        true,
+                        "It's a match! You and ${profile.name.ifBlank { "this member" }} can now chat."
+                    )
+                    return@launch
+                }
+
                 val existingInvite = invitationRef.get().await()
                 if (existingInvite.exists()) {
                     onComplete(false, "Invitation already sent to this person.")
@@ -812,6 +835,65 @@ class DateEvaViewModel(
                 _uiState.update { it.copy(invitingUserIds = it.invitingUserIds - recipientId) }
             }
         }
+    }
+
+    private fun isPendingDatingLoopInvitation(doc: com.google.firebase.firestore.DocumentSnapshot): Boolean {
+        if (!doc.exists()) return false
+        val status = (doc.get("status") as? String)?.trim()?.lowercase(Locale.US).orEmpty()
+        val context = (doc.get("context") as? String)?.lowercase(Locale.US).orEmpty()
+        return status == "pending" && context.contains("dating loop")
+    }
+
+    /**
+     * Accepts the other member's pending Dating Loop invitation instead of sending a crossing one.
+     * The chat must be created in the same batch as the accept: the chat rules require a pending
+     * invitation from the other participant.
+     */
+    private suspend fun acceptMutualDatingLike(
+        currentUserId: String,
+        otherUserId: String,
+        incomingInviteRef: com.google.firebase.firestore.DocumentReference
+    ) {
+        val existingChatId = db.collection(FirestoreCollection.CHATS)
+            .whereArrayContains("participants", currentUserId)
+            .get()
+            .await()
+            .documents
+            .firstOrNull { doc ->
+                val participants = (doc.get("participants") as? List<*>)
+                    ?.filterIsInstance<String>()
+                    ?.toSet()
+                    .orEmpty()
+                (doc.get("chatType") as? String) != "group" && participants == setOf(currentUserId, otherUserId)
+            }
+            ?.id
+        val chatRef = existingChatId?.let { db.collection(FirestoreCollection.CHATS).document(it) }
+            ?: db.collection(FirestoreCollection.CHATS).document()
+
+        db.runBatch { batch ->
+            if (existingChatId == null) {
+                batch.set(
+                    chatRef,
+                    mapOf(
+                        "chatId" to chatRef.id,
+                        "chatType" to "direct",
+                        "participants" to listOf(currentUserId, otherUserId),
+                        "lastMessageText" to "Chat started! Say hi.",
+                        "lastMessage" to "Chat started! Say hi.",
+                        "lastMessageTimestamp" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            batch.set(
+                incomingInviteRef,
+                mapOf(
+                    "status" to "accepted",
+                    "lastUpdatedAt" to FieldValue.serverTimestamp(),
+                    "matchedChatId" to chatRef.id
+                ),
+                SetOptions.merge()
+            )
+        }.await()
     }
 
     fun navigateToMain() {
@@ -850,8 +932,10 @@ class DateEvaViewModel(
                 }
 
                 if (snapshots != null) {
-                    val rawProfiles = snapshots.documents.map { doc ->
-                        val parsed = doc.toObject(DatingProfile::class.java) ?: DatingProfile()
+                    val rawProfiles = snapshots.documents.mapNotNull { doc ->
+                        val parsed = runCatching { doc.toObject(DatingProfile::class.java) }
+                            .onFailure { Log.w("DateEvaViewModel", "Skipping malformed dating profile ${doc.id}", it) }
+                            .getOrElse { return@mapNotNull null } ?: DatingProfile()
                         val uid = parsed.uid.ifBlank { doc.id }
                         parsed.copy(
                             uid = uid,

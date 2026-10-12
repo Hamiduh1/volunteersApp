@@ -59,6 +59,8 @@ object FirestoreSubcollection {
     const val CHAT_INVITATIONS = "chat_invitations"
     const val BLIND_DATE_INVITATIONS = "blindDateInvitations"
     const val BLIND_DATE_SENT_INVITATIONS = "blindDateSentInvitations"
+    /** Owner-only dating data shared with iOS (`contact`, `swipes`). */
+    const val DATING_PRIVATE = "dating_private"
     const val HOSTED_EVENTS = "hostedEvents"
     const val JOKES = "jokes"
     const val FOLLOWERS = "followers"

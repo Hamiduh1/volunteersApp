@@ -19,7 +19,26 @@ data class DatingProfile(
     val phone: String = "",
     val country: String = "", // The fix is here
     val imageUrls: List<String> = emptyList(),
+    // Written by iOS (see docs/IOS_ANDROID_DATING_LOOP.md). Android saves with merge so these survive edits.
+    val age: Int? = null,
+    val relationshipGoal: String = "",
+    val interests: List<String> = emptyList(),
+    val prompts: List<DatingPrompt> = emptyList(),
+    val jobTitle: String = "",
+    val school: String = "",
     
     @ServerTimestamp
     val createdAt: Date? = null
 )
+
+@Keep
+data class DatingPrompt(
+    val question: String = "",
+    val answer: String = ""
+)
+
+fun DatingProfile.nameWithAge(fallback: String): String {
+    val displayName = name.ifBlank { fallback }
+    val shownAge = age?.takeIf { it >= 18 } ?: return displayName
+    return "$displayName, $shownAge"
+}

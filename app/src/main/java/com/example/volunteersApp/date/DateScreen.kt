@@ -1775,7 +1775,7 @@ private fun DatingDiscoveryCard(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = profile.name.ifBlank { "Community member" },
+                            text = profile.nameWithAge("Community member"),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = DateA11yPalette.textPrimary
@@ -1889,7 +1889,7 @@ private fun DatingDiscoveryQuickViewCard(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = profile.name.ifBlank { "Community member" },
+                    text = profile.nameWithAge("Community member"),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = DateA11yPalette.textPrimary
@@ -1943,7 +1943,7 @@ private fun DatingProfileDetailDialog(
             TextButton(onClick = onDismiss) { Text("Close") }
             }
         },
-        title = { Text(profile.name.ifBlank { "Dating Profile" }) },
+        title = { Text(profile.nameWithAge("Dating Profile")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(

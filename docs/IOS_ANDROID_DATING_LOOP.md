@@ -19,8 +19,8 @@ compatible. All new fields are optional; profiles without them keep working on b
 | `updatedAt` | timestamp | Written on every save. |
 | `createdAt` | timestamp | **Written only when the profile is first created.** |
 
-Android currently resets `createdAt` on every save; please change it to write `createdAt` only when the document does not
-exist yet (and keep saving with `SetOptions.merge()` so iOS-only fields survive Android edits).
+Android (branch `feature/dating-loop-ios-parity`) writes `createdAt` only when the document has none and adds `updatedAt`.
+Keep saving with `SetOptions.merge()` so iOS-only fields survive Android edits.
 
 Display: iOS shows `"Name, 27"` when `age >= 18`, the goal as a chip, and interests with ones shared with the viewer first.
 
@@ -57,7 +57,7 @@ A "like" is still the existing Dating Loop chat invitation:
   iOS allows 1 Super Like per day (counted from sent invitations' `timestamp`), free for everyone.
 - **Mutual like:** before sending, check `users/{me}/invitations/{them}`. If a pending Dating Loop invitation from them
   exists, **accept it** (normal invitation-accept flow that creates the direct chat) instead of creating a new
-  invitation. Android does not do this yet, so two people liking each other can end up with crossing pending invites.
+  invitation. Android does this in `DateEvaViewModel.sendChatInvitation` (branch `feature/dating-loop-ios-parity`).
 - **Match** = an accepted Dating Loop invitation in either direction. iOS shows an "It's a Match!" screen to both
   sides and a matches strip with "Send a message".
 - **Likes You** = pending Dating Loop invitations received by the user, excluding passed/blocked/already matched
