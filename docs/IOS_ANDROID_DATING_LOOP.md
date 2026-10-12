@@ -56,9 +56,101 @@ A "like" is still the existing Dating Loop chat invitation:
   `contains("super like")`. It still contains "dating loop", so existing Android parsing treats it as a normal like.
   iOS allows 1 Super Like per day (counted from sent invitations' `timestamp`), free for everyone.
 - **Mutual like:** before sending, check `users/{me}/invitations/{them}`. If a pending Dating Loop invitation from them
-  exists, **accept it** (normal invitation-accept flow that creates the direct chat) instead of creating a new
-  invitation. Android does not do this yet, so two people liking each other can end up with crossing pending invites.
+  exists, **accept it** instead of creating a new invitation: set `status: "accepted"` and `lastUpdatedAt` on that
+  doc. **Do not create a chat** (see section 5). Android does not do this yet, so two people liking each other can end
+  up with crossing pending invites.
 - **Match** = an accepted Dating Loop invitation in either direction. iOS shows an "It's a Match!" screen to both
-  sides and a matches strip with "Send a message".
+  sides and a matches strip; both lead to Blind Date ("Chat on Blind Date").
 - **Likes You** = pending Dating Loop invitations received by the user, excluding passed/blocked/already matched
   people, Super Likes first.
+
+## 5) Blind Date is the paid chat for Dating Loop matches
+
+Section 4 (shared catalog) lives on branch `feature/dating-loop-ios-parity`.
+
+Product model (iOS, Oct 2026):
+
+- **Dating Loop is free:** browse, like, Super Like, and comment. Liking each other is a match, but **no chat opens**.
+- **Blind Date is paid:** chatting happens only there. **Both people need an active pass.** One pass covers one match;
+  once a chat opens, the pass is used and the user pays again (`rejoinBlindDate`) to chat with someone else.
+- People can also join Blind Date directly and invite members from the Blind Date pool, as before.
+- The fee is `app_config/fee_settings.blindDateFeeUsd` (admin dashboard), read through `getPublicCommerceFeeSettings`.
+
+### What Android needs to change
+
+1. **No free chat for Dating Loop matches.** `DateViewModel.acceptMutualDatingLike` and
+   `InvitationsViewModel.acceptInvitation` (for invitations whose `context` contains "dating loop") must only mark the
+   invitation accepted (`status: "accepted"`, `lastUpdatedAt`). Show "It's a match! Open Date Hub > Blind Date to
+   chat." Chats that already exist between matched users keep working.
+2. **Match screen / matches strip / profile:** the button becomes "Chat on Blind Date" and opens Blind Date. Open the
+   chat directly only if one already exists.
+3. **Comments** (below): a comment button on the swipe deck and profile; show received comments in Likes You and on
+   the sender's profile with "Like back"; reply only happens on Blind Date.
+4. **Blind Date screen:** list Dating Loop matches with the per-pair state below, plus comments, invites, and the pool.
+5. **Payment payloads** (below). Android's current Blind Date payment already uses `paymentRail`; keep it, and allow
+   joining with the Dating Loop photo URLs as `mediaUrls`.
+
+### Comments: `users/{owner}/dating_comments/{senderId}`
+
+One doc per sender (doc id = sender uid; sending again overwrites it).
+
+```json
+{
+  "senderId": "<uid>",
+  "senderName": "Ada",
+  "senderPhotoUrl": "https://...",
+  "text": "1-300 chars",
+  "createdAt": "<server timestamp>",
+  "updatedAt": "<server timestamp>"
+}
+```
+
+- Rules: only the sender creates or updates it, with exactly these keys. `createdAt` and `updatedAt` must be server
+  timestamps. Both users need a dating profile, and neither may have blocked the other. Only the owner can list; the
+  sender can read their own doc; either side can delete it (the owner deletes to dismiss).
+- Sending a comment also sends a like (section 3). If they already liked you, that like-back is a match.
+- Only the owner sees comments. "Reply" = like back (creates the match), then chat on Blind Date.
+
+### Per-match state on the Blind Date screen
+
+For each Dating Loop match, evaluated in this order:
+
+| Condition | State | Action |
+| --- | --- | --- |
+| An accepted/matched Blind Date invitation with `matchedChatId` exists between the two (either inbox), or a legacy Dating Loop chat exists | Chat ready | Open chat |
+| My `blindDateProfiles/{me}.status` is `awaiting_payment` | Payment processing | Wait for the status change |
+| My status is missing, `matched`, or `expired` | Needs my pass | Pay: `joinBlindDate` if I have no profile, `rejoinBlindDate` if `matched` |
+| A pending invite from them in `users/{me}/blindDateInvitations` | They're waiting | `acceptBlindDateInvitation({senderId})`, which returns `chatId` |
+| My pending invite in `users/{me}/blindDateSentInvitations/{them}` | Request sent | Wait |
+| Their `blindDateProfiles/{them}.status == "active"` | Both have a pass | Send the existing Blind Date invitation |
+| Otherwise | Waiting for their pass | Nothing |
+
+Accepting the invite creates the chat and sets both profiles to `matched`, which uses both passes.
+
+### Payment payloads
+
+- `joinBlindDate`: `{mediaUrls: [String] (non-empty), bio, gender: MALE|FEMALE|OTHER, lookingFor: MEN|WOMEN|EVERYONE,
+  paymentRail: "STRIPE"|"MOBILE_MONEY", paymentMethodId?}`.
+- `rejoinBlindDate`: `{paymentRail, paymentMethodId?}`.
+- **Stripe** returns `{checkoutUrl, orderId, pending}`. Open `checkoutUrl` in the browser; the webhook sets the profile
+  to `active`.
+- **Mobile money** returns `{orderId, status, pending, message}`. The user approves the prompt on their phone, and the
+  profile becomes `active` when it settles. `getPlatformFeeMobileMoneyOptions({orderId})` reports the order status.
+- Use `getPlatformFeeMobileMoneyOptions({kind: "BLIND_DATE_JOIN"})` for the eligible method `id` and
+  `estimatedLocalAmount` + `currency`. If `enabled` is false, offer card only.
+- Staff-exempt users, or a fee of 0, activate immediately (`charged: false`).
+- iOS listens to `blindDateProfiles/{me}` and both Blind Date invitation inboxes so payments and partner actions show up
+  live.
+
+### Server changes in this commit (not deployed yet)
+
+- `acceptBlindDateInvitation` also writes `matchedChatId`, `matchedPartnerId`, `matchedAt`, and `updatedAt` on both
+  profiles.
+- `rejoinBlindDate` keys its order per match (`<uid>:<matchedChatId>`). Before this, the order was keyed per user, so
+  every rejoin after the first reused the paid order and was free.
+
+### Not enforced yet
+
+Rules still let a client create a direct chat from a pending Dating Loop invitation (`canCreateDirectChatFromInvitation`),
+so old clients can keep opening free chats. Once Android ships item 1, tighten that rule for invitations whose `context`
+contains "dating loop".

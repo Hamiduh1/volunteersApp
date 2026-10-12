@@ -1631,6 +1631,33 @@ service cloud.firestore {
       match /dating_private/{docId} {
         allow read, write: if isOwner(userId) && userCanAccessDating(userId);
       }
+
+      // Private Dating Loop comment sent with a like (doc id = sender uid). Only the profile
+      // owner lists them; replies happen in a paid Blind Date chat.
+      match /dating_comments/{senderId} {
+        allow get: if isSignedIn() && (request.auth.uid == userId || request.auth.uid == senderId);
+        allow list: if isOwner(userId);
+        allow create, update: if isSignedIn()
+          && request.auth.uid == senderId
+          && senderId != userId
+          && userCanAccessDating(senderId)
+          && exists(/databases/$(database)/documents/dating_profiles/$(senderId))
+          && exists(/databases/$(database)/documents/dating_profiles/$(userId))
+          && !hasUserBlocked(userId, senderId)
+          && !hasUserBlocked(senderId, userId)
+          && request.resource.data.keys().hasOnly(['senderId', 'senderName', 'senderPhotoUrl', 'text', 'createdAt', 'updatedAt'])
+          && request.resource.data.senderId == senderId
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 300
+          && request.resource.data.senderName is string
+          && request.resource.data.senderName.size() <= 80
+          && request.resource.data.senderPhotoUrl is string
+          && request.resource.data.senderPhotoUrl.size() <= 2048
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isSignedIn() && (request.auth.uid == userId || request.auth.uid == senderId);
+      }
     }
 
     // --- BLIND DATE RULES ---

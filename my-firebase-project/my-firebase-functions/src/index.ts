@@ -5934,8 +5934,20 @@ export const acceptBlindDateInvitation = functions.runWith({enforceAppCheck: tru
         const now = admin.firestore.Timestamp.now();
         const chatData = {chatId: newChatRef.id, participants: [acceptorId, senderId], lastMessageText: "Blind Date match! Say hi.", lastMessageTimestamp: now};
         transaction.set(newChatRef, chatData);
-        transaction.update(acceptorProfileRef, "status", "matched");
-        transaction.update(senderProfileRef, "status", "matched");
+        transaction.update(acceptorProfileRef, {
+          status: "matched",
+          matchedChatId: newChatRef.id,
+          matchedPartnerId: senderId,
+          matchedAt: now,
+          updatedAt: now,
+        });
+        transaction.update(senderProfileRef, {
+          status: "matched",
+          matchedChatId: newChatRef.id,
+          matchedPartnerId: acceptorId,
+          matchedAt: now,
+          updatedAt: now,
+        });
         transaction.update(acceptorInviteRef, {
           status: "accepted",
           updatedAt: now,
@@ -6037,6 +6049,14 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
       return {success: true, charged: false, feeCharged: 0, message: "You are back in the Blind Date loop."};
     }
 
+    // One pass covers one match, so each match gets its own order. Keying the order on the
+    // user alone would make every later rejoin reuse the first paid order without charging.
+    const currentBlindProfile = ((await blindDateProfileRef.get()).data() || {}) as Record<string, unknown>;
+    const matchedAt = currentBlindProfile.matchedAt as admin.firestore.Timestamp | undefined;
+    const rejoinMatchKey = asNonEmptyString(currentBlindProfile.matchedChatId) ||
+      (matchedAt && typeof matchedAt.toMillis === "function" ? String(matchedAt.toMillis()) : "legacy");
+    const rejoinResourceId = `${userId}:${rejoinMatchKey}`;
+
     const rejoinPayload = (data || {}) as {paymentRail?: unknown; paymentMethodId?: unknown};
     if (normalizeFirstPartyFeePaymentRail(rejoinPayload.paymentRail) === "MOBILE_MONEY") {
       const paymentMethodId = asNonEmptyString(rejoinPayload.paymentMethodId);
@@ -6049,7 +6069,7 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
       return startFirstPartyMobileMoneyFeeCollection({
         kind: "BLIND_DATE_REJOIN",
         buyerId: userId,
-        resourceId: userId,
+        resourceId: rejoinResourceId,
         paymentMethodId,
         prepare: async (transaction, orderRef) => {
           const [userDoc, profileDoc] = await Promise.all([transaction.get(userRef), transaction.get(blindDateProfileRef)]);
@@ -6078,7 +6098,7 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
     return startStripeCommerceCheckout({
       kind: "BLIND_DATE_REJOIN",
       buyerId: userId,
-      resourceId: userId,
+      resourceId: rejoinResourceId,
       prepare: async (transaction, orderRef) => {
         const [userDoc, profileDoc] = await Promise.all([transaction.get(userRef), transaction.get(blindDateProfileRef)]);
         if (!userDoc.exists) throw new functions.https.HttpsError("not-found", "User profile not found.");
