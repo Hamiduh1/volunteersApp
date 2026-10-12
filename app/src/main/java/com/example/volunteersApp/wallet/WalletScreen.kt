@@ -2552,7 +2552,7 @@ private fun GlobalCalculatorCard(
     state: WalletUiState,
     onInputsChanged: (amount: String?, from: String?, to: String?) -> Unit
 ) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
+    var expanded by rememberSaveable { mutableStateOf(true) }
     var fromExpanded by remember { mutableStateOf(false) }
     var toExpanded by remember { mutableStateOf(false) }
     var fromSearch by remember { mutableStateOf("") }

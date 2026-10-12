@@ -20,6 +20,7 @@ import io.agora.rtc2.Constants
 import io.agora.rtc2.IRtcEngineEventHandler
 import io.agora.rtc2.RtcEngine
 import io.agora.rtc2.RtcEngineConfig
+import io.agora.rtc2.video.VideoCanvas
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -921,6 +922,10 @@ class LiveStreamViewModel : ViewModel() {
                 }
 
                 if (publish) {
+                    // Undo a previous end attempt's media shutdown if the host rejoins the same room.
+                    agoraEngine?.enableLocalVideo(true)
+                    agoraEngine?.muteLocalVideoStream(_uiState.value.isVideoMuted)
+                    agoraEngine?.muteLocalAudioStream(_uiState.value.isAudioMuted)
                     agoraEngine?.startPreview()
                 } else {
                     // A guest removed from stage must stop capturing before rejoining as audience.
@@ -1347,6 +1352,9 @@ class LiveStreamViewModel : ViewModel() {
         if (!state.isHost || state.session == null) return
 
         if (keepRoomForSummary) {
+            // Stop publishing the moment the host confirms, so camera and mic never outlive the
+            // decision even if the ENDED write is slow or fails and needs a retry.
+            stopLocalBroadcastMedia()
             viewModelScope.launch {
                 _uiState.update { it.copy(error = null) }
                 try {
@@ -1381,7 +1389,6 @@ class LiveStreamViewModel : ViewModel() {
                     // Stay on the session listener so the replay status updates on the summary.
                     stopViewerHeartbeat()
                     suppressReconnect = true
-                    agoraEngine?.stopPreview()
                     agoraEngine?.leaveChannel()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to update stream status to ended", e)
@@ -1424,6 +1431,15 @@ class LiveStreamViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    private fun stopLocalBroadcastMedia() {
+        val engine = agoraEngine ?: return
+        runCatching { engine.muteLocalVideoStream(true) }
+        runCatching { engine.muteLocalAudioStream(true) }
+        runCatching { engine.stopPreview() }
+        runCatching { engine.enableLocalVideo(false) }
+        runCatching { engine.setupLocalVideo(VideoCanvas(null, VideoCanvas.RENDER_MODE_HIDDEN, 0)) }
     }
 
     // --- NEWLY UPDATED `leaveStream` FUNCTION ---

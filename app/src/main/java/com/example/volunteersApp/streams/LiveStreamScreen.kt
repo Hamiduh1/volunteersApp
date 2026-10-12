@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -245,11 +246,15 @@ fun LiveStreamScreen(
                 // The host always fills the screen; stage guests (and a guest's own camera) are tiles.
                 val mainRemoteUid = if (uiState.isHost) null else uiState.remoteUid
                 val mainIsLocal = uiState.isHost || (uiState.isOnStage && mainRemoteUid == null)
-                VideoRenderer(
-                    engine = viewModel.getEngine(),
-                    publishLocally = mainIsLocal,
-                    remoteUid = mainRemoteUid
-                )
+                // The media-overlay SurfaceView draws above Compose, so it must leave composition when the
+                // stream ends or its last frame keeps "playing" over the ended summary.
+                if (!uiState.sessionEnded) {
+                    VideoRenderer(
+                        engine = viewModel.getEngine(),
+                        publishLocally = mainIsLocal,
+                        remoteUid = mainRemoteUid
+                    )
+                }
                 if (!uiState.sessionEnded) {
                     val hostLabel = session.hostName.ifBlank { "The host" }
                     when {
@@ -792,8 +797,8 @@ internal fun formatLiveDuration(durationMs: Long): String {
 @Composable
 private fun LiveSummaryStat(value: String, label: String, modifier: Modifier = Modifier) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = LiveStudioInk, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text(label, color = LiveStudioMuted, style = MaterialTheme.typography.labelSmall)
+        Text(value, color = LiveStudioInk, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(label, color = LiveStudioMuted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -818,82 +823,64 @@ private fun SessionEndedOverlay(
     ) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            shape = RoundedCornerShape(24.dp),
+                .padding(horizontal = 28.dp)
+                .widthIn(max = 400.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
             color = LiveStudioSurface,
             shadowElevation = 8.dp,
         ) {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 620.dp)
+                    .heightIn(max = 560.dp)
                     .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                LiveHostAvatar(
-                    name = session.hostName,
-                    photoUrl = session.hostProfilePicUrl,
-                    size = 64.dp,
-                )
-                Text(
-                    "Stream ended",
-                    color = LiveStudioInk,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    "${session.title.ifBlank { "Live session" }} · ${session.hostName.ifBlank { "Host" }}",
-                    color = LiveStudioMuted,
-                    textAlign = TextAlign.Center,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LiveHostAvatar(
+                        name = session.hostName,
+                        photoUrl = session.hostProfilePicUrl,
+                        size = 44.dp,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Stream ended",
+                            color = LiveStudioInk,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "${session.title.ifBlank { "Live session" }} · ${session.hostName.ifBlank { "Host" }}",
+                            color = LiveStudioMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 when {
                     session.isArchiveReady && canWatchReplay -> Unit
                     session.isArchiveReady -> Text(
                         "The host has kept this replay private.",
                         color = LiveStudioMuted,
                         style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
                     )
                     session.isArchiveProcessing -> Unit
                     else -> Text(
                         "No replay was recorded for this stream.",
                         color = LiveStudioMuted,
                         style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
                     )
-                }
-                if (onReplayVisibility != null && (session.isArchiveReady || session.isArchiveProcessing)) {
-                    Text(
-                        "Who can watch the replay",
-                        color = LiveStudioInk,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        LiveReplayVisibility.entries.forEach { mode ->
-                            FilterChip(
-                                selected = session.replayVisibility == mode,
-                                onClick = { onReplayVisibility(mode) },
-                                label = { Text(mode.label) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = LiveStudioInk,
-                                    selectedLabelColor = Color.White,
-                                ),
-                            )
-                        }
-                    }
                 }
                 summary?.let { stats ->
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(LiveStudioInk.copy(alpha = 0.05f))
+                            .padding(vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
                         LiveSummaryStat(formatLiveDuration(stats.durationMs), "Duration", Modifier.weight(1f))
@@ -902,49 +889,99 @@ private fun SessionEndedOverlay(
                         LiveSummaryStat(stats.comments.toString(), "Comments", Modifier.weight(1f))
                     }
                 }
+                if (onReplayVisibility != null && (session.isArchiveReady || session.isArchiveProcessing)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "Who can watch the replay",
+                            color = LiveStudioInk,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            LiveReplayVisibility.entries.forEach { mode ->
+                                FilterChip(
+                                    selected = session.replayVisibility == mode,
+                                    onClick = { onReplayVisibility(mode) },
+                                    label = { Text(mode.label, style = MaterialTheme.typography.labelMedium) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = LiveStudioInk,
+                                        selectedLabelColor = Color.White,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
                 if (session.isArchiveReady) {
                     if (canWatchReplay) {
                         LiveAccentButton(
                             onClick = onWatchReplay,
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.fillMaxWidth().height(42.dp),
+                            shape = RoundedCornerShape(21.dp),
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("Watch replay", fontWeight = FontWeight.SemiBold)
                         }
                     }
                     if (isHost) {
-                        OutlinedButton(
-                            onClick = onShareReplay,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                        ) {
-                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Share replay link")
-                        }
-                        Button(
-                            onClick = onPostReplayToMindLoom,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            enabled = !mindLoomReplayShareInProgress,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = LiveStudioInk,
-                                contentColor = Color.White,
-                            ),
-                        ) {
-                            Text(
-                                if (mindLoomReplayShareInProgress) "Posting to MindLoom…" else "Post replay to MindLoom",
-                                fontWeight = FontWeight.SemiBold,
-                            )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = onShareReplay,
+                                modifier = Modifier.weight(1f).height(40.dp),
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    "Share replay link",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            Button(
+                                onClick = onPostReplayToMindLoom,
+                                modifier = Modifier.weight(1f).height(40.dp),
+                                shape = RoundedCornerShape(20.dp),
+                                enabled = !mindLoomReplayShareInProgress,
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = LiveStudioInk,
+                                    contentColor = Color.White,
+                                ),
+                            ) {
+                                Text(
+                                    if (mindLoomReplayShareInProgress) "Posting to MindLoom…" else "Post replay to MindLoom",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 } else if (session.isArchiveProcessing) {
-                    CircularProgressIndicator(color = LiveStudioAccent, strokeWidth = 2.dp)
-                    Text("Replay is processing…", color = LiveStudioMuted)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            color = LiveStudioAccent,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Replay is processing…", color = LiveStudioMuted, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
-                TextButton(onClick = onLeave) { Text("Close") }
+                TextButton(
+                    onClick = onLeave,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) { Text("Close") }
             }
         }
     }
