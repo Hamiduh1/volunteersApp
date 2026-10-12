@@ -111,6 +111,14 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isValidMindLoomSavedPostWrite() {
+      return request.resource.data.keys().hasOnly(['authorId', 'savedAt'])
+        && request.resource.data.keys().hasAll(['authorId', 'savedAt'])
+        && request.resource.data.authorId is string
+        && request.resource.data.authorId.size() > 0
+        && request.resource.data.savedAt == request.time;
+    }
+
     function isOrganizer() {
       return exists(/databases/$(database)/documents/organizers/$(request.auth.uid));
     }
@@ -603,7 +611,9 @@ service cloud.firestore {
           (
             exists(primaryPath) &&
             get(primaryPath).data.status in ['pending', 'PENDING'] &&
-            get(primaryPath).data.senderId == senderUid
+            get(primaryPath).data.senderId == senderUid &&
+            // Dating Loop likes are matches only; their chat opens through paid Blind Date.
+            !string(get(primaryPath).data.get('context', '')).lower().matches('.*dating loop.*')
           ) ||
           (
             exists(legacyPath) &&
@@ -1490,6 +1500,13 @@ service cloud.firestore {
 
       match /settings/{settingId} {
         allow read, write: if isOwner(userId);
+      }
+
+      // Android MindLoom saved posts (private bookmark list).
+      match /saved_jokes/{jokeId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidMindLoomSavedPostWrite();
+        allow delete: if isOwner(userId);
       }
 
       match /invitations/{senderId} {

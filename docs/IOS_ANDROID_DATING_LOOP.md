@@ -187,6 +187,10 @@ Rules still let a client create a direct chat from a pending Dating Loop invitat
 so old clients can keep opening free chats. Once Android ships item 1, tighten that rule for invitations whose `context`
 contains "dating loop".
 
+**Update:** enforced. `hasPendingChatInvitation` ignores `users/{uid}/invitations` docs whose `context` contains
+"dating loop", so a pending Dating Loop like no longer authorizes creating a direct chat. Legacy `chat_invitations`
+docs are unchanged.
+
 ## 6) Push notifications for dating activity
 
 Three Firestore triggers in `my-firebase-functions/src/index.ts` send the push and write an in-app row to
