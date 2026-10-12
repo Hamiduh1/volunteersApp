@@ -2880,6 +2880,199 @@ export const onChatMessageCreated = functions.firestore
 
 
 // =============================================================================
+//  DATING LOOP + BLIND DATE ACTIVITY PUSH
+// =============================================================================
+
+type DatingActivityPushType =
+  "dating_like" |
+  "dating_super_like" |
+  "dating_match" |
+  "dating_comment" |
+  "blind_date_invite" |
+  "blind_date_match";
+
+const datingPushString = (value: unknown, maxLength = 120): string =>
+  typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+
+const datingPushStatus = (data: FirebaseFirestore.DocumentData | undefined): string =>
+  datingPushString(data?.status, 40).toLowerCase();
+
+const isDatingLoopInvitationData = (data: FirebaseFirestore.DocumentData | undefined): boolean =>
+  datingPushString(data?.context, 80).toLowerCase().includes("dating loop");
+
+const readDatingDisplayName = async (uid: string, fallback: string): Promise<string> => {
+  const userDoc = await db.collection("users").doc(uid).get();
+  const data = userDoc.data() || {};
+  return datingPushString(data.name, 80) || datingPushString(data.username, 80) || fallback;
+};
+
+const sendDatingActivityPush = async (params: {
+  recipientId: string;
+  actorId: string;
+  type: DatingActivityPushType;
+  title: string;
+  body: string;
+  referenceId: string;
+}): Promise<void> => {
+  const {recipientId, actorId, type, title, body, referenceId} = params;
+  if (!recipientId || !actorId || recipientId === actorId) return;
+
+  const [recipientDoc, settingsDoc, recipientBlocked, actorBlocked] = await Promise.all([
+    db.collection("users").doc(recipientId).get(),
+    db.collection("users").doc(recipientId).collection("settings").doc("notifications").get(),
+    readBlockedUserIds(recipientId),
+    readBlockedUserIds(actorId),
+  ]);
+  if (!recipientDoc.exists) return;
+  if (recipientBlocked.includes(actorId) || actorBlocked.includes(recipientId)) return;
+  if (settingsDoc.data()?.datingActivity === false) return;
+
+  // One in-app row per actor and type so retries and repeat edits don't stack duplicates.
+  await db.collection("users").doc(recipientId).collection("notifications")
+    .doc(`${type}_${actorId}`)
+    .set({
+      type,
+      title,
+      body,
+      actorId,
+      referenceId,
+      read: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+  const tokens = collectUserFcmTokens(recipientDoc.data());
+  if (tokens.length === 0) return;
+
+  const response = await admin.messaging().sendEachForMulticast({
+    tokens,
+    notification: {title, body},
+    data: {type, actorId, referenceId, receiverId: recipientId},
+    android: {priority: "high"},
+    apns: {payload: {aps: {sound: "default"}}},
+  });
+  if (response.failureCount > 0) {
+    functions.logger.warn("Some dating activity pushes failed", {
+      type,
+      recipientId,
+      failed: response.failureCount,
+      total: tokens.length,
+    });
+  }
+};
+
+export const onDatingLoopInvitationWriteNotify = functions.firestore
+  .document("users/{userId}/invitations/{senderId}")
+  .onWrite(async (change, context) => {
+    const {userId, senderId} = context.params as {userId: string; senderId: string};
+    const before = change.before.exists ? change.before.data() : undefined;
+    const after = change.after.exists ? change.after.data() : undefined;
+    if (!after || !isDatingLoopInvitationData(after)) return undefined;
+
+    const beforeStatus = datingPushStatus(before);
+    const afterStatus = datingPushStatus(after);
+
+    if (afterStatus === "pending" && beforeStatus !== "pending") {
+      const senderName = datingPushString(after.senderName, 80) ||
+        await readDatingDisplayName(senderId, "Someone");
+      const isSuperLike = datingPushString(after.context, 80).toLowerCase().includes("super like");
+      await sendDatingActivityPush({
+        recipientId: userId,
+        actorId: senderId,
+        type: isSuperLike ? "dating_super_like" : "dating_like",
+        title: isSuperLike ? `${senderName} Super Liked you` : `${senderName} liked you`,
+        body: isSuperLike ?
+          "You stood out to them on Dating Loop. Like back to match." :
+          "Open Dating Loop to see who liked you and like back to match.",
+        referenceId: senderId,
+      });
+      return undefined;
+    }
+
+    if (afterStatus === "accepted" && beforeStatus !== "accepted") {
+      const matchName = await readDatingDisplayName(userId, "Someone");
+      await sendDatingActivityPush({
+        recipientId: senderId,
+        actorId: userId,
+        type: "dating_match",
+        title: "It's a match!",
+        body: `You and ${matchName} liked each other. Continue on Blind Date to chat.`,
+        referenceId: userId,
+      });
+    }
+    return undefined;
+  });
+
+const datingCommentRenotifyCooldownMs = 60 * 60 * 1000;
+
+export const onDatingCommentWriteNotify = functions.firestore
+  .document("users/{userId}/dating_comments/{senderId}")
+  .onWrite(async (change, context) => {
+    const {userId, senderId} = context.params as {userId: string; senderId: string};
+    if (!change.after.exists) return undefined;
+    const after = change.after.data() || {};
+    const text = datingPushString(after.text, 120);
+    if (!text) return undefined;
+
+    if (change.before.exists) {
+      const before = change.before.data() || {};
+      if (datingPushString(before.text, 300) === datingPushString(after.text, 300)) return undefined;
+      const previous = before.updatedAt instanceof admin.firestore.Timestamp ?
+        before.updatedAt.toMillis() :
+        0;
+      if (Date.now() - previous < datingCommentRenotifyCooldownMs) return undefined;
+    }
+
+    const senderName = datingPushString(after.senderName, 80) ||
+      await readDatingDisplayName(senderId, "Someone");
+    await sendDatingActivityPush({
+      recipientId: userId,
+      actorId: senderId,
+      type: "dating_comment",
+      title: `${senderName} commented on your profile`,
+      body: text,
+      referenceId: senderId,
+    });
+    return undefined;
+  });
+
+export const onBlindDateInvitationWriteNotify = functions.firestore
+  .document("users/{userId}/blindDateInvitations/{senderId}")
+  .onWrite(async (change, context) => {
+    const {userId, senderId} = context.params as {userId: string; senderId: string};
+    if (!change.after.exists) return undefined;
+    const before = change.before.exists ? change.before.data() : undefined;
+    const after = change.after.data() || {};
+    const beforeStatus = datingPushStatus(before);
+    const afterStatus = datingPushStatus(after);
+
+    if (afterStatus === "pending" && beforeStatus !== "pending") {
+      const senderName = datingPushString(after.senderName, 80) || "Someone";
+      await sendDatingActivityPush({
+        recipientId: userId,
+        actorId: senderId,
+        type: "blind_date_invite",
+        title: "New Blind Date invite",
+        body: `${senderName} wants to start a Blind Date with you.`,
+        referenceId: senderId,
+      });
+      return undefined;
+    }
+
+    if (afterStatus === "accepted" && beforeStatus !== "accepted") {
+      const recipientName = datingPushString(after.recipientName, 80) || "Your match";
+      await sendDatingActivityPush({
+        recipientId: senderId,
+        actorId: userId,
+        type: "blind_date_match",
+        title: "Blind Date accepted",
+        body: `${recipientName} accepted your invite. Your private chat is open.`,
+        referenceId: datingPushString(after.matchedChatId, 128) || userId,
+      });
+    }
+    return undefined;
+  });
+
+// =============================================================================
 //  2A. GARAGE SALE PAYMENTS (NEW)
 // =============================================================================
 

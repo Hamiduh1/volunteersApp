@@ -173,3 +173,25 @@ These links are pinned to VolunteersAppiOS commit `249bab1`, so they keep showin
 Rules still let a client create a direct chat from a pending Dating Loop invitation (`canCreateDirectChatFromInvitation`),
 so old clients can keep opening free chats. Once Android ships item 1, tighten that rule for invitations whose `context`
 contains "dating loop".
+
+## 6) Push notifications for dating activity
+
+Three Firestore triggers in `my-firebase-functions/src/index.ts` send the push and write an in-app row to
+`users/{recipient}/notifications/{type}_{actorId}`. Both apps get them with no client change. Android only needs to
+route taps and show the settings toggle.
+
+| `data.type` | Sent to | When | Trigger |
+|---|---|---|---|
+| `dating_like` | the liked user | Dating Loop invitation becomes `pending` | `onDatingLoopInvitationWriteNotify` |
+| `dating_super_like` | the liked user | same, `context` contains "super like" | `onDatingLoopInvitationWriteNotify` |
+| `dating_match` | the original liker | that invitation becomes `accepted` | `onDatingLoopInvitationWriteNotify` |
+| `dating_comment` | the profile owner | comment created, or text changed more than 1 hour after the last edit | `onDatingCommentWriteNotify` |
+| `blind_date_invite` | the invited user | `blindDateInvitations` doc becomes `pending` | `onBlindDateInvitationWriteNotify` |
+| `blind_date_match` | the inviter | that invite becomes `accepted` | `onBlindDateInvitationWriteNotify` |
+
+- Payload `data`: `type`, `actorId`, `referenceId` (actor uid; `matchedChatId` for `blind_date_match`), `receiverId`.
+- Invitation pushes only fire when `context` contains "dating loop", so other chat invitations are untouched.
+- Skipped when either user blocked the other (`settings/chat_privacy.blockedUserIds`) or when the recipient set
+  `users/{uid}/settings/notifications.datingActivity` to `false` (missing means on).
+- Tap routing on iOS: `dating_*` opens Dating Loop, `blind_date_*` opens Blind Date
+  (`Core/Services/DatingPushRoute.swift`).
