@@ -13035,10 +13035,22 @@ const afriexPayoutLimitUsageRef = (utcDate: string) =>
 
 const currentUtcDateKey = (): string => new Date().toISOString().slice(0, 10);
 
+// One sender must not be able to consume the whole shared account-level ceiling.
+const afriexProductionPerSenderDailyLimitUsd = (): number => {
+  const configured = Number(process.env.AFRIEX_PRODUCTION_PER_SENDER_DAILY_LIMIT_USD || "");
+  return Number.isFinite(configured) && configured > 0 ?
+    Math.min(configured, AFRIEX_PRODUCTION_PAYOUT_DAILY_LIMIT_USD) :
+    AFRIEX_PRODUCTION_PAYOUT_TRANSACTION_LIMIT_USD;
+};
+
+const afriexPayoutLimitSenderUsageRef = (utcDate: string, senderId: string) =>
+  afriexPayoutLimitUsageRef(utcDate).collection("senders").doc(senderId);
+
 const assertAfriexProductionPayoutDailyCapacity = async (params: {
   config: AfriexBusinessApiConfig;
   route: string;
   amountUsd: number;
+  senderId?: string;
 }): Promise<void> => {
   if (!isAfriexProductionPayoutCapRoute(params.config, params.route)) return;
   const usageSnap = await afriexPayoutLimitUsageRef(currentUtcDateKey()).get();
@@ -13047,6 +13059,16 @@ const assertAfriexProductionPayoutDailyCapacity = async (params: {
     throw new functions.https.HttpsError(
       "failed-precondition",
       `Afriex production payouts are limited to $${AFRIEX_PRODUCTION_PAYOUT_DAILY_LIMIT_USD.toLocaleString("en-US")} per UTC day.`
+    );
+  }
+  if (!params.senderId) return;
+  const senderLimitUsd = afriexProductionPerSenderDailyLimitUsd();
+  const senderUsageSnap = await afriexPayoutLimitSenderUsageRef(currentUtcDateKey(), params.senderId).get();
+  const senderUsedUsd = roundMoney(Number(senderUsageSnap.get("attemptedAmountUsd") || 0));
+  if (senderUsedUsd + params.amountUsd > senderLimitUsd + 0.0001) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `Transfers on this route are limited to $${senderLimitUsd.toLocaleString("en-US")} per sender per UTC day.`
     );
   }
 };
@@ -13063,14 +13085,43 @@ const reserveAfriexProductionPayoutLimit = async (params: {
   assertAfriexProductionPayoutTransactionLimit(params.config, params.route, params.amountUsd);
   const utcDate = currentUtcDateKey();
   const usageRef = afriexPayoutLimitUsageRef(utcDate);
+  const senderUsageRef = afriexPayoutLimitSenderUsageRef(utcDate, params.senderId);
+  const senderLimitUsd = afriexProductionPerSenderDailyLimitUsd();
   await db.runTransaction(async (transaction) => {
-    const usageSnap = await transaction.get(usageRef);
+    const [usageSnap, senderUsageSnap] = await Promise.all([
+      transaction.get(usageRef),
+      transaction.get(senderUsageRef),
+    ]);
     const usedUsd = roundMoney(Number(usageSnap.get("attemptedAmountUsd") || 0));
     if (usedUsd + params.amountUsd > AFRIEX_PRODUCTION_PAYOUT_DAILY_LIMIT_USD + 0.0001) {
       throw new functions.https.HttpsError(
         "failed-precondition",
         `Afriex production payouts are limited to $${AFRIEX_PRODUCTION_PAYOUT_DAILY_LIMIT_USD.toLocaleString("en-US")} per UTC day.`
       );
+    }
+    const senderUsedUsd = roundMoney(Number(senderUsageSnap.get("attemptedAmountUsd") || 0));
+    if (senderUsedUsd + params.amountUsd > senderLimitUsd + 0.0001) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `Transfers on this route are limited to $${senderLimitUsd.toLocaleString("en-US")} per sender per UTC day.`
+      );
+    }
+    transaction.set(senderUsageRef, {
+      utcDate,
+      senderId: params.senderId,
+      attemptedAmountUsd: roundMoney(senderUsedUsd + params.amountUsd),
+      attemptedTransferCount: Number(senderUsageSnap.get("attemptedTransferCount") || 0) + 1,
+      updatedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+    if (params.quoteId) {
+      // releaseWalletTransferQuoteReservation returns this capacity if the send never starts.
+      transaction.set(db.collection("wallet_transfer_quotes").doc(params.quoteId), {
+        afriexCapReservation: {
+          utcDate,
+          amountUsd: params.amountUsd,
+          released: false,
+        },
+      }, {merge: true});
     }
     transaction.set(usageRef, {
       utcDate,
@@ -15330,7 +15381,41 @@ const releaseWalletTransferQuoteReservation = async (params: {
     const releasable = status === "IN_PROGRESS" ||
       (params.includeFundingInProgress === true && status === "FUNDING_IN_PROGRESS");
     if (!releasable || quoteSnap.get("consumedAt")) return;
+
+    const capReservation = quoteSnap.get("afriexCapReservation") as
+      {utcDate?: unknown; amountUsd?: unknown; released?: unknown} | undefined;
+    const capUtcDate = asNonEmptyString(capReservation?.utcDate);
+    const capAmountUsd = roundMoney(Number(capReservation?.amountUsd || 0));
+    const capReleaseFields: FirebaseFirestore.DocumentData = {};
+    if (capReservation && capReservation.released !== true && capUtcDate && capAmountUsd > 0) {
+      const usageRef = afriexPayoutLimitUsageRef(capUtcDate);
+      const senderUsageRef = afriexPayoutLimitSenderUsageRef(capUtcDate, params.senderId);
+      const [usageSnap, senderUsageSnap] = await Promise.all([
+        transaction.get(usageRef),
+        transaction.get(senderUsageRef),
+      ]);
+      const now = admin.firestore.Timestamp.now();
+      if (usageSnap.exists) {
+        transaction.set(usageRef, {
+          attemptedAmountUsd: Math.max(0, roundMoney(Number(usageSnap.get("attemptedAmountUsd") || 0) - capAmountUsd)),
+          releasedAmountUsd: roundMoney(Number(usageSnap.get("releasedAmountUsd") || 0) + capAmountUsd),
+          updatedAt: now,
+        }, {merge: true});
+      }
+      if (senderUsageSnap.exists) {
+        transaction.set(senderUsageRef, {
+          attemptedAmountUsd: Math.max(
+            0,
+            roundMoney(Number(senderUsageSnap.get("attemptedAmountUsd") || 0) - capAmountUsd)
+          ),
+          updatedAt: now,
+        }, {merge: true});
+      }
+      capReleaseFields.afriexCapReservation = {released: true, releasedAt: now};
+    }
+
     transaction.set(quoteRef, {
+      ...capReleaseFields,
       reservationStatus: "RELEASED",
       reservationReleasedAt: admin.firestore.Timestamp.now(),
       reservationReleaseReason: params.reason,
@@ -26221,6 +26306,7 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
         config,
         route: providerDeliveryRoute,
         amountUsd: amount,
+        senderId: context.auth.uid,
       });
     }
     if (
@@ -26247,6 +26333,7 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
           config,
           route: providerDeliveryRoute,
           amountUsd: amount,
+          senderId: context.auth.uid,
         });
       }
     }
