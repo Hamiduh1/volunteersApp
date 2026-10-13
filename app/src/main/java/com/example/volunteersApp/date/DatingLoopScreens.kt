@@ -83,6 +83,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -113,6 +115,16 @@ internal fun datingInviteLabel(status: DatingRelationStatus, inFlight: Boolean):
 /** Dating Loop matches chat on Blind Date unless a chat already exists between the two. */
 internal fun datingMatchChatLabel(chatId: String?): String =
     if (chatId.isNullOrBlank()) "Chat on Blind Date" else "Send a message"
+
+/** Widens a child past its parent's horizontal padding so it touches the screen edges. */
+private fun Modifier.bleedHorizontally(inset: Dp): Modifier = layout { measurable, constraints ->
+    val extra = (inset * 2).roundToPx()
+    val width = constraints.maxWidth + extra
+    val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+    layout(constraints.maxWidth, placeable.height) {
+        placeable.place(-extra / 2, 0)
+    }
+}
 
 private fun DatingRelationStatus.badgeLabel(): String? = when (this) {
     DatingRelationStatus.Matched -> "Match"
@@ -743,8 +755,9 @@ internal fun DatingProfileFullScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .bleedHorizontally(16.dp)
                             .aspectRatio(3f / 4f)
-                            .clip(RoundedCornerShape(24.dp))
+                            .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
                             .background(DateA11yPalette.photoPlaceholder)
                     ) {
                         if (photos.isEmpty()) {

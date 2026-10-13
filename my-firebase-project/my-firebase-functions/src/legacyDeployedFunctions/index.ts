@@ -132,7 +132,7 @@ const getApiKeys = () => {
 
   const stripeFromEnv = isSandboxRuntime ?
     firstNonEmptyString(process.env.STRIPE_SECRET_KEY_TEST) :
-    firstNonEmptyString(process.env.STRIPE_SECRET_KEY, stripeSecretLiveParam.value());
+    firstNonEmptyString(process.env.STRIPE_SECRET_KEY_LIVE, process.env.STRIPE_SECRET_KEY, stripeSecretLiveParam.value());
 
   // Legacy `functions.config().stripe.secret_key` is often still `sk_live_...` on old projects.
   // Never use it in test/sandbox mode — that causes "token in one mode, secret in the other".
