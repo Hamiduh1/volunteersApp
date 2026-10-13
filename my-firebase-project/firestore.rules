@@ -1008,6 +1008,20 @@ service cloud.firestore {
         'payoutAccountId',
         'stripeAccountId',
         'chargeCustomerId',
+        'afriexBusinessCustomerId',
+        'afriexBusinessCustomerCountry',
+        'afriexBusinessCustomerReference',
+        'afriexBusinessCustomerUpdatedAt',
+        'providerCustomerId',
+        'walletProvider',
+        'walletMigration',
+        'walletCurrency',
+        'defaultCurrency',
+        'stripeConnectCommerceServices',
+        'stripeConnectPurpose',
+        'chargesEnabled',
+        'payoutsEnabled',
+        'detailsSubmitted',
         'lastFundingSource',
         'supportAccess',
         'isStaff',
@@ -1020,6 +1034,7 @@ service cloud.firestore {
         'supportGrantedBy',
         'supportNote',
         'birthDate',
+        'dateOfBirth',
         'isMinor',
         'requiresParentalConsent',
         'canAccessDating',
@@ -2758,7 +2773,8 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         (docId != 'platform_revenue' &&
           docId != 'afriex_business_wallet' &&
-          docId != 'stripe_platform_settlement_mirror') || isPlatformAdmin()
+          docId != 'stripe_platform_settlement_mirror' &&
+          docId != 'stripe_platform_income_mirror') || isPlatformAdmin()
       );
       allow write: if false;
 

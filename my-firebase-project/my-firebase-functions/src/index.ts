@@ -354,13 +354,19 @@ const acquireAppUserTransferLock = async (params: {
 const releaseAppUserTransferLock = async (params: {
   senderId: string;
   payoutRequestId: string;
+  // Mobile-money-funded sends lock on the collection request; delivery runs under a new payout id.
+  collectionRequestId?: string | null;
   outcome: "FUNDING_FAILED" | "DELIVERED";
 }): Promise<void> => {
   const lockRef = appUserTransferLockRef(params.senderId);
   await db.runTransaction(async (transaction) => {
     const lockSnap = await transaction.get(lockRef);
     if (!lockSnap.exists || lockSnap.get("active") !== true) return;
-    if (asNonEmptyString(lockSnap.get("payoutRequestId")) !== params.payoutRequestId) return;
+    const lockedPayoutRequestId = asNonEmptyString(lockSnap.get("payoutRequestId"));
+    if (
+      lockedPayoutRequestId !== params.payoutRequestId &&
+      (!params.collectionRequestId || lockedPayoutRequestId !== params.collectionRequestId)
+    ) return;
 
     transaction.set(lockRef, {
       active: false,
@@ -16840,9 +16846,11 @@ const initiateTransferHandler = async (
   const requestData = data as InitiateTransferRequest;
   const providerWalletOnlyMode = !isInternalWalletCustodyAllowed();
 
-  if (!requestData.amount || requestData.amount <= 0) {
+  // Callable payloads are untyped JSON; a string amount would concatenate with fees.
+  if (typeof requestData.amount !== "number" || !Number.isFinite(requestData.amount) || requestData.amount <= 0) {
     throw new functions.https.HttpsError("invalid-argument", "Transfer amount must be positive.");
   }
+  requestData.amount = roundMoney(requestData.amount);
   if (!requestData.recipientId && !requestData.recipientBeneficiary) {
     throw new functions.https.HttpsError("invalid-argument", "A recipient must be specified.");
   }
@@ -20774,6 +20782,7 @@ export const onMobileMoneyPayoutStatusChanged = functions.firestore
       await releaseAppUserTransferLock({
         senderId,
         payoutRequestId: change.after.id,
+        collectionRequestId: asNonEmptyString(after.collectionRequestId),
         outcome: nextTxStatus === "COMPLETED" ? "DELIVERED" : "FUNDING_FAILED",
       });
     }
