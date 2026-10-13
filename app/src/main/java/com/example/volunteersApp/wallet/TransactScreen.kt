@@ -6806,7 +6806,7 @@ private fun TransferQuotePendingCard(message: String, onRetry: (() -> Unit)? = n
             Text(message, style = MaterialTheme.typography.bodySmall, color = SendMoneyTextSecondary)
             Text(
                 if (routeUnavailable) {
-                    "Choose another receive route, or try again after this environment's payout UAT is enabled."
+                    "Choose another receive route, or try again later."
                 } else {
                     "You will see one combined transfer fee before you confirm."
                 },

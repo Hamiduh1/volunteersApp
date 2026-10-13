@@ -75,6 +75,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Button
@@ -1332,8 +1333,12 @@ private fun DatingLoopScreen(
     val commentsBySender = uiState.visibleDatingComments.associateBy { it.senderId }
     var blockTarget by remember { mutableStateOf<DatingProfile?>(null) }
     var showFilters by remember { mutableStateOf(false) }
+    var showMatchesSheet by remember { mutableStateOf(false) }
     val modernLayout = uiState.browseLayout != DatingBrowseLayout.Discover ||
         uiState.datingLoopTab == DatingLoopTab.LikesYou
+    val fullScreenDeck = modernLayout &&
+        uiState.browseLayout == DatingBrowseLayout.Swipe &&
+        uiState.datingLoopTab != DatingLoopTab.LikesYou
     val openChatWith: (String, String, String) -> Unit = { uid, name, photo ->
         onOpenMatchChat(
             uiState.matches.firstOrNull { it.uid == uid }
@@ -1390,6 +1395,37 @@ private fun DatingLoopScreen(
                         }
                     },
                     actions = {
+                        if (fullScreenDeck) {
+                            IconButton(onClick = { onTabChange(DatingLoopTab.LikesYou) }) {
+                                BadgedBox(
+                                    badge = {
+                                        if (uiState.likesYou.isNotEmpty()) {
+                                            Badge { Text(uiState.likesYou.size.coerceAtMost(99).toString()) }
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        Icons.Default.Favorite,
+                                        contentDescription = "Likes you, ${uiState.likesYou.size}",
+                                        tint = Color(0xFFB8860B)
+                                    )
+                                }
+                            }
+                            IconButton(onClick = { showMatchesSheet = true }) {
+                                BadgedBox(
+                                    badge = {
+                                        if (uiState.matches.isNotEmpty()) {
+                                            Badge { Text(uiState.matches.size.coerceAtMost(99).toString()) }
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Chat,
+                                        contentDescription = "Your matches, ${uiState.matches.size}"
+                                    )
+                                }
+                            }
+                        }
                         IconButton(onClick = onAskAi) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = "Dating assistant")
                         }
@@ -1443,6 +1479,7 @@ private fun DatingLoopScreen(
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
+                            if (!fullScreenDeck) {
                             DatingMatchesStrip(
                                 likesYouCount = uiState.likesYou.size,
                                 likesYouPreviewUrl = uiState.likesYou.firstOrNull()?.senderPhotoUrl,
@@ -1450,6 +1487,7 @@ private fun DatingLoopScreen(
                                 onOpenLikesYou = { onTabChange(DatingLoopTab.LikesYou) },
                                 onOpenMatch = onOpenMatchChat,
                             )
+                            }
                             DatingBrowseBar(
                                 layout = uiState.browseLayout,
                                 onLayoutChange = onBrowseLayoutChange,
@@ -1489,7 +1527,7 @@ private fun DatingLoopScreen(
                                 onSuperLike = { profile -> onSuperLike(profile) { banner -> localBanner = banner } },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                                    .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
                                 fillHeight = true,
                                 superLikedByIds = uiState.superLikedByIds,
                                 canUndo = uiState.passHistory.isNotEmpty(),
@@ -1770,6 +1808,40 @@ private fun DatingLoopScreen(
             onReset = onClearFilters,
             onDismiss = { showFilters = false },
         )
+    }
+
+    if (showMatchesSheet) {
+        ModalBottomSheet(onDismissRequest = { showMatchesSheet = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Your matches", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (uiState.matches.isEmpty() && uiState.likesYou.isEmpty()) {
+                    Text(
+                        "No matches yet. Keep swiping — when you both like each other, they show up here.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    DatingMatchesStrip(
+                        likesYouCount = uiState.likesYou.size,
+                        likesYouPreviewUrl = uiState.likesYou.firstOrNull()?.senderPhotoUrl,
+                        matches = uiState.matches,
+                        onOpenLikesYou = {
+                            showMatchesSheet = false
+                            onTabChange(DatingLoopTab.LikesYou)
+                        },
+                        onOpenMatch = { match ->
+                            showMatchesSheet = false
+                            onOpenMatchChat(match)
+                        },
+                    )
+                }
+            }
+        }
     }
 
     selectedProfile?.let { profile ->

@@ -460,12 +460,12 @@ fun OwnerDashboardScreen(
                         highlight = Color(0xFF0F766E)
                     )
                     ProviderReadinessRow(
-                        label = "Bank and SWIFT payout UAT",
+                        label = "Bank and SWIFT payouts",
                         value = if (bankSwiftPayoutsEnabled) "Execution enabled" else "Execution gated",
                         detail = if (bankSwiftPayoutsEnabled) {
-                            "Use only approved sandbox corridors and the documented UAT cases."
+                            "Live payouts are enabled for the approved corridors."
                         } else {
-                            "Send Money blocks these rails before funding or provider submission. Enable only after approved UAT."
+                            "Send Money blocks these rails before funding or provider submission until execution is enabled."
                         },
                         highlight = if (bankSwiftPayoutsEnabled) Color(0xFF0F766E) else Color(0xFF9A6700)
                     )
@@ -563,7 +563,7 @@ fun OwnerDashboardScreen(
                             modifier = Modifier.weight(1f)
                         )
                         CorridorCoverageChip(
-                            label = "MM payout UAT",
+                            label = "MM payout",
                             count = afriexCorridorCoverage.mobileMoneyPayoutLive,
                             modifier = Modifier.weight(1f)
                         )
@@ -603,7 +603,7 @@ fun OwnerDashboardScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        "Coverage is reference data, not an execution switch. Bank and SWIFT remain unavailable until the provider UAT gate above is enabled.",
+                        "Coverage is reference data, not an execution switch. Bank and SWIFT stay unavailable while execution above is gated.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF5F4B00)
                     )

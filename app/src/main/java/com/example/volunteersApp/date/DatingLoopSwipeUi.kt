@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -85,6 +86,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -99,6 +101,8 @@ private val SwipeLikeColor = Color(0xFF1B8A5A)
 private val SwipePassColor = Color(0xFFC62828)
 internal val SwipeSuperLikeColor = Color(0xFF1565C0)
 private val SwipeUndoColor = Color(0xFFB7791F)
+/** Keeps the name and details above the floating action buttons on the full-screen card. */
+private val SwipeOverlayInfoBottomPadding = 100.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -185,9 +189,10 @@ internal fun DatingSwipeDeck(
                     profile = behind,
                     viewer = viewer,
                     superLikedYou = behind.uid in superLikedByIds,
+                    contentBottomPadding = if (fillHeight) SwipeOverlayInfoBottomPadding else 18.dp,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(bottom = 76.dp)
+                        .padding(bottom = if (fillHeight) 0.dp else 76.dp)
                         .graphicsLayer {
                             scaleX = 0.95f + 0.05f * topDragFraction
                             scaleY = 0.95f + 0.05f * topDragFraction
@@ -282,11 +287,11 @@ private fun SwipeableTopCard(
         val progress = (offsetX.value / threshold).coerceIn(-1f, 1f)
         val superProgress = (-offsetY.value / threshold).coerceIn(0f, 1f)
 
-        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .then(if (allowSwipeUp) Modifier.fillMaxSize() else Modifier.fillMaxHeight().padding(bottom = 74.dp))
                     .offset { IntOffset(offsetX.value.roundToInt(), offsetY.value.roundToInt()) }
                     .graphicsLayer { rotationZ = offsetX.value / 22f }
                     .pointerInput(profile.uid, allowSwipeUp, superLikesLeft) {
@@ -358,7 +363,8 @@ private fun SwipeableTopCard(
                     viewer = viewer,
                     onOpenProfile = onOpenProfile,
                     superLikedYou = superLikedYou,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    contentBottomPadding = if (allowSwipeUp) SwipeOverlayInfoBottomPadding else 18.dp,
                 )
                 SwipeStamp(
                     text = "LIKE",
@@ -388,7 +394,10 @@ private fun SwipeableTopCard(
             }
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = if (allowSwipeUp) 16.dp else 0.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -515,6 +524,7 @@ internal fun DatingSwipeCard(
     modifier: Modifier = Modifier,
     onOpenProfile: (() -> Unit)? = null,
     superLikedYou: Boolean = false,
+    contentBottomPadding: Dp = 18.dp,
 ) {
     val photos = remember(profile.uid, profile.imageUrls) { profile.resolvedImageUrls() }
     var photoIndex by remember(profile.uid) { mutableStateOf(0) }
@@ -599,7 +609,7 @@ internal fun DatingSwipeCard(
                             Modifier
                         }
                     )
-                    .padding(start = 18.dp, end = 18.dp, top = 48.dp, bottom = 18.dp),
+                    .padding(start = 18.dp, end = 18.dp, top = 48.dp, bottom = contentBottomPadding),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
