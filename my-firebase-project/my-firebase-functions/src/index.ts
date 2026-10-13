@@ -11082,6 +11082,9 @@ const hasServerIssuedBeneficiaryProof = (stored: Record<string, unknown>): boole
   const hasCanonicalServerIdentityProof =
     isServerMarkedVerified && verifiedStatus && hasServerRouteIdentity;
   if (hasCanonicalServerIdentityProof) return true;
+  // Owners can edit route fields on their saved recipients. A stored identity
+  // that no longer matches means the route changed after verification.
+  if (asNonEmptyString(stored.recipientIdentityKey) && !hasServerRouteIdentity) return false;
 
   const hasCompleteLegacyRoute = (() => {
     try {
@@ -11094,8 +11097,8 @@ const hasServerIssuedBeneficiaryProof = (stored: Record<string, unknown>): boole
       return false;
     }
   })();
-  // Beneficiaries are server-write-only in Firestore. Earlier iOS releases
-  // stored a verified provider status and complete route without the later
+  // Firestore rules reset verificationStatus when an owner edits route fields.
+  // Earlier iOS releases stored a verified provider status and complete route without the later
   // marker/audit fields; accept that server-owned proof rather than forcing
   // a second provider lookup from Android.
   if (verifiedStatus && hasCompleteLegacyRoute) return true;
@@ -21682,6 +21685,25 @@ export const reconcilePendingBankDeposits = functions.pubsub
     return null;
   });
 
+/**
+ * Stripe webhooks are at-least-once and overlap the scheduled reconciler, so a
+ * bank-funded payout leaves bank settlement exactly once.
+ * @param {FirebaseFirestore.DocumentReference} payoutRef Payout request document.
+ * @param {FirebaseFirestore.DocumentData} update Fields to merge when the payout is still awaiting bank settlement.
+ * @return {Promise<boolean>} Whether this caller applied the transition.
+ */
+const advancePendingBankSettlement = async (
+  payoutRef: FirebaseFirestore.DocumentReference,
+  update: FirebaseFirestore.DocumentData
+): Promise<boolean> => db.runTransaction(async (transaction) => {
+  const snap = await transaction.get(payoutRef);
+  if (!snap.exists) return false;
+  const status = String(snap.get("status") || "").trim().toUpperCase();
+  if (status !== "PENDING_BANK_SETTLEMENT" && status !== "PROCESSING_BANK_SETTLEMENT") return false;
+  transaction.set(payoutRef, update, {merge: true});
+  return true;
+});
+
 const settlePendingStripeFundedAppUserTransfer = async (
   payoutRef: FirebaseFirestore.DocumentReference,
   payoutData: FirebaseFirestore.DocumentData
@@ -21689,12 +21711,13 @@ const settlePendingStripeFundedAppUserTransfer = async (
   const senderId = asNonEmptyString(payoutData.senderId);
   const bankChargeId = asNonEmptyString(payoutData.fundingBankChargeId);
   if (!bankChargeId) {
-    await payoutRef.set({
+    const failed = await advancePendingBankSettlement(payoutRef, {
       status: "FAILED",
       providerStatus: "FAILED",
       errorMessage: "Missing bank charge reference for settlement.",
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
+    if (!failed) return;
     if (senderId) {
       await finalizeSenderTransactionsForPayout(senderId, payoutRef, payoutData, "FAILED");
       await releaseAppUserTransferLock({
@@ -21709,12 +21732,13 @@ const settlePendingStripeFundedAppUserTransfer = async (
   const charge = await getStripe().charges.retrieve(bankChargeId);
   const chargeStatus = String((charge as Stripe.Charge).status || "").toLowerCase();
   if (chargeStatus === "succeeded") {
-    await payoutRef.set({
+    const settled = await advancePendingBankSettlement(payoutRef, {
       status: "PENDING",
       fundingBankChargeStatus: chargeStatus,
       bankSettlementCompletedAt: admin.firestore.Timestamp.now(),
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
+    if (!settled) return;
     const refreshed = await payoutRef.get();
     if (refreshed.exists) {
       try {
@@ -21733,17 +21757,17 @@ const settlePendingStripeFundedAppUserTransfer = async (
     return;
   }
   if (chargeStatus === "pending") {
-    await payoutRef.set({
+    await advancePendingBankSettlement(payoutRef, {
       status: "PENDING_BANK_SETTLEMENT",
       fundingBankChargeStatus: chargeStatus,
       lastStatusCheckAt: admin.firestore.Timestamp.now(),
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
     return;
   }
 
   const failureMessage = "Bank funding did not settle. Transfer was cancelled.";
-  await payoutRef.set({
+  const failed = await advancePendingBankSettlement(payoutRef, {
     status: "FAILED",
     providerStatus: "FAILED",
     errorMessage: failureMessage,
@@ -21751,7 +21775,8 @@ const settlePendingStripeFundedAppUserTransfer = async (
     fundingBankChargeStatus: chargeStatus || "failed",
     lastStatusCheckAt: admin.firestore.Timestamp.now(),
     processedAt: admin.firestore.Timestamp.now(),
-  }, {merge: true});
+  });
+  if (!failed) return;
   if (senderId) {
     await finalizeSenderTransactionsForPayout(senderId, payoutRef, payoutData, "FAILED");
     await releaseAppUserTransferLock({
@@ -21769,14 +21794,14 @@ const settlePendingBankFundedTransferRequest = async (
   const senderId = asNonEmptyString(payoutData.senderId);
   const bankChargeId = asNonEmptyString(payoutData.fundingBankChargeId);
   if (!bankChargeId) {
-    await payoutRef.set({
+    const failed = await advancePendingBankSettlement(payoutRef, {
       status: "FAILED",
       providerStatus: "FAILED",
       errorMessage: "Missing bank charge reference for settlement.",
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
 
-    if (senderId) {
+    if (failed && senderId) {
       await finalizeSenderTransactionsForPayout(senderId, payoutRef, payoutData, "FAILED");
     }
     return;
@@ -21786,12 +21811,13 @@ const settlePendingBankFundedTransferRequest = async (
   const chargeStatus = String((charge as Stripe.Charge).status || "").toLowerCase();
 
   if (chargeStatus === "succeeded") {
-    await payoutRef.set({
+    const settled = await advancePendingBankSettlement(payoutRef, {
       status: "PENDING_PROVIDER",
       fundingBankChargeStatus: chargeStatus,
       bankSettlementCompletedAt: admin.firestore.Timestamp.now(),
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
+    if (!settled) return;
 
     const refreshed = await payoutRef.get();
     if (refreshed.exists) {
@@ -21801,17 +21827,17 @@ const settlePendingBankFundedTransferRequest = async (
   }
 
   if (chargeStatus === "pending") {
-    await payoutRef.set({
+    await advancePendingBankSettlement(payoutRef, {
       status: "PENDING_BANK_SETTLEMENT",
       fundingBankChargeStatus: chargeStatus,
       lastStatusCheckAt: admin.firestore.Timestamp.now(),
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
     return;
   }
 
   const failureMessage = "Bank funding did not settle. Transfer was cancelled.";
-  await payoutRef.set({
+  const failed = await advancePendingBankSettlement(payoutRef, {
     status: "FAILED",
     providerStatus: "FAILED",
     errorMessage: failureMessage,
@@ -21819,9 +21845,9 @@ const settlePendingBankFundedTransferRequest = async (
     fundingBankChargeStatus: chargeStatus || "failed",
     lastStatusCheckAt: admin.firestore.Timestamp.now(),
     processedAt: admin.firestore.Timestamp.now(),
-  }, {merge: true});
+  });
 
-  if (senderId) {
+  if (failed && senderId) {
     await finalizeSenderTransactionsForPayout(senderId, payoutRef, payoutData, "FAILED");
   }
 };

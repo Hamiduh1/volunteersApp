@@ -258,6 +258,34 @@ service cloud.firestore {
       ];
     }
 
+    function beneficiaryRouteIdentityFields() {
+      return [
+        'name',
+        'country',
+        'network',
+        'phone',
+        'phoneNumber',
+        'recipientPhone',
+        'accountNumber',
+        'accountNumberRaw',
+        'bankAccountNumber',
+        'bankName',
+        'institutionName',
+        'providerInstitutionName',
+        'institutionCode',
+        'providerInstitutionCode',
+        'afriexInstitutionCode',
+        'providerChannel',
+        'afriexProviderChannel',
+        'swiftBic',
+        'recipientAddress',
+        'institutionAddress',
+        'route',
+        'afriexPayoutRoute',
+        'type'
+      ];
+    }
+
     function beneficiaryRouteFrom(data) {
       return ('type' in data) ? data.type :
         (('route' in data) ? data.route :
@@ -380,6 +408,9 @@ service cloud.firestore {
         // details. Provider-confirmed statuses are server-owned.
         && (!request.writeFields.hasAny(['verificationStatus']) ||
           request.resource.data.verificationStatus == 'UNVERIFIED')
+        // Changing where money is delivered invalidates the earlier provider check.
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(beneficiaryRouteIdentityFields()) ||
+          request.resource.data.get('verificationStatus', '') == 'UNVERIFIED')
         && (!request.writeFields.hasAny(['isAppUser']) || request.resource.data.isAppUser is bool)
         && (!request.writeFields.hasAny(['lastTransferAtMs']) || request.resource.data.lastTransferAtMs is int);
     }
