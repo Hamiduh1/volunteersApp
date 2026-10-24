@@ -264,9 +264,9 @@ class ChatListViewModel : ViewModel() {
 
 
 
-        if (selectedUserIds.isEmpty()) {
+        if (selectedUserIds.size < 2) {
 
-            _event.value = ChatListEvent.ShowToast("Choose at least one friend for your group.")
+            _event.value = ChatListEvent.ShowToast("Choose at least two friends for your group. To chat with one person, send them a chat invite.")
 
             return
 
