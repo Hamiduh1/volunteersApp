@@ -561,8 +561,8 @@ service cloud.firestore {
         && blindDateProfileIsActive(senderUid)
         && blindDateProfileIsActive(recipientUid)
         && blindDateSenderCanInvite(senderUid)
-        && !hasUserBlocked(recipientUid, senderUid)
-        && !hasUserBlocked(senderUid, recipientUid);
+        && !hasAnyUserBlock(recipientUid, senderUid)
+        && !hasAnyUserBlock(senderUid, recipientUid);
     }
 
     // Chats: treat users in exitedParticipantIds as no longer authorized (prevents modified clients
@@ -614,6 +614,19 @@ service cloud.firestore {
         );
     }
 
+    // Android blocks live in settings/chat_privacy.blockedUserIds; iOS writes the blocked_users subcollections.
+    // Scoped to chats, invitations and dating so live/marketplace access-call budgets are unchanged.
+    function hasAnyUserBlock(blockerUid, blockedUid) {
+      return hasUserBlocked(blockerUid, blockedUid) || (
+        blockerUid is string
+        && blockedUid is string
+        && blockerUid.size() > 0
+        && exists(/databases/$(database)/documents/users/$(blockerUid)/settings/chat_privacy)
+        && get(/databases/$(database)/documents/users/$(blockerUid)/settings/chat_privacy).data.get('blockedUserIds', []) is list
+        && blockedUid in get(/databases/$(database)/documents/users/$(blockerUid)/settings/chat_privacy).data.get('blockedUserIds', [])
+      );
+    }
+
     // Android / legacy clients sometimes omit `chatType` or use different casing.
     // Treat explicit `group` as group; otherwise two-participant chats behave as direct for exit + block rules.
     function isExplicitGroupChatType(data) {
@@ -645,8 +658,8 @@ service cloud.firestore {
       return inferredDirectChat(data)
         && participants.size() == 2
         && (
-          hasUserBlocked(firstUid, secondUid) ||
-          hasUserBlocked(secondUid, firstUid)
+          hasAnyUserBlock(firstUid, secondUid) ||
+          hasAnyUserBlock(secondUid, firstUid)
         );
     }
 
@@ -717,8 +730,8 @@ service cloud.firestore {
             && exists(/databases/$(database)/documents/dating_profiles/$(recipientUid))
           )
         )
-        && !hasUserBlocked(recipientUid, senderUid)
-        && !hasUserBlocked(senderUid, recipientUid);
+        && !hasAnyUserBlock(recipientUid, senderUid)
+        && !hasAnyUserBlock(senderUid, recipientUid);
     }
 
     function isChatInvitationResponse() {
@@ -781,8 +794,8 @@ service cloud.firestore {
         && firstUid is string
         && secondUid is string
         && firstUid != secondUid
-        && !hasUserBlocked(firstUid, secondUid)
-        && !hasUserBlocked(secondUid, firstUid)
+        && !hasAnyUserBlock(firstUid, secondUid)
+        && !hasAnyUserBlock(secondUid, firstUid)
         && (
           (request.auth.uid == firstUid && hasPendingChatInvitation(secondUid, firstUid)) ||
           (request.auth.uid == secondUid && hasPendingChatInvitation(firstUid, secondUid))
@@ -1548,8 +1561,8 @@ service cloud.firestore {
           && blindDateProfileIsActive(request.auth.uid)
           && blindDateProfileIsActive(userId)
           && blindDateSenderCanInvite(request.auth.uid)
-          && !hasUserBlocked(userId, invitationId)
-          && !hasUserBlocked(invitationId, userId);
+          && !hasAnyUserBlock(userId, invitationId)
+          && !hasAnyUserBlock(invitationId, userId);
         allow read: if request.auth.uid == userId;
         // Accept/decline must go through Cloud Functions (Admin SDK). Sender may re-send after decline.
         allow update: if request.auth.uid == invitationId
@@ -1568,8 +1581,8 @@ service cloud.firestore {
           && blindDateProfileIsActive(request.auth.uid)
           && blindDateProfileIsActive(recipientId)
           && blindDateSenderCanInvite(request.auth.uid)
-          && !hasUserBlocked(recipientId, request.auth.uid)
-          && !hasUserBlocked(request.auth.uid, recipientId);
+          && !hasAnyUserBlock(recipientId, request.auth.uid)
+          && !hasAnyUserBlock(request.auth.uid, recipientId);
         // Mirrors the incoming invite: the sender may re-send only after a decline.
         allow update: if isOwner(userId) && isSafeBlindDateInvitationResend(userId, recipientId);
         allow delete: if false;
@@ -1789,8 +1802,8 @@ service cloud.firestore {
           && userCanAccessDating(senderId)
           && exists(/databases/$(database)/documents/dating_profiles/$(senderId))
           && exists(/databases/$(database)/documents/dating_profiles/$(userId))
-          && !hasUserBlocked(userId, senderId)
-          && !hasUserBlocked(senderId, userId)
+          && !hasAnyUserBlock(userId, senderId)
+          && !hasAnyUserBlock(senderId, userId)
           && request.resource.data.keys().hasOnly(['senderId', 'senderName', 'senderPhotoUrl', 'text', 'createdAt', 'updatedAt'])
           && request.resource.data.senderId == senderId
           && request.resource.data.text is string

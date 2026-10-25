@@ -700,12 +700,28 @@ const assertBlindDateFeatureEnabled = async (): Promise<void> => {
   }
 };
 
+// Android keeps blocks in settings/chat_privacy.blockedUserIds instead of the blocked_users subcollections.
+const userHasPrivacyBlocked = async (blockerUid: string, blockedUid: string): Promise<boolean> => {
+  if (!blockerUid || !blockedUid) return false;
+  const privacy = await db.collection("users").doc(blockerUid).collection("settings").doc("chat_privacy").get();
+  const raw = privacy.get("blockedUserIds");
+  return Array.isArray(raw) && raw.includes(blockedUid);
+};
+
 const directChatIsBlocked = async (chat: Record<string, unknown>): Promise<boolean> => {
   const participants = normalizeStringList(chat.participants);
   const chatType = String(chat.chatType || "").trim().toLowerCase();
-  if (chatType !== "direct" || participants.length !== 2) return false;
+  // Matches the rules' inferredDirectChat: untyped two-person chats are direct.
+  const isDirect = chatType === "direct" || (chatType !== "group" && participants.length === 2);
+  if (!isDirect || participants.length !== 2) return false;
   const [firstUid, secondUid] = participants;
-  return (await userHasBlocked(firstUid, secondUid)) || (await userHasBlocked(secondUid, firstUid));
+  const checks = await Promise.all([
+    userHasBlocked(firstUid, secondUid),
+    userHasBlocked(secondUid, firstUid),
+    userHasPrivacyBlocked(firstUid, secondUid),
+    userHasPrivacyBlocked(secondUid, firstUid),
+  ]);
+  return checks.some(Boolean);
 };
 
 const USER_PRIVATE_COLLECTION = "user_private";
