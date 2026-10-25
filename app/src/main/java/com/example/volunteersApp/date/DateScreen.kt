@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import android.text.format.DateUtils
 import android.widget.Toast
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -62,11 +64,13 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAddAlt1
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wallet
@@ -83,6 +87,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -517,11 +523,29 @@ fun DateEvaScreen(
                     }
                 },
                 onDismissMatch = viewModel::dismissMatchCelebration,
+                onRefreshLoop = { onDone -> viewModel.refreshDatingLoop(onDone) },
                 onUndoPass = viewModel::undoLastDatingPass,
                 onResetPasses = viewModel::resetDatingPasses,
                 onAgeRangeChange = viewModel::setDatingLoopAgeRange,
                 onReportUser = { profile, reason, onMessage ->
                     viewModel.reportDatingUser(profile, reason) { success, message ->
+                        onMessage(
+                            DateHubBannerMessage(
+                                message,
+                                if (success) DateHubBannerTone.Success else DateHubBannerTone.Error
+                            )
+                        )
+                    }
+                },
+                onSubmitReport = { profile, reason, details, alsoBlock, onMessage ->
+                    viewModel.submitDatingReport(
+                        reportedUserId = profile.uid,
+                        reportedUserName = profile.name,
+                        reason = reason,
+                        details = details,
+                        alsoBlock = alsoBlock,
+                        context = "Dating Loop",
+                    ) { success, message ->
                         onMessage(
                             DateHubBannerMessage(
                                 message,
@@ -587,6 +611,18 @@ fun DateEvaScreen(
                 },
                 onDismissComment = { comment -> viewModel.dismissDatingComment(comment) },
                 onClearFocus = viewModel::clearBlindDateFocus,
+                onReportMember = { userId, name, reason, details, alsoBlock, onResult ->
+                    viewModel.submitDatingReport(
+                        reportedUserId = userId,
+                        reportedUserName = name,
+                        reason = reason,
+                        details = details,
+                        alsoBlock = alsoBlock,
+                        context = "Blind Date",
+                        onComplete = onResult,
+                    )
+                },
+                onBlockMember = { userId, onResult -> viewModel.blockDatingUser(userId, onResult) },
             )
         }
     }
@@ -1316,10 +1352,13 @@ private fun DatingLoopScreen(
     onResetPasses: () -> Unit = {},
     onAgeRangeChange: (Int, Int) -> Unit = { _, _ -> },
     onReportUser: (DatingProfile, String, (DateHubBannerMessage) -> Unit) -> Unit = { _, _, _ -> },
+    onSubmitReport: ((DatingProfile, String, String, Boolean, (DateHubBannerMessage) -> Unit) -> Unit)? = null,
     onSendComment: (DatingProfile, String, (Boolean, DateHubBannerMessage) -> Unit) -> Unit = { _, _, _ -> },
     onDismissComment: (DatingComment) -> Unit = {},
+    onRefreshLoop: ((onDone: () -> Unit) -> Unit)? = null,
 ) {
     val discoverableProfiles = uiState.filteredLoopProfiles
+    var peopleRefreshing by remember { mutableStateOf(false) }
     var localBanner by remember { mutableStateOf<DateHubBannerMessage?>(null) }
     var selectedProfile by remember { mutableStateOf<DatingProfile?>(null) }
     var commentTarget by remember { mutableStateOf<DatingProfile?>(null) }
@@ -1334,6 +1373,7 @@ private fun DatingLoopScreen(
     var blockTarget by remember { mutableStateOf<DatingProfile?>(null) }
     var showFilters by remember { mutableStateOf(false) }
     var showMatchesSheet by remember { mutableStateOf(false) }
+    var showHeaderMenu by remember { mutableStateOf(false) }
     val modernLayout = uiState.browseLayout != DatingBrowseLayout.Discover ||
         uiState.datingLoopTab == DatingLoopTab.LikesYou
     val fullScreenDeck = modernLayout &&
@@ -1378,11 +1418,19 @@ private fun DatingLoopScreen(
             topBar = {
                 TopAppBar(
                     title = {
-                        Text(
-                            "Dating Loop",
-                            color = DateA11yPalette.textPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                            Text(
+                                "Discover",
+                                color = DateA11yPalette.textPrimary,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "Dating Loop",
+                                color = DateA11yPalette.textSecondary,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(
@@ -1425,12 +1473,47 @@ private fun DatingLoopScreen(
                                     )
                                 }
                             }
+                            IconButton(onClick = { showFilters = true }) {
+                                Icon(
+                                    Icons.Default.Tune,
+                                    contentDescription = "Filters, ${filters.activeCount} active"
+                                )
+                            }
                         }
-                        IconButton(onClick = onAskAi) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = "Dating assistant")
-                        }
-                        IconButton(onClick = onOpenProfile) {
-                            Icon(Icons.Default.Person, contentDescription = "Open dating profile")
+                        if (fullScreenDeck) {
+                            Box {
+                                IconButton(onClick = { showHeaderMenu = true }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "More Dating Loop options")
+                                }
+                                DropdownMenu(
+                                    expanded = showHeaderMenu,
+                                    onDismissRequest = { showHeaderMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("My profile") },
+                                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                                        onClick = {
+                                            showHeaderMenu = false
+                                            onOpenProfile()
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Dating assistant") },
+                                        leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
+                                        onClick = {
+                                            showHeaderMenu = false
+                                            onAskAi()
+                                        }
+                                    )
+                                }
+                            }
+                        } else {
+                            IconButton(onClick = onAskAi) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = "Dating assistant")
+                            }
+                            IconButton(onClick = onOpenProfile) {
+                                Icon(Icons.Default.Person, contentDescription = "Open dating profile")
+                            }
                         }
                     }
                 )
@@ -1476,41 +1559,69 @@ private fun DatingLoopScreen(
                         )
                     } else {
                         Column(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            modifier = if (fullScreenDeck) Modifier.fillMaxWidth()
+                            else Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             if (!fullScreenDeck) {
-                            DatingMatchesStrip(
-                                likesYouCount = uiState.likesYou.size,
-                                likesYouPreviewUrl = uiState.likesYou.firstOrNull()?.senderPhotoUrl,
-                                matches = uiState.matches,
-                                onOpenLikesYou = { onTabChange(DatingLoopTab.LikesYou) },
-                                onOpenMatch = onOpenMatchChat,
-                            )
+                                if (uiState.browseLayout != DatingBrowseLayout.Photos) {
+                                DatingMatchesStrip(
+                                    likesYouCount = uiState.likesYou.size,
+                                    likesYouPreviewUrl = uiState.likesYou.firstOrNull()?.senderPhotoUrl,
+                                    matches = uiState.matches,
+                                    onOpenLikesYou = { onTabChange(DatingLoopTab.LikesYou) },
+                                    onOpenMatch = onOpenMatchChat,
+                                )
+                                }
+                                DatingBrowseBar(
+                                    layout = uiState.browseLayout,
+                                    onLayoutChange = onBrowseLayoutChange,
+                                    activeFilterCount = filters.activeCount,
+                                    onOpenFilters = { showFilters = true },
+                                )
                             }
-                            DatingBrowseBar(
-                                layout = uiState.browseLayout,
-                                onLayoutChange = onBrowseLayoutChange,
-                                activeFilterCount = filters.activeCount,
-                                onOpenFilters = { showFilters = true },
-                            )
+                            if (fullScreenDeck) {
+                                DatingBrowseBar(
+                                    layout = uiState.browseLayout,
+                                    onLayoutChange = onBrowseLayoutChange,
+                                    activeFilterCount = filters.activeCount,
+                                    onOpenFilters = { showFilters = true },
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 6.dp),
+                                    showFilterButton = false,
+                                )
+                            }
                             if (uiState.myProfile == null) {
                                 Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = DateA11yPalette.chipBackground,
-                                    modifier = Modifier.fillMaxWidth()
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = Color.Transparent,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .then(
+                                            if (fullScreenDeck) Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                            else Modifier
+                                        )
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(Brush.horizontalGradient(listOf(Color(0xFFE5486B), Color(0xFF7B3FC4))))
+                                        .clickable(onClickLabel = "Create your dating profile", onClick = onOpenProfile)
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                                        modifier = Modifier.padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            "Create your profile to like people and get matches.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = DateA11yPalette.chipText,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        TextButton(onClick = onOpenProfile) { Text("Create") }
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                "Create your dating profile",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                "Add photos and a bio so you can start liking people",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.White.copy(alpha = 0.9f)
+                                            )
+                                        }
+                                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White)
                                     }
                                 }
                             }
@@ -1527,7 +1638,10 @@ private fun DatingLoopScreen(
                                 onSuperLike = { profile -> onSuperLike(profile) { banner -> localBanner = banner } },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                                    .then(
+                                        if (fullScreenDeck) Modifier
+                                        else Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp)
+                                    ),
                                 fillHeight = true,
                                 superLikedByIds = uiState.superLikedByIds,
                                 canUndo = uiState.passHistory.isNotEmpty(),
@@ -1535,15 +1649,42 @@ private fun DatingLoopScreen(
                                 hasPasses = uiState.passedProfileIds.isNotEmpty(),
                                 onResetPasses = onResetPasses,
                                 onChangeFilters = { showFilters = true },
-                                onComment = startComment,
+                                onComment = { profile -> startComment(profile) },
+                                onShowList = { onBrowseLayoutChange(DatingBrowseLayout.People) },
                             )
-                            DatingBrowseLayout.People -> LazyColumn(
-                                modifier = Modifier.weight(1f),
+                            DatingBrowseLayout.People -> PullToRefreshBox(
+                                isRefreshing = peopleRefreshing,
+                                onRefresh = {
+                                    onRefreshLoop?.let { refresh ->
+                                        peopleRefreshing = true
+                                        refresh { peopleRefreshing = false }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
+                                item(key = "people_search") {
+                                    OutlinedTextField(
+                                        value = filters.searchQuery,
+                                        onValueChange = onSearchQueryChange,
+                                        placeholder = { Text("Search by name, bio, or country") },
+                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                item(key = "people_header") {
+                                    DatingBrowseSectionHeader(title = "People", count = discoverableProfiles.size)
+                                }
                                 item { DateHubBlindDatePromoCard(onClick = onTryBlindDate) }
-                                if (discoverableProfiles.isEmpty()) {
+                                if (!uiState.profilesLoaded) {
+                                    items(4) { DatingPeopleSkeletonRow() }
+                                } else if (discoverableProfiles.isEmpty()) {
                                     item {
                                         Text(
                                             "No one matches your filters yet. Try changing them or check back later.",
@@ -1570,13 +1711,29 @@ private fun DatingLoopScreen(
                                     )
                                 }
                             }
+                            }
                             else -> LazyVerticalGrid(
-                                columns = GridCells.Fixed(2),
+                                columns = GridCells.Fixed(3),
                                 modifier = Modifier.weight(1f),
                                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
+                                val photoEntries = datingPhotoEntries(discoverableProfiles)
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    DatingBrowseSectionHeader(
+                                        title = "Photos",
+                                        count = photoEntries.size,
+                                        hint = "Tap a photo to open that person's profile."
+                                    )
+                                }
+                                gridItems(photoEntries, key = { it.key }) { entry ->
+                                    DatingPhotoGridTile(
+                                        entry = entry,
+                                        status = uiState.relationStatusFor(entry.profile.uid),
+                                        onOpen = { selectedProfile = entry.profile },
+                                    )
+                                }
                                 if (discoverableProfiles.isEmpty()) {
                                     item(span = { GridItemSpan(maxLineSpan) }) {
                                         Text(
@@ -1586,14 +1743,6 @@ private fun DatingLoopScreen(
                                             modifier = Modifier.padding(8.dp)
                                         )
                                     }
-                                }
-                                gridItems(discoverableProfiles, key = { it.uid }) { profile ->
-                                    DatingPhotoTile(
-                                        profile = profile,
-                                        status = uiState.relationStatusFor(profile.uid),
-                                        superLikedYou = profile.uid in uiState.superLikedByIds,
-                                        onOpen = { selectedProfile = profile },
-                                    )
                                 }
                             }
                         }
@@ -1727,7 +1876,6 @@ private fun DatingLoopScreen(
                             onPass = onPass,
                             onLike = { profile -> onInvite(profile) { banner -> localBanner = banner } },
                             onSuperLike = { profile -> onSuperLike(profile) { banner -> localBanner = banner } },
-                            onComment = startComment,
                         )
                     }
                 } else {
@@ -1885,6 +2033,14 @@ private fun DatingLoopScreen(
                     }
                 }
             },
+            onSubmitReport = onSubmitReport?.let { submit ->
+                { reason, details, alsoBlock ->
+                    submit(profile, reason, details, alsoBlock) { banner ->
+                        localBanner = banner
+                        if (banner.tone != DateHubBannerTone.Error) selectedProfile = null
+                    }
+                }
+            },
             isReporting = profile.uid in uiState.reportingUserIds,
             matchChatId = uiState.matches.firstOrNull { it.uid == profile.uid }?.chatId,
             likedYou = uiState.likesYou.any { it.senderId == profile.uid },
@@ -1920,7 +2076,7 @@ private fun DatingLoopScreen(
             onDismissRequest = { blockTarget = null },
             title = { Text("Block ${profile.name.ifBlank { "this member" }}?") },
             text = {
-                Text("They will be removed from Dating Loop and you will not be able to invite them. This does not share your phone number.")
+                Text("They won't appear in Dating Loop or Blind Date, and they can't send you likes or chat requests.")
             },
             confirmButton = {
                 Button(
@@ -2579,32 +2735,32 @@ private fun DatingProfileEditorScreen(
     onAskAi: (String, String) -> Unit
 ) {
     val existingProfile = uiState.myProfile
-    var name by remember(existingProfile) { mutableStateOf(existingProfile?.name.orEmpty()) }
-    var bio by remember(existingProfile) { mutableStateOf(existingProfile?.bio.orEmpty()) }
-    var phone by remember(existingProfile, uiState.ownerPrivatePhone) {
+    var name by remember(existingProfile?.uid) { mutableStateOf(existingProfile?.name.orEmpty()) }
+    var bio by remember(existingProfile?.uid) { mutableStateOf(existingProfile?.bio.orEmpty()) }
+    var phone by remember(existingProfile?.uid, uiState.ownerPrivatePhone) {
         mutableStateOf(uiState.ownerPrivatePhone.ifBlank { existingProfile?.phone.orEmpty() })
     }
-    var country by remember(existingProfile) {
+    var country by remember(existingProfile?.uid) {
         mutableStateOf(existingProfile?.country?.takeIf { it.isNotBlank() } ?: Locale.getDefault().displayCountry)
     }
     val availableCountries = remember { globalCountries() }
-    var gender by remember(existingProfile, uiState.userGender) {
+    var gender by remember(existingProfile?.uid, uiState.userGender) {
         mutableStateOf(existingProfile?.gender?.let(Gender::fromRaw) ?: uiState.userGender ?: Gender.OTHER)
     }
-    var lookingFor by remember(existingProfile, uiState.lookingFor) {
+    var lookingFor by remember(existingProfile?.uid, uiState.lookingFor) {
         mutableStateOf(existingProfile?.lookingFor?.let(LookingFor::fromRaw) ?: uiState.lookingFor ?: LookingFor.EVERYONE)
     }
     var newImageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var birthDate by remember(uiState.privateBirthDate) { mutableStateOf(uiState.privateBirthDate) }
-    var relationshipGoal by remember(existingProfile) {
+    var relationshipGoal by remember(existingProfile?.uid) {
         mutableStateOf(RelationshipGoal.fromRaw(existingProfile?.relationshipGoal))
     }
-    var interests by remember(existingProfile) { mutableStateOf(existingProfile?.interests.orEmpty()) }
-    var prompts by remember(existingProfile) { mutableStateOf(existingProfile?.prompts.orEmpty()) }
-    var jobTitle by remember(existingProfile) { mutableStateOf(existingProfile?.jobTitle.orEmpty()) }
-    var school by remember(existingProfile) { mutableStateOf(existingProfile?.school.orEmpty()) }
-    var keptImageUrls by remember(existingProfile) { mutableStateOf(existingProfile?.resolvedImageUrls().orEmpty()) }
+    var interests by remember(existingProfile?.uid) { mutableStateOf(existingProfile?.interests.orEmpty()) }
+    var prompts by remember(existingProfile?.uid) { mutableStateOf(existingProfile?.prompts.orEmpty()) }
+    var jobTitle by remember(existingProfile?.uid) { mutableStateOf(existingProfile?.jobTitle.orEmpty()) }
+    var school by remember(existingProfile?.uid) { mutableStateOf(existingProfile?.school.orEmpty()) }
+    var keptImageUrls by remember(existingProfile?.uid) { mutableStateOf(existingProfile?.resolvedImageUrls().orEmpty()) }
     var showPreview by remember { mutableStateOf(false) }
     val draftProfile = DatingProfile(
         uid = existingProfile?.uid.orEmpty(),
@@ -2976,6 +3132,8 @@ private fun BlindDateScreen(
     onReplyComment: (DatingComment, (DateHubBannerMessage) -> Unit) -> Unit = { _, _ -> },
     onDismissComment: (DatingComment) -> Unit = {},
     onClearFocus: () -> Unit = {},
+    onReportMember: ((userId: String, name: String, reason: String, details: String, alsoBlock: Boolean, onResult: (Boolean, String) -> Unit) -> Unit)? = null,
+    onBlockMember: ((userId: String, onResult: (Boolean, String) -> Unit) -> Unit)? = null,
 ) {
     val viewModel = blindDateViewModel
     val uiState by viewModel.uiState.collectAsState()
@@ -2999,6 +3157,8 @@ private fun BlindDateScreen(
     var showClassicFlow by rememberSaveable { mutableStateOf(false) }
     var showPassPaywall by remember { mutableStateOf(false) }
     var poolDetail by remember { mutableStateOf<BlindDateProfile?>(null) }
+    var reportMember by remember { mutableStateOf<BlindDateProfile?>(null) }
+    var blockMember by remember { mutableStateOf<BlindDateProfile?>(null) }
     LaunchedEffect(focusPartnerId) {
         if (focusPartnerId != null) showClassicFlow = false
     }
@@ -3244,7 +3404,7 @@ private fun BlindDateScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        if (isFree) priceLabel else "$priceLabel / match",
+                        if (isFree) priceLabel else "$priceLabel / chat",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Black,
                         color = DateHubBlindDateAccent
@@ -3266,6 +3426,11 @@ private fun BlindDateScreen(
                             Text(perk, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
+                    Text(
+                        "Liking is free. To chat, you each need a Blind Date pass (1 pass = 1 chat).",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     if (!isRejoin) {
                         Text(
                             "We use your Dating Loop photos and bio.",
@@ -3275,10 +3440,14 @@ private fun BlindDateScreen(
                     }
                     if (!isFree && !uiState.isEntryFeeLoaded) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            if (uiState.isPriceLoadFailed) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                            } else {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            }
                             Spacer(Modifier.width(10.dp))
                             Text(
-                                "Loading the current price…",
+                                if (uiState.isPriceLoadFailed) "Couldn't load the price" else "Loading the current price…",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -3361,6 +3530,46 @@ private fun BlindDateScreen(
                     viewModel.declineInvitation(invite)
                 }
             },
+            onReport = onReportMember?.let { { poolDetail = null; reportMember = profile } },
+            onBlock = onBlockMember?.let { { poolDetail = null; blockMember = profile } },
+        )
+    }
+
+    reportMember?.let { member ->
+        onReportMember?.let { report ->
+            DatingReportSheet(
+                name = member.name,
+                isSending = member.userId in datingState.reportingUserIds,
+                onDismiss = { reportMember = null },
+                onSubmit = { reason, details, alsoBlock ->
+                    reportMember = null
+                    report(member.userId, member.name, reason, details, alsoBlock) { success, message ->
+                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        if (success && alsoBlock) viewModel.refreshBlockedUsers()
+                    }
+                }
+            )
+        }
+    }
+
+    blockMember?.let { member ->
+        AlertDialog(
+            onDismissRequest = { blockMember = null },
+            title = { Text("Block ${member.name.ifBlank { "this member" }}?") },
+            text = { Text("They won't appear in Dating Loop or Blind Date, and they can't send you likes or chat requests.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        blockMember = null
+                        onBlockMember?.invoke(member.userId) { success, message ->
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                            if (success) viewModel.refreshBlockedUsers()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Block") }
+            },
+            dismissButton = { TextButton(onClick = { blockMember = null }) { Text("Cancel") } }
         )
     }
 
@@ -3441,8 +3650,8 @@ private fun BlindDateScreen(
                         blindState = uiState,
                         focusPartnerId = focusPartnerId,
                         priceLabel = priceLabel,
-                        unlockLabel = if (uiState.isStaffExempt || (uiState.isEntryFeeLoaded && uiState.entryFeeUsd <= 0.0)) "Unlock"
-                            else "Unlock \u00B7 $priceLabel",
+                        unlockLabel = if (uiState.isStaffExempt || (uiState.isEntryFeeLoaded && uiState.entryFeeUsd <= 0.0)) "Unlock chat"
+                            else "Unlock chat \u00B7 $priceLabel",
                         onGetPass = {
                             if (!uiState.isEntryFeeLoaded) viewModel.refreshPublicFee()
                             if (!uiState.isPaymentCollectionPending) showPassPaywall = true
@@ -3469,6 +3678,9 @@ private fun BlindDateScreen(
                         onQueryChange = viewModel::onSearchQueryChanged,
                         onFilterChange = viewModel::onGenderFilterChanged,
                         modifier = Modifier.weight(1f),
+                        onContinueCheckout = viewModel::continuePendingCheckout,
+                        onRetryStatus = viewModel::retryStatusCheck,
+                        onRetryPrice = viewModel::refreshPublicFee,
                     )
                 } else {
                 TextButton(
@@ -3511,8 +3723,8 @@ private fun BlindDateScreen(
                         datingState = datingState,
                         blindState = uiState,
                         focusPartnerId = focusPartnerId,
-                        unlockLabel = if (uiState.isStaffExempt || (uiState.isEntryFeeLoaded && uiState.entryFeeUsd <= 0.0)) "Unlock"
-                            else "Unlock \u00B7 $priceLabel",
+                        unlockLabel = if (uiState.isStaffExempt || (uiState.isEntryFeeLoaded && uiState.entryFeeUsd <= 0.0)) "Unlock chat"
+                            else "Unlock chat \u00B7 $priceLabel",
                         onPairAction = { pairing ->
                             viewModel.startPairChat(pairing.match.uid, pairing.match.name, pairing.match.chatId)
                         },
@@ -3748,8 +3960,9 @@ private fun BlindDateProfileDetailsStep(
                     )
                     OutlinedTextField(
                         value = bio,
-                        onValueChange = { bio = it },
+                        onValueChange = { bio = it.take(BLIND_DATE_BIO_MAX) },
                         label = { Text("Blind Date bio") },
+                        supportingText = { Text("${bio.length}/$BLIND_DATE_BIO_MAX") },
                         placeholder = { Text("Give a quick read on your energy and what you're hoping for.") },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -4251,15 +4464,36 @@ private fun BlindDateProfileDetailDialog(
     inviteLabel: String = "Invite",
     inviteEnabled: Boolean = true,
     onDecline: (() -> Unit)? = null,
+    onReport: (() -> Unit)? = null,
+    onBlock: (() -> Unit)? = null,
 ) {
-    val mediaItems = remember(profile.media, profile.mediaUrls) {
-        profile.media.ifEmpty { profile.mediaUrls }
+    val mediaItems = remember(profile.media, profile.mediaUrls, profile.profilePictureUrl) {
+        (listOf(profile.profilePictureUrl) + profile.media.ifEmpty { profile.mediaUrls })
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+    val joinedLabel = remember(profile.postedAt) {
+        profile.postedAt?.let {
+            "Joined " + DateUtils.getRelativeTimeSpanString(
+                it.time,
+                System.currentTimeMillis(),
+                DateUtils.DAY_IN_MILLIS
+            ).toString().replaceFirstChar { c -> c.lowercase() }
+        }
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(profile.name.ifBlank { "Blind Date Profile" }) },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(profile.name.ifBlank { "Blind Date Profile" }, modifier = Modifier.weight(1f))
+                DatingMemberSafetyMenu(name = profile.name, onReport = onReport, onBlock = onBlock)
+            }
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                joinedLabel?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = DateA11yPalette.textSecondary)
+                }
                 if (mediaItems.isNotEmpty()) {
                     val pagerState = rememberPagerState(pageCount = { mediaItems.size })
                     HorizontalPager(state = pagerState, modifier = Modifier.height(220.dp)) { page ->

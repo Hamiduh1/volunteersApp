@@ -183,8 +183,17 @@ class BlindDateViewModel : ViewModel() {
     fun refreshBlockedUsers() {
         val uid = currentUserId ?: return
         viewModelScope.launch {
-            runCatching { db.fetchBlockedUserIds(uid) }
-                .onSuccess { blocked -> _uiState.update { it.copy(blockedUserIds = blocked) } }
+            runCatching { db.fetchDatingBlockedUserIds(uid) }
+                .onSuccess { blocked ->
+                    _uiState.update { state ->
+                        state.copy(
+                            blockedUserIds = blocked,
+                            receivedInvitations = state.receivedInvitations.filter { it.senderId !in blocked },
+                            profilesToBrowse = state.profilesToBrowse.filter { it.userId !in blocked },
+                            filteredProfiles = state.filteredProfiles.filter { it.userId !in blocked },
+                        )
+                    }
+                }
         }
     }
 
@@ -304,6 +313,7 @@ class BlindDateViewModel : ViewModel() {
                         "Secure Stripe Checkout started. Dating access unlocks after payment confirmation."
                     }
                     val checkoutUrl = result?.get("checkoutUrl") as? String
+                    if (!checkoutUrl.isNullOrBlank()) _uiState.update { it.copy(pendingCheckoutUrl = checkoutUrl) }
                     _events.value = if (!checkoutUrl.isNullOrBlank()) {
                         BlindDateEvent.OpenStripeCheckout(checkoutUrl, message)
                     } else {
@@ -339,13 +349,34 @@ class BlindDateViewModel : ViewModel() {
     /** Only admins can read fee_settings directly; everyone else gets the customer price from this callable. */
     fun refreshPublicFee() {
         viewModelScope.launch {
+            _uiState.update { it.copy(isPriceLoadFailed = false) }
             val fee = runCatching {
                 FunctionsClient.callMap(CallableFunction.GET_PUBLIC_COMMERCE_FEE_SETTINGS)
             }.onFailure {
                 Log.w("BlindDateVM", "Failed to load the public Blind Date fee.", it)
-            }.getOrNull()?.get("blindDateFeeUsd") as? Number ?: return@launch
-            _uiState.update { it.copy(entryFeeUsd = fee.toDouble().coerceAtLeast(0.0), isEntryFeeLoaded = true) }
+            }.getOrNull()?.get("blindDateFeeUsd") as? Number
+            if (fee == null) {
+                _uiState.update { it.copy(isPriceLoadFailed = !it.isEntryFeeLoaded) }
+                return@launch
+            }
+            _uiState.update { it.copy(entryFeeUsd = fee.toDouble().coerceAtLeast(0.0), isEntryFeeLoaded = true, isPriceLoadFailed = false) }
         }
+    }
+
+    /** Reopens the checkout already in progress; without one, re-checks the payment instead of starting a new charge. */
+    fun continuePendingCheckout() {
+        val url = _uiState.value.pendingCheckoutUrl
+        if (!url.isNullOrBlank()) {
+            _events.value = BlindDateEvent.OpenStripeCheckout(url, "Continue your secure checkout.")
+        } else {
+            _events.value = BlindDateEvent.ShowToast("Checking your payment status…", DateHubBannerTone.Info)
+            checkUserStatus()
+        }
+    }
+
+    fun retryStatusCheck() {
+        _uiState.update { it.copy(statusLoadFailed = false) }
+        checkUserStatus()
     }
 
     private fun checkUserStatus() {
@@ -446,8 +477,11 @@ class BlindDateViewModel : ViewModel() {
                         )
                     }
                 }
+                _uiState.update { it.copy(statusLoaded = true, statusLoadFailed = false) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = "Failed to check Blind Date status.") }
+                _uiState.update {
+                    it.copy(isLoading = false, statusLoadFailed = true, error = "Failed to check Blind Date status.")
+                }
             }
         }
     }
@@ -614,7 +648,9 @@ class BlindDateViewModel : ViewModel() {
 
                 receivedInvitationHistory = allReceived
                 val pending = allReceived.filter { normalizeInvitationStatus(it.status) == "pending" }
-                _uiState.update { it.copy(receivedInvitations = pending) }
+                _uiState.update { state ->
+                    state.copy(receivedInvitations = pending.filter { it.senderId !in state.blockedUserIds })
+                }
                 rebuildInvitationTimeline()
                 updateMatchedConversationCandidate()
             }
@@ -969,6 +1005,7 @@ class BlindDateViewModel : ViewModel() {
                         "Secure Stripe Checkout started. Access unlocks after payment confirmation."
                     }
                     val checkoutUrl = result?.get("checkoutUrl") as? String
+                    if (!checkoutUrl.isNullOrBlank()) _uiState.update { it.copy(pendingCheckoutUrl = checkoutUrl) }
                     _events.value = if (!checkoutUrl.isNullOrBlank()) {
                         BlindDateEvent.OpenStripeCheckout(checkoutUrl, message)
                     } else {

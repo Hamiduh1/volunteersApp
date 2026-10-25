@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,6 +31,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -43,8 +46,12 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.FilterAlt
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -59,10 +66,12 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -84,6 +93,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -417,13 +427,14 @@ internal fun DatingBrowseBar(
     activeFilterCount: Int,
     onOpenFilters: () -> Unit,
     modifier: Modifier = Modifier,
+    showFilterButton: Boolean = true,
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        val layouts = DatingBrowseLayout.entries
+        val layouts = DatingBrowseModes
         SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
             layouts.forEachIndexed { index, option ->
                 SegmentedButton(
@@ -435,13 +446,13 @@ internal fun DatingBrowseBar(
                 )
             }
         }
-        BadgedBox(
+        if (showFilterButton) BadgedBox(
             badge = {
                 if (activeFilterCount > 0) Badge { Text(activeFilterCount.toString()) }
             }
         ) {
             FilledTonalIconButton(onClick = onOpenFilters) {
-                Icon(Icons.Default.Tune, contentDescription = "Filters, $activeFilterCount active")
+                Icon(Icons.Default.FilterAlt, contentDescription = "Filters, $activeFilterCount active", tint = MatchPink)
             }
         }
     }
@@ -464,6 +475,17 @@ internal fun DatingLoopFiltersSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var countryMenuOpen by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    val tick: () -> Unit = { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+    val applyGender = onGenderFilterChange
+    val applyCountry = onCountryFilterChange
+    val applyPhotosOnly = onHasPhotosOnlyChange
+    @Suppress("NAME_SHADOWING")
+    val onGenderFilterChange: (Gender?) -> Unit = { tick(); applyGender(it) }
+    @Suppress("NAME_SHADOWING")
+    val onCountryFilterChange: (String?) -> Unit = { tick(); applyCountry(it) }
+    @Suppress("NAME_SHADOWING")
+    val onHasPhotosOnlyChange: (Boolean) -> Unit = { tick(); applyPhotosOnly(it) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
@@ -481,12 +503,20 @@ internal fun DatingLoopFiltersSheet(
             OutlinedTextField(
                 value = filters.searchQuery,
                 onValueChange = onSearchQueryChange,
-                label = { Text("Search name, bio or country") },
+                label = { Text("Search by name, bio, or country") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+            if (!showGenderFilter) {
+                Text("Show me", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "You're shown people who match the \"Looking for\" choice on your dating profile. Change it there to see everyone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DateA11yPalette.textSecondary
+                )
+            }
             if (showGenderFilter) {
-                Text("Gender", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Text("Show me", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = filters.genderFilter == null, onClick = { onGenderFilterChange(null) }, label = { Text("Anyone") })
                     Gender.entries.forEach { gender ->
@@ -501,10 +531,10 @@ internal fun DatingLoopFiltersSheet(
             Text("Country", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             Box {
                 OutlinedButton(onClick = { countryMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(filters.countryFilter ?: "Any country")
+                    Text(filters.countryFilter ?: "Anywhere")
                 }
                 DropdownMenu(expanded = countryMenuOpen, onDismissRequest = { countryMenuOpen = false }) {
-                    DropdownMenuItem(text = { Text("Any country") }, onClick = {
+                    DropdownMenuItem(text = { Text("Anywhere") }, onClick = {
                         onCountryFilterChange(null)
                         countryMenuOpen = false
                     })
@@ -518,7 +548,7 @@ internal fun DatingLoopFiltersSheet(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Photos only", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Text("Only people with photos", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                     Text("Hide profiles without photos", style = MaterialTheme.typography.bodySmall, color = DateA11yPalette.textSecondary)
                 }
                 Switch(checked = filters.hasPhotosOnly, onCheckedChange = onHasPhotosOnlyChange)
@@ -538,12 +568,22 @@ internal fun DatingLoopFiltersSheet(
                 )
                 if (filters.hasAgeRange) {
                     Text(
-                        "Profiles without an age are hidden while an age range is set.",
+                        "People who haven't added their birthday yet are hidden while an age range is set.",
                         style = MaterialTheme.typography.bodySmall,
                         color = DateA11yPalette.textSecondary
                     )
                 }
             }
+            OutlinedButton(onClick = onReset, enabled = filters.activeCount > 0, modifier = Modifier.fillMaxWidth()) {
+                Text("Reset filters")
+            }
+            Text(
+                "$visibleCount ${if (visibleCount == 1) "person matches" else "people match"} right now",
+                style = MaterialTheme.typography.bodyMedium,
+                color = DateA11yPalette.textSecondary,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
             Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text("Show $visibleCount ${if (visibleCount == 1) "person" else "people"}")
             }
@@ -689,6 +729,96 @@ internal fun DatingPhotoTile(
     }
 }
 
+/** One photo of a person, as iOS builds Photos mode: every image gets its own tile. */
+internal data class DatingPhotoEntry(val profile: DatingProfile, val url: String, val index: Int) {
+    val key: String get() = "${profile.uid}#$index"
+}
+
+internal fun datingPhotoEntries(profiles: List<DatingProfile>): List<DatingPhotoEntry> =
+    profiles.flatMap { profile ->
+        profile.resolvedImageUrls().mapIndexed { index, url -> DatingPhotoEntry(profile, url, index) }
+    }
+
+@Composable
+internal fun DatingPhotoGridTile(
+    entry: DatingPhotoEntry,
+    status: DatingRelationStatus,
+    onOpen: () -> Unit,
+) {
+    val profile = entry.profile
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(DateA11yPalette.photoPlaceholder)
+            .clickable(onClickLabel = "Open ${profile.name}'s profile", onClick = onOpen)
+    ) {
+        AsyncImageDisplayUrl(
+            rawUrl = entry.url,
+            contentDescription = "${profile.name} photo ${entry.index + 1}",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+        if (status == DatingRelationStatus.Matched || status == DatingRelationStatus.Liked) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(5.dp)
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(status.badgeColor())
+            )
+        }
+        Text(
+            profile.name.ifBlank { "Member" },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))))
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+            color = Color.White,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+internal fun DatingBrowseSectionHeader(title: String, count: Int, hint: String? = null) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = DateA11yPalette.textPrimary)
+            Spacer(Modifier.width(8.dp))
+            Text(count.toString(), style = MaterialTheme.typography.titleMedium, color = DateA11yPalette.textSecondary)
+        }
+        if (hint != null) {
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = DateA11yPalette.textSecondary)
+        }
+    }
+}
+
+/** Placeholder rows shown while profiles load in People mode. */
+@Composable
+internal fun DatingPeopleSkeletonRow() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = DateA11yPalette.cardSurface,
+        border = BorderStroke(1.dp, DateA11yPalette.cardBorder.copy(alpha = 0.4f))
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)).background(DateA11yPalette.photoPlaceholder))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.fillMaxWidth(0.6f).height(14.dp).clip(RoundedCornerShape(7.dp)).background(DateA11yPalette.photoPlaceholder))
+                Box(Modifier.fillMaxWidth(0.35f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(DateA11yPalette.photoPlaceholder))
+            }
+        }
+    }
+}
+
 /**
  * Full profile page: 3:4 photo hero (tap for full-screen gallery), goal, bio, interests with shared ones first,
  * prompts, detail chips and a safety section. [isPreview] hides actions for "Preview my profile".
@@ -715,8 +845,10 @@ internal fun DatingProfileFullScreen(
     onComment: (() -> Unit)? = null,
     onDismissComment: (() -> Unit)? = null,
     likedYou: Boolean = false,
+    onSubmitReport: ((reason: String, details: String, alsoBlock: Boolean) -> Unit)? = null,
 ) {
     val showLikeBack = superLikedYou || likedYou || receivedComment != null
+    var showReportSheet by remember { mutableStateOf(false) }
     val photos = remember(profile.uid, profile.imageUrls) { profile.resolvedImageUrls() }
     var galleryStart by remember { mutableStateOf<Int?>(null) }
     var showReport by remember { mutableStateOf(false) }
@@ -744,6 +876,17 @@ internal fun DatingProfileFullScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    if (!isPreview) {
+                        DatingMemberSafetyMenu(
+                            name = profile.name,
+                            onReport = when {
+                                onSubmitReport != null -> ({ showReportSheet = true })
+                                onReport != null -> ({ showReport = true })
+                                else -> null
+                            },
+                            onBlock = onBlock,
+                        )
+                    }
                 }
                 Column(
                     modifier = Modifier
@@ -880,7 +1023,7 @@ internal fun DatingProfileFullScreen(
                         }
                     }
 
-                    if (!isPreview && (onBlock != null || onReport != null)) {
+                    if (!isPreview && (onBlock != null || onReport != null || onSubmitReport != null)) {
                         DatingSectionCard(title = "Safety") {
                             Text(
                                 "Your phone number is never shown. Block or report anyone who makes you uncomfortable.",
@@ -896,8 +1039,11 @@ internal fun DatingProfileFullScreen(
                                         Text("Block")
                                     }
                                 }
-                                if (onReport != null) {
-                                    OutlinedButton(onClick = { showReport = true }, enabled = !isReporting) {
+                                if (onReport != null || onSubmitReport != null) {
+                                    OutlinedButton(
+                                        onClick = { if (onSubmitReport != null) showReportSheet = true else showReport = true },
+                                        enabled = !isReporting
+                                    ) {
                                         Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
                                         Text(if (isReporting) "Reporting…" else "Report")
@@ -991,6 +1137,17 @@ internal fun DatingProfileFullScreen(
             }
         )
     }
+    if (showReportSheet && onSubmitReport != null) {
+        DatingReportSheet(
+            name = profile.name,
+            isSending = isReporting,
+            onDismiss = { showReportSheet = false },
+            onSubmit = { reason, details, alsoBlock ->
+                showReportSheet = false
+                onSubmitReport(reason, details, alsoBlock)
+            }
+        )
+    }
 }
 
 @Composable
@@ -1060,6 +1217,125 @@ internal fun DatingPhotoGalleryDialog(photos: List<String>, startIndex: Int, onD
                 color = Color.White,
                 modifier = Modifier.align(Alignment.TopEnd).padding(20.dp)
             )
+        }
+    }
+}
+
+/** iOS report sheet: one reason, optional details, "Also block" on by default. Shared by Dating Loop and Blind Date. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun DatingReportSheet(
+    name: String,
+    isSending: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (reason: String, details: String, alsoBlock: Boolean) -> Unit,
+) {
+    val displayName = name.ifBlank { "this member" }
+    var selected by remember { mutableStateOf<String?>(null) }
+    var details by remember { mutableStateOf("") }
+    var alsoBlock by remember { mutableStateOf(true) }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("Report $displayName", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Why are you reporting them?", style = MaterialTheme.typography.bodyMedium, color = DateA11yPalette.textSecondary)
+            DatingReportReasons.forEach { reason ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .selectable(selected = selected == reason, onClick = { selected = reason }, role = Role.RadioButton)
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = selected == reason, onClick = null)
+                    Spacer(Modifier.width(10.dp))
+                    Text(reason, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+            OutlinedTextField(
+                value = details,
+                onValueChange = { details = it.take(DATING_REPORT_DETAILS_MAX) },
+                label = { Text("Details (optional)") },
+                supportingText = { Text("${details.length}/$DATING_REPORT_DETAILS_MAX") },
+                minLines = 3,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .toggleable(value = alsoBlock, onValueChange = { alsoBlock = it }, role = Role.Switch),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Also block $displayName", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "They won't appear in Dating Loop or Blind Date.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DateA11yPalette.textSecondary
+                    )
+                }
+                Switch(checked = alsoBlock, onCheckedChange = null)
+            }
+            Button(
+                onClick = { selected?.let { onSubmit(it, details.trim(), alsoBlock) } },
+                enabled = selected != null && !isSending,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) { Text(if (isSending) "Sending\u2026" else "Send report") }
+            Text(
+                "Reports are confidential. $displayName won't know who reported them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DateA11yPalette.textSecondary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+/** ⋯ menu for member profiles: "Report {name}" and "Block {name}". */
+@Composable
+internal fun DatingMemberSafetyMenu(
+    name: String,
+    onReport: (() -> Unit)?,
+    onBlock: (() -> Unit)?,
+    tint: Color = LocalContentColor.current,
+) {
+    if (onReport == null && onBlock == null) return
+    val displayName = name.ifBlank { "this member" }
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Default.MoreHoriz, contentDescription = "More options for $displayName", tint = tint)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            onReport?.let { report ->
+                DropdownMenuItem(
+                    text = { Text("Report $displayName") },
+                    leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) },
+                    onClick = { expanded = false; report() }
+                )
+            }
+            onBlock?.let { block ->
+                DropdownMenuItem(
+                    text = { Text("Block $displayName", color = MaterialTheme.colorScheme.error) },
+                    leadingIcon = { Icon(Icons.Default.Block, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                    onClick = { expanded = false; block() }
+                )
+            }
         }
     }
 }
@@ -1339,7 +1615,11 @@ internal fun DatingCommentComposerSheet(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text("Sent with a like", style = MaterialTheme.typography.labelMedium, color = DateA11yPalette.textSecondary)
+                    Text(
+                        "Only $name sees this. You can update it once a day.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = DateA11yPalette.textSecondary
+                    )
                 }
             }
             OutlinedTextField(

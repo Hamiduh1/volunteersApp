@@ -32,6 +32,13 @@ data class BlindDateUiState(
     /** Accepted Blind Date invitations with a chat, keyed by the other person's uid. */
     val chatIdsByPartner: Map<String, String> = emptyMap(),
     val startingChatIds: Set<String> = emptySet(),
+    /** True once my Blind Date status has been read at least once; the hero shows "Checking your pass…" until then. */
+    val statusLoaded: Boolean = false,
+    val statusLoadFailed: Boolean = false,
+    /** The public price callable failed and no price is known yet; pay buttons stay disabled. */
+    val isPriceLoadFailed: Boolean = false,
+    /** The Stripe checkout that is still awaiting payment; reopening it avoids a second charge. */
+    val pendingCheckoutUrl: String? = null,
 )
 
 /** Where a Dating Loop match stands on Blind Date. Both people need an active pass before chatting. */

@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -148,7 +149,7 @@ internal fun BlindDateMatchesPane(
                 Spacer(Modifier.size(6.dp))
                 PaneTitle(
                     title = "Comments for you",
-                    subtitle = "Only you can see these. Reply here on Blind Date.",
+                    subtitle = "Only you can see these. Like back to match, then chat on Blind Date.",
                     count = comments.size
                 )
             }
@@ -402,7 +403,7 @@ private fun CommentRow(
                 }
             } else {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    PillButton("Like back & reply", busy = replyBusy, onClick = onReply)
+                    PillButton("Like back", busy = replyBusy, onClick = onReply)
                 }
             }
         }
@@ -441,6 +442,9 @@ internal fun BlindDateHomePane(
     onQueryChange: (String) -> Unit,
     onFilterChange: (Gender?) -> Unit,
     modifier: Modifier = Modifier,
+    onContinueCheckout: () -> Unit = onCheckPayment,
+    onRetryStatus: () -> Unit = {},
+    onRetryPrice: () -> Unit = {},
 ) {
     val isActive = blindState.status == BlindDateUserStatus.Active
     val matchIds = pairings.map { it.match.uid }.toSet()
@@ -466,6 +470,9 @@ internal fun BlindDateHomePane(
                 onCheckPayment = onCheckPayment,
                 onOpenMatchedChat = onOpenMatchedChat,
                 onUseCustomPhotos = onUseCustomPhotos,
+                onContinueCheckout = onContinueCheckout,
+                onRetryStatus = onRetryStatus,
+                onRetryPrice = onRetryPrice,
             )
         }
         item(key = "matches_title") {
@@ -476,7 +483,19 @@ internal fun BlindDateHomePane(
                 count = pairings.size
             )
         }
-        if (pairings.isEmpty()) {
+        if (pairings.isEmpty() && !datingState.profilesLoaded) {
+            item(key = "matches_loading") {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Loading your matches\u2026", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        } else if (pairings.isEmpty()) {
             item(key = "matches_empty") {
                 PaneEmptyCard(
                     title = "No matches yet",
@@ -649,9 +668,13 @@ private fun BlindDateHeroCard(
     onCheckPayment: () -> Unit,
     onOpenMatchedChat: () -> Unit,
     onUseCustomPhotos: () -> Unit,
+    onContinueCheckout: () -> Unit = onCheckPayment,
+    onRetryStatus: () -> Unit = {},
+    onRetryPrice: () -> Unit = {},
 ) {
     val isFree = blindState.isStaffExempt || (blindState.isEntryFeeLoaded && blindState.entryFeeUsd <= 0.0)
     val passBusy = blindState.isLoading || blindState.isPaymentCollectionPending
+    val priceUnavailable = !isFree && !blindState.isEntryFeeLoaded && blindState.isPriceLoadFailed
     val (pillLabel, pillColor) = statusPill(
         if (blindState.isPaymentCollectionPending) BlindDateUserStatus.AwaitingPayment else blindState.status
     )
@@ -725,6 +748,19 @@ private fun BlindDateHeroCard(
                     HeroStat(blindState.receivedInvitations.size.toString(), "Invites", Modifier.weight(1f))
                     HeroStat(blindState.filteredProfiles.size.toString(), "In the pool", Modifier.weight(1f))
                 }
+            } else if (priceUnavailable) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Couldn't load the price",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onRetryPrice, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("Retry", color = HeroGold, fontWeight = FontWeight.Bold)
+                    }
+                }
             } else {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
@@ -735,7 +771,7 @@ private fun BlindDateHeroCard(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (blindState.isStaffExempt) "staff pass" else "per match",
+                        if (blindState.isStaffExempt) "staff pass" else "per chat",
                         modifier = Modifier.padding(bottom = 6.dp),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
@@ -743,14 +779,35 @@ private fun BlindDateHeroCard(
                     )
                 }
             }
-            when (blindState.status) {
+            if (!blindState.statusLoaded) {
+                if (blindState.statusLoadFailed) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            blindState.error ?: "We couldn't check your pass.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onRetryStatus, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text("Try again", color = HeroGold, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Checking your pass\u2026", style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                    }
+                }
+            } else when (blindState.status) {
                 BlindDateUserStatus.NotJoined,
                 BlindDateUserStatus.Expired -> {
                     HeroPrimaryButton(
                         label = if (isFree) "Join Blind Date" else "Get your pass \u00B7 $priceLabel",
                         icon = Icons.Default.ConfirmationNumber,
                         busy = passBusy,
-                        onClick = onGetPass
+                        onClick = onGetPass,
+                        enabled = !priceUnavailable
                     )
                     if (blindState.status == BlindDateUserStatus.NotJoined) {
                         TextButton(
@@ -762,11 +819,19 @@ private fun BlindDateHeroCard(
                         }
                     }
                 }
-                BlindDateUserStatus.AwaitingPayment -> HeroSecondaryButton(
-                    label = "Check payment status",
-                    icon = Icons.Default.Refresh,
-                    onClick = onCheckPayment
-                )
+                BlindDateUserStatus.AwaitingPayment -> {
+                    HeroPrimaryButton(
+                        label = "Continue to secure checkout",
+                        icon = Icons.Default.ConfirmationNumber,
+                        busy = false,
+                        onClick = onContinueCheckout
+                    )
+                    HeroSecondaryButton(
+                        label = "Check payment status",
+                        icon = Icons.Default.Refresh,
+                        onClick = onCheckPayment
+                    )
+                }
                 BlindDateUserStatus.Matched -> {
                     if (!blindState.matchedChatId.isNullOrBlank()) {
                         HeroPrimaryButton(
@@ -777,6 +842,12 @@ private fun BlindDateHeroCard(
                         )
                     }
                     if (blindState.isPaymentCollectionPending) {
+                        HeroPrimaryButton(
+                            label = "Continue to secure checkout",
+                            icon = Icons.Default.ConfirmationNumber,
+                            busy = false,
+                            onClick = onContinueCheckout
+                        )
                         HeroSecondaryButton(
                             label = "Check payment status",
                             icon = Icons.Default.Refresh,
@@ -786,7 +857,7 @@ private fun BlindDateHeroCard(
                     HeroSecondaryButton(
                         label = if (isFree) "Meet someone new" else "Meet someone new \u00B7 $priceLabel",
                         icon = Icons.Default.Autorenew,
-                        enabled = !passBusy,
+                        enabled = !passBusy && !priceUnavailable,
                         onClick = onGetPass
                     )
                 }
@@ -818,10 +889,10 @@ private fun HeroStat(value: String, label: String, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun HeroPrimaryButton(label: String, icon: ImageVector, busy: Boolean, onClick: () -> Unit) {
+private fun HeroPrimaryButton(label: String, icon: ImageVector, busy: Boolean, onClick: () -> Unit, enabled: Boolean = true) {
     Button(
         onClick = onClick,
-        enabled = !busy,
+        enabled = !busy && enabled,
         modifier = Modifier
             .fillMaxWidth()
             .height(52.dp),
@@ -837,7 +908,7 @@ private fun HeroPrimaryButton(label: String, icon: ImageVector, busy: Boolean, o
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Brush.horizontalGradient(HeroAccent.map { if (busy) it.copy(alpha = 0.6f) else it })),
+                .background(Brush.horizontalGradient(HeroAccent.map { if (busy || !enabled) it.copy(alpha = 0.6f) else it })),
             contentAlignment = Alignment.Center
         ) {
             if (busy) {
