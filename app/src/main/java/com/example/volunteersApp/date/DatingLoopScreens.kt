@@ -1,6 +1,9 @@
 package com.example.volunteersApp.date
 
 import android.net.Uri
+import android.text.format.DateUtils
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -82,6 +86,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -91,6 +96,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
@@ -386,18 +392,32 @@ internal fun DatingLikesYouGrid(
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
+                        like.timestamp?.let { likedAt ->
+                            Text(
+                                (if (like.isSuperLike) "Super Liked you " else "Liked you ") +
+                                    DateUtils.getRelativeTimeSpanString(
+                                        likedAt.time,
+                                        System.currentTimeMillis(),
+                                        DateUtils.MINUTE_IN_MILLIS
+                                    ).toString().replaceFirstChar { c -> c.lowercase() },
+                                color = Color.White.copy(alpha = 0.85f),
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilledTonalIconButton(
                                 onClick = { onPass(like) },
                                 enabled = !inFlight,
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(44.dp)
                             ) {
                                 Icon(Icons.Default.Close, contentDescription = "Pass on ${like.senderName}", tint = PassRed)
                             }
                             FilledTonalIconButton(
                                 onClick = { onLikeBack(like) },
                                 enabled = canLikeBack && !inFlight,
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(44.dp)
                             ) {
                                 Icon(Icons.Default.Favorite, contentDescription = "Like ${like.senderName} back", tint = LikeGreen)
                             }
@@ -1542,10 +1562,46 @@ internal fun DatingMatchFullScreen(
                     )
                 }
                 Spacer(Modifier.height(32.dp))
-                Row {
-                    MatchPhoto(myPhotoUrl, "Your photo")
-                    Spacer(Modifier.width(16.dp))
-                    MatchPhoto(match.photoUrl, "${match.name} photo")
+                val pop = remember(match.uid) { Animatable(0f) }
+                val matchHaptics = LocalHapticFeedback.current
+                LaunchedEffect(match.uid) {
+                    matchHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    pop.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 260f))
+                }
+                Box(contentAlignment = Alignment.Center) {
+                    Row {
+                        Box(
+                            Modifier
+                                .offset(x = 14.dp)
+                                .graphicsLayer {
+                                    rotationZ = -8f * pop.value
+                                    translationX = -120f * (1f - pop.value)
+                                    alpha = pop.value.coerceIn(0f, 1f)
+                                }
+                        ) { MatchPhoto(myPhotoUrl, "Your photo") }
+                        Box(
+                            Modifier
+                                .offset(x = (-14).dp)
+                                .graphicsLayer {
+                                    rotationZ = 8f * pop.value
+                                    translationX = 120f * (1f - pop.value)
+                                    alpha = pop.value.coerceIn(0f, 1f)
+                                }
+                        ) { MatchPhoto(match.photoUrl, "${match.name} photo") }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = pop.value
+                                scaleY = pop.value
+                            }
+                            .size(52.dp)
+                            .clip(CircleShape)
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Favorite, contentDescription = null, tint = MatchPink, modifier = Modifier.size(28.dp))
+                    }
                 }
                 Spacer(Modifier.height(40.dp))
                 Button(
@@ -1753,5 +1809,70 @@ private fun MatchPhoto(url: String, description: String) {
                 .clip(CircleShape),
             contentScale = ContentScale.Crop
         )
+    }
+}
+
+/** Matches sheet list, newest first, with when you matched and where the chat happens. */
+@Composable
+internal fun DatingMatchesList(matches: List<DatingMatch>, onOpenMatch: (DatingMatch) -> Unit) {
+    val sorted = remember(matches) { matches.sortedByDescending { it.matchedAt?.time ?: 0L } }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        sorted.forEach { match ->
+            val matchedLabel = match.matchedAt?.let {
+                "Matched " + DateUtils.getRelativeTimeSpanString(
+                    it.time,
+                    System.currentTimeMillis(),
+                    DateUtils.MINUTE_IN_MILLIS
+                ).toString().replaceFirstChar { c -> c.lowercase() }
+            }
+            val chatHint = if (match.chatId.isNullOrBlank()) "Chat on Blind Date" else "Tap to message"
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 64.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(
+                        onClickLabel = if (match.chatId.isNullOrBlank()) "Chat with ${match.name} on Blind Date" else "Message ${match.name}"
+                    ) { onOpenMatch(match) }
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(MatchPink, MatchOrange)))
+                ) {
+                    AsyncImageDisplayUrl(
+                        rawUrl = match.photoUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(2.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        match.name.ifBlank { "Your match" },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = DateA11yPalette.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        listOfNotNull(matchedLabel, chatHint).joinToString(" \u00B7 "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DateA11yPalette.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = MatchPink)
+            }
+        }
     }
 }

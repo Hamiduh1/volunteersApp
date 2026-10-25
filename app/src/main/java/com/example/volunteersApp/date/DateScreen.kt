@@ -1963,6 +1963,7 @@ private fun DatingLoopScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -1974,6 +1975,12 @@ private fun DatingLoopScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
+                    Text(
+                        "New matches",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = DateA11yPalette.textSecondary
+                    )
                     DatingMatchesStrip(
                         likesYouCount = uiState.likesYou.size,
                         likesYouPreviewUrl = uiState.likesYou.firstOrNull()?.senderPhotoUrl,
@@ -1987,6 +1994,21 @@ private fun DatingLoopScreen(
                             onOpenMatchChat(match)
                         },
                     )
+                    if (uiState.matches.isNotEmpty()) {
+                        Text(
+                            "Messages",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = DateA11yPalette.textSecondary
+                        )
+                        DatingMatchesList(
+                            matches = uiState.matches,
+                            onOpenMatch = { match ->
+                                showMatchesSheet = false
+                                onOpenMatchChat(match)
+                            },
+                        )
+                    }
                 }
             }
         }

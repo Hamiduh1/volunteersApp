@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Work
@@ -554,6 +555,10 @@ internal fun DatingSwipeCard(
         viewer?.interests.orEmpty().map { it.lowercase(Locale.ROOT) }.toSet()
     }
     val prompt = profile.visiblePrompts().firstOrNull()
+    val sharedCount = interests.count { it.lowercase(Locale.ROOT) in viewerInterests }
+    val isNewHere = remember(profile.createdAt) {
+        profile.createdAt?.let { System.currentTimeMillis() - it.time < 7L * 24 * 60 * 60 * 1000 } == true
+    }
 
     Surface(
         modifier = modifier,
@@ -632,14 +637,34 @@ internal fun DatingSwipeCard(
                     .padding(start = 18.dp, end = 18.dp, top = 48.dp, bottom = contentBottomPadding),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     profile.displayNameWithAge(),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+                    if (onOpenProfile != null) {
+                        IconButton(onClick = onOpenProfile) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.22f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowUp,
+                                    contentDescription = "Open ${profile.name.ifBlank { "this member" }}'s full profile",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
                 val workLine = listOf(profile.jobTitle, profile.school, profile.country)
                     .filter { it.isNotBlank() }
                     .joinToString(" · ")
@@ -656,6 +681,8 @@ internal fun DatingSwipeCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (isNewHere) DatingOverlayChip("\u2728 New here", highlighted = true)
+                    if (sharedCount > 0) DatingOverlayChip("$sharedCount in common", highlighted = true)
                     goal?.let { DatingOverlayChip(it.label, highlighted = true) }
                         ?: profile.lookingFor.takeIf { it.isNotBlank() }?.let { raw ->
                             DatingOverlayChip("Looking for ${lookingForLabel(raw)}", highlighted = false)
