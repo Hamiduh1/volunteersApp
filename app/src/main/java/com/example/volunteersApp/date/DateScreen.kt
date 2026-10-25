@@ -238,11 +238,12 @@ private fun ConsumeBlindDateDeepLinkEffect(
     mainViewModel: MainViewModel?,
     uiRoute: DateHubRoute,
     onConsumeAndRequestBlind: () -> Unit,
+    ready: Boolean = true,
 ) {
     if (mainViewModel == null) return
     val pending by mainViewModel.pendingBlindDateDeepLink.collectAsState()
-    LaunchedEffect(pending, uiRoute) {
-        if (!pending || uiRoute != DateHubRoute.DASHBOARD) return@LaunchedEffect
+    LaunchedEffect(pending, uiRoute, ready) {
+        if (!pending || !ready || uiRoute != DateHubRoute.DASHBOARD) return@LaunchedEffect
         mainViewModel.clearPendingBlindDateDeepLink()
         onConsumeAndRequestBlind()
     }
@@ -253,11 +254,12 @@ private fun ConsumeDatingLoopDeepLinkEffect(
     mainViewModel: MainViewModel?,
     uiRoute: DateHubRoute,
     onConsumeAndRequestDatingLoop: () -> Unit,
+    ready: Boolean = true,
 ) {
     if (mainViewModel == null) return
     val pending by mainViewModel.pendingDatingLoopDeepLink.collectAsState()
-    LaunchedEffect(pending, uiRoute) {
-        if (!pending || uiRoute != DateHubRoute.DASHBOARD) return@LaunchedEffect
+    LaunchedEffect(pending, uiRoute, ready) {
+        if (!pending || !ready || uiRoute != DateHubRoute.DASHBOARD) return@LaunchedEffect
         mainViewModel.clearPendingDatingLoopDeepLink()
         onConsumeAndRequestDatingLoop()
     }
@@ -301,21 +303,29 @@ fun DateEvaScreen(
         }
     }
 
+    val deepLinkReady = uiState.accountCanAccessDating == false ||
+        (uiState.accountCanAccessDating == true && uiState.profilesLoaded)
     ConsumeBlindDateDeepLinkEffect(
         mainViewModel = mainViewModel,
         uiRoute = uiState.route,
-        onConsumeAndRequestBlind = { handleAccessResult(viewModel.requestBlindDate()) }
+        onConsumeAndRequestBlind = { handleAccessResult(viewModel.requestBlindDate()) },
+        ready = deepLinkReady,
     )
     ConsumeDatingLoopDeepLinkEffect(
         mainViewModel = mainViewModel,
         uiRoute = uiState.route,
-        onConsumeAndRequestDatingLoop = { handleAccessResult(viewModel.requestDatingLoop()) }
+        onConsumeAndRequestDatingLoop = { handleAccessResult(viewModel.requestDatingLoop()) },
+        ready = deepLinkReady,
     )
 
     LaunchedEffect(uiState.accountCanAccessDating) {
         if (uiState.accountCanAccessDating == true) {
             blindDateViewModel.refreshOverview()
         }
+    }
+
+    LaunchedEffect(uiState.blockedUserIds) {
+        if (uiState.blockedUserIds.isNotEmpty()) blindDateViewModel.refreshBlockedUsers()
     }
 
     LaunchedEffect(aiResponse) {
@@ -409,7 +419,7 @@ fun DateEvaScreen(
         }
         LaunchedEffect(uiState.route, uiState.matchCelebration) {
             if (uiState.route != DateHubRoute.DATING_LOOP && uiState.matchCelebration != null) {
-                viewModel.dismissMatchCelebration()
+                viewModel.dismissMatchCelebration(seen = false)
             }
         }
 
@@ -522,7 +532,7 @@ fun DateEvaScreen(
                     }
                     }
                 },
-                onDismissMatch = viewModel::dismissMatchCelebration,
+                onDismissMatch = { viewModel.dismissMatchCelebration() },
                 onRefreshLoop = { onDone -> viewModel.refreshDatingLoop(onDone) },
                 onUndoPass = viewModel::undoLastDatingPass,
                 onResetPasses = viewModel::resetDatingPasses,
@@ -2905,7 +2915,7 @@ private fun DatingProfileEditorScreen(
             EditorSectionCard(title = "Basics", subtitle = "The first things people notice.") {
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = { name = it.take(80) },
                     label = { Text("Display name") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
@@ -2913,14 +2923,14 @@ private fun DatingProfileEditorScreen(
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = bio,
-                    onValueChange = { bio = it },
+                    onValueChange = { bio = it.take(1000) },
                     label = { Text("Bio") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 140.dp),
                     placeholder = { Text("Tell people what kind of energy you bring.") },
                     supportingText = {
-                        Text("At least $DATING_BIO_MIN_LENGTH characters for a complete profile.")
+                        Text("At least $DATING_BIO_MIN_LENGTH characters for a complete profile. ${bio.length}/1000")
                     }
                 )
                 Spacer(Modifier.height(12.dp))
@@ -3869,7 +3879,7 @@ private fun BlindDateProfileDetailsStep(
     onContinue: (String, List<Uri>, Gender, LookingFor) -> Unit
 ) {
     val myProfile = datingState.myProfile
-    var bio by remember(myProfile?.uid) { mutableStateOf(myProfile?.bio.orEmpty()) }
+    var bio by remember(myProfile?.uid) { mutableStateOf(myProfile?.bio.orEmpty().take(BLIND_DATE_BIO_MAX)) }
     LaunchedEffect(myProfile?.bio) {
         val latest = myProfile?.bio.orEmpty()
         if (latest.isNotBlank() && bio.isBlank()) bio = latest

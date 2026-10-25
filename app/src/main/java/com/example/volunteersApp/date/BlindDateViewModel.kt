@@ -53,6 +53,17 @@ class BlindDateViewModel : ViewModel() {
     private val storage = Firebase.storage
     private val currentUserId = auth.currentUser?.uid
     private val listenerRegistrations = mutableListOf<ListenerRegistration>()
+    /** Status refreshes reset isLoading mid-payment, so payments need their own guard against double charges. */
+    private var paymentInFlight = false
+
+    private fun claimPayment(): Boolean {
+        if (paymentInFlight) {
+            _events.value = BlindDateEvent.ShowToast("Your payment is already in progress.", DateHubBannerTone.Info)
+            return false
+        }
+        paymentInFlight = true
+        return true
+    }
 
     private val _uiState = MutableStateFlow(BlindDateUiState())
     val uiState = _uiState.asStateFlow()
@@ -251,6 +262,7 @@ class BlindDateViewModel : ViewModel() {
             }
             return
         }
+        if (!claimPayment()) return
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
@@ -313,7 +325,7 @@ class BlindDateViewModel : ViewModel() {
                         "Secure Stripe Checkout started. Dating access unlocks after payment confirmation."
                     }
                     val checkoutUrl = result?.get("checkoutUrl") as? String
-                    if (!checkoutUrl.isNullOrBlank()) _uiState.update { it.copy(pendingCheckoutUrl = checkoutUrl) }
+                    _uiState.update { it.copy(pendingCheckoutUrl = checkoutUrl?.takeIf { url -> url.isNotBlank() }) }
                     _events.value = if (!checkoutUrl.isNullOrBlank()) {
                         BlindDateEvent.OpenStripeCheckout(checkoutUrl, message)
                     } else {
@@ -326,6 +338,8 @@ class BlindDateViewModel : ViewModel() {
                 val message = blindDateProviderFailureMessage(e, "Failed to join. Please try again.")
                 _uiState.update { it.copy(isLoading = false, error = message) }
                 _events.value = BlindDateEvent.ShowToast(message, DateHubBannerTone.Error)
+            } finally {
+                paymentInFlight = false
             }
         }
     }
@@ -477,7 +491,14 @@ class BlindDateViewModel : ViewModel() {
                         )
                     }
                 }
-                _uiState.update { it.copy(statusLoaded = true, statusLoadFailed = false) }
+                _uiState.update {
+                    val checkoutOpen = it.isPaymentCollectionPending || it.status == BlindDateUserStatus.AwaitingPayment
+                    it.copy(
+                        statusLoaded = true,
+                        statusLoadFailed = false,
+                        pendingCheckoutUrl = if (checkoutOpen) it.pendingCheckoutUrl else null,
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(isLoading = false, statusLoadFailed = true, error = "Failed to check Blind Date status.")
@@ -498,8 +519,10 @@ class BlindDateViewModel : ViewModel() {
                     .await()
 
                 val profiles = result.documents.mapNotNull { doc ->
-                    doc.toObject(BlindDateProfile::class.java)?.copy(
-                        userId = doc.getString("userId").orEmpty().ifBlank { doc.id }
+                    runCatching { doc.toObject(BlindDateProfile::class.java) }
+                        .onFailure { Log.w("BlindDateVM", "Skipping malformed Blind Date profile ${doc.id}.", it) }
+                        .getOrNull()?.copy(
+                        userId = (doc.get("userId") as? String).orEmpty().ifBlank { doc.id }
                     )
                 }.filter { it.userId != currentUserId && it.userId !in _uiState.value.blockedUserIds }
                 val registeredProfiles = try {
@@ -693,7 +716,9 @@ class BlindDateViewModel : ViewModel() {
         defaultRecipientId: String,
         isSentRecord: Boolean
     ): BlindDateInvitation? {
-        val invitation = doc.toObject(BlindDateInvitation::class.java) ?: return null
+        val invitation = runCatching { doc.toObject(BlindDateInvitation::class.java) }
+            .onFailure { Log.w("BlindDateVM", "Skipping malformed Blind Date invitation ${doc.id}.", it) }
+            .getOrNull() ?: return null
         val senderId = if (invitation.senderId.isNotBlank()) invitation.senderId else defaultSenderId
         val recipientId = if (invitation.recipientId.isNotBlank()) invitation.recipientId else defaultRecipientId
         val senderName = if (invitation.senderName.isNotBlank()) invitation.senderName else if (isSentRecord) "You" else "Anonymous User"
@@ -963,6 +988,7 @@ class BlindDateViewModel : ViewModel() {
             }
             return
         }
+        if (!claimPayment()) return
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
@@ -1005,7 +1031,7 @@ class BlindDateViewModel : ViewModel() {
                         "Secure Stripe Checkout started. Access unlocks after payment confirmation."
                     }
                     val checkoutUrl = result?.get("checkoutUrl") as? String
-                    if (!checkoutUrl.isNullOrBlank()) _uiState.update { it.copy(pendingCheckoutUrl = checkoutUrl) }
+                    _uiState.update { it.copy(pendingCheckoutUrl = checkoutUrl?.takeIf { url -> url.isNotBlank() }) }
                     _events.value = if (!checkoutUrl.isNullOrBlank()) {
                         BlindDateEvent.OpenStripeCheckout(checkoutUrl, message)
                     } else {
@@ -1018,6 +1044,8 @@ class BlindDateViewModel : ViewModel() {
                 val message = blindDateProviderFailureMessage(e, "An error occurred while trying to rejoin.")
                 _uiState.update { it.copy(isLoading = false, error = message) }
                 _events.value = BlindDateEvent.ShowToast(message, DateHubBannerTone.Error)
+            } finally {
+                paymentInFlight = false
             }
         }
     }

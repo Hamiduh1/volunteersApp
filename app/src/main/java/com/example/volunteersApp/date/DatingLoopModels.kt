@@ -31,11 +31,16 @@ fun isDatingLoopInvitationContext(context: String?): Boolean =
 fun isSuperLikeInvitationContext(context: String?): Boolean =
     context?.contains("super like", ignoreCase = true) == true
 
+/** Birthdays are stored as UTC midnight (date picker), so read them in UTC and compare month, then day. */
 fun ageFromBirthDate(birthDate: Date, now: Date = Date()): Int {
-    val birth = Calendar.getInstance().apply { time = birthDate }
+    val birth = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply { time = birthDate }
     val today = Calendar.getInstance().apply { time = now }
     var age = today.get(Calendar.YEAR) - birth.get(Calendar.YEAR)
-    if (today.get(Calendar.DAY_OF_YEAR) < birth.get(Calendar.DAY_OF_YEAR)) age--
+    val birthMonth = birth.get(Calendar.MONTH)
+    val todayMonth = today.get(Calendar.MONTH)
+    if (todayMonth < birthMonth ||
+        (todayMonth == birthMonth && today.get(Calendar.DAY_OF_MONTH) < birth.get(Calendar.DAY_OF_MONTH))
+    ) age--
     return age
 }
 

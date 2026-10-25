@@ -181,6 +181,8 @@ class DateEvaViewModel(
 
     private var sentLikesRefreshJob: kotlinx.coroutines.Job? = null
     private var sentLikesProfileKey: Set<String> = emptySet()
+    /** Only the newest profiles snapshot may finish; an older one finishing last would overwrite fresher data. */
+    private var profilesJob: kotlinx.coroutines.Job? = null
     private val sentLikeListeners = mutableMapOf<String, ListenerRegistration>()
     private var ownAgeRefreshed = false
 
@@ -289,7 +291,10 @@ class DateEvaViewModel(
             onComplete(false, "Invalid user.")
             return
         }
-        if (targetUserId in _uiState.value.blockingUserIds) return
+        if (targetUserId in _uiState.value.blockingUserIds) {
+            onComplete(false, "Already blocking this member.")
+            return
+        }
 
         viewModelScope.launch {
             _uiState.update { it.copy(blockingUserIds = it.blockingUserIds + targetUserId) }
@@ -301,7 +306,8 @@ class DateEvaViewModel(
                     .document(CHAT_PRIVACY_SETTINGS_DOC)
                     .set(
                         mapOf(
-                            "blockedUserIds" to updated.toList().sorted(),
+                            // arrayUnion so a stale local list can never wipe earlier blocks.
+                            "blockedUserIds" to FieldValue.arrayUnion(targetUserId),
                             "updatedAt" to FieldValue.serverTimestamp()
                         ),
                         SetOptions.merge()
@@ -476,8 +482,16 @@ class DateEvaViewModel(
         _uiState.update { it.copy(datingLoopTab = tab) }
     }
 
-    fun dismissMatchCelebration() {
+    fun dismissMatchCelebration(seen: Boolean = true) {
+        val unseenUid = if (seen) null else _uiState.value.matchCelebration?.uid
         _uiState.update { it.copy(matchCelebration = null) }
+        if (unseenUid != null) {
+            val updated = _uiState.value.celebratedMatchIds - unseenUid
+            _uiState.update { it.copy(celebratedMatchIds = it.celebratedMatchIds - unseenUid) }
+            auth.currentUser?.uid?.let { me ->
+                datingPrefs?.edit()?.putStringSet(PREF_CELEBRATED_MATCHES + me, updated.toSet())?.apply()
+            }
+        }
     }
 
     /** Hides a profile from the deck and Likes You, synced via users/{uid}/dating_private/swipes. */
@@ -588,7 +602,7 @@ class DateEvaViewModel(
                     return@addSnapshotListener
                 }
                 val comments = snapshots?.documents.orEmpty()
-                    .mapNotNull { it.toDatingCommentOrNull() }
+                    .mapNotNull { doc -> runCatching { doc.toDatingCommentOrNull() }.getOrNull() }
                     .sortedByDescending { (it.updatedAt ?: it.createdAt)?.time ?: 0L }
                 _uiState.update { it.copy(receivedDatingComments = comments) }
             }
@@ -771,12 +785,18 @@ class DateEvaViewModel(
                         "createdAt" to FieldValue.serverTimestamp(),
                     )
                 ).await()
+                var blockFailed = false
                 if (alsoBlock && reportedUserId !in _uiState.value.blockedUserIds) {
-                    val blockDone = kotlinx.coroutines.CompletableDeferred<Unit>()
-                    blockDatingUser(reportedUserId) { _, _ -> blockDone.complete(Unit) }
-                    kotlinx.coroutines.withTimeoutOrNull(10_000L) { blockDone.await() }
+                    val blockDone = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                    blockDatingUser(reportedUserId) { blocked, _ -> blockDone.complete(blocked) }
+                    blockFailed = kotlinx.coroutines.withTimeoutOrNull(10_000L) { blockDone.await() } != true &&
+                        reportedUserId !in _uiState.value.blockedUserIds
                 }
-                onComplete(true, "Thanks. Our team will review your report.")
+                onComplete(
+                    true,
+                    if (blockFailed) "Thanks. Our team will review your report. We couldn't block them; try again from their profile."
+                    else "Thanks. Our team will review your report."
+                )
             } catch (e: Exception) {
                 Log.e("DateEvaViewModel", "Dating report failed.", e)
                 onComplete(false, "We couldn't send the report. Please try again.")
@@ -910,6 +930,7 @@ class DateEvaViewModel(
     ) {
         val previous = _uiState.value.sentDatingLikes[recipientId] ?: return
         if (snap == null) return
+        if (!snap.exists() && snap.metadata.isFromCache) return
         // Declined invites may be deleted; keep them out of the deck like iOS does.
         val status = if (!snap.exists()) "declined" else snap.getString("status").orEmpty().ifBlank { "pending" }
         if (status.equals(previous.status, ignoreCase = true)) return
@@ -943,7 +964,7 @@ class DateEvaViewModel(
                     Log.w("DateEvaViewModel", "Dating likes listen failed.", error)
                     return@addSnapshotListener
                 }
-                val invites = snapshots?.documents.orEmpty().mapNotNull { doc ->
+                val invites = snapshots?.documents.orEmpty().mapNotNull { doc -> runCatching {
                     val context = doc.getString("context")
                     if (!isDatingLoopInvitationContext(context)) return@mapNotNull null
                     DatingReceivedInvite(
@@ -958,6 +979,7 @@ class DateEvaViewModel(
                         timestamp = doc.getTimestamp("lastUpdatedAt")?.toDate() ?: doc.getTimestamp("timestamp")?.toDate(),
                         matchedChatId = doc.getString("matchedChatId")?.takeIf { it.isNotBlank() },
                     )
+                }.onFailure { Log.w("DateEvaViewModel", "Skipping malformed dating like ${doc.id}.", it) }.getOrNull()
                 }
                 _uiState.update { state -> recomputeLoopProfiles(state.copy(receivedDatingInvites = invites)) }
             }
@@ -1327,6 +1349,7 @@ class DateEvaViewModel(
                 completePendingDatingRoute()
             } catch (error: Exception) {
                 Log.w("DateEvaViewModel", "Dating eligibility verification failed.", error)
+                legacyEligibilityCheckStarted = false
                 _uiState.update { state ->
                     state.copy(
                         isLoading = false,
@@ -1798,9 +1821,12 @@ class DateEvaViewModel(
                     val rawProfiles = snapshots.documents
                         .mapNotNull { doc -> doc.toDatingProfileOrNull() }
                         .sortedByDescending { (it.updatedAt ?: it.createdAt)?.time ?: 0L }
-                    viewModelScope.launch {
+                    profilesJob?.cancel()
+                    profilesJob = viewModelScope.launch {
                         val profiles = try {
                             filterRegisteredDatingProfiles(rawProfiles)
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             Log.w(
                                 "DateEvaViewModel",
@@ -1810,8 +1836,14 @@ class DateEvaViewModel(
                             emptyList()
                         }
 
+                        kotlinx.coroutines.currentCoroutineContext().let { ctx ->
+                            if (ctx[kotlinx.coroutines.Job]?.isActive == false) return@launch
+                        }
                         val currentUserId = auth.currentUser?.uid
+                        // Own profile comes from the raw snapshot so a failed member filter can't make the
+                        // editor think it has no photos and wipe them on save.
                         val myProfile = profiles.find { it.uid == currentUserId }
+                            ?: rawProfiles.find { it.uid == currentUserId }
                         val profileKey = profiles.map { it.uid }.toSet()
                         if (profileKey != sentLikesProfileKey) {
                             sentLikesProfileKey = profileKey

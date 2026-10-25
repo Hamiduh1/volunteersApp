@@ -1,5 +1,6 @@
 package com.example.volunteersApp.date
 
+import androidx.annotation.Keep
 import com.google.firebase.firestore.ServerTimestamp
 import java.util.Date
 
@@ -82,6 +83,7 @@ enum class BlindDateUserStatus {
     Expired
 }
 
+@Keep
 data class BlindDateProfile(
     val userId: String = "",
     val name: String = "",
@@ -113,6 +115,7 @@ data class BlindDateTimelineItem(
     val matchedChatId: String = ""
 )
 
+@Keep
 data class BlindDateInvitation(
     val senderId: String = "",
     val senderName: String = "",

@@ -30,7 +30,7 @@ internal fun normalizeDatingImageUrls(
     addValue(doc.get("images"))
     addValue(doc.get("photos"))
     addValue(doc.get("mediaUrls"))
-    doc.getString("imageUrl")?.trim()?.takeIf { it.isNotEmpty() }?.let { urls.add(0, it) }
+    (doc.get("imageUrl") as? String)?.trim()?.takeIf { it.isNotEmpty() }?.let { urls.add(0, it) }
 
     if (urls.isEmpty()) {
         fallback.map { it.trim() }.filter { it.isNotEmpty() }.forEach(urls::add)
