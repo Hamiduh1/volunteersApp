@@ -289,17 +289,26 @@ class CallHistoryViewModel : ViewModel() {
     }
 
     private suspend fun buildCallHistoryItems(logs: List<CallLog>, userId: String): List<CallHistoryItem> {
+        val selfName = resolveUserProfile(userId).first
         return logs.mapNotNull { log ->
             val isGroupCall = log.isGroupCall || log.participantIds.size > 2
-            val otherUserId = when {
-                log.callerId == userId -> log.receiverId.ifBlank {
-                    log.peerUid.ifBlank {
-                        log.participantIds.firstOrNull { it != userId }.orEmpty()
+            val isOutgoing = log.callerId == userId ||
+                log.direction.equals("outgoing", ignoreCase = true) ||
+                log.direction.equals("dialed", ignoreCase = true)
+            val otherUserId = listOf(
+                when {
+                    log.callerId == userId -> log.receiverId.ifBlank {
+                        log.peerUid.ifBlank {
+                            log.participantIds.firstOrNull { it != userId }.orEmpty()
+                        }
                     }
-                }
-                log.callerId.isNotBlank() -> log.callerId
-                else -> log.peerUid
-            }
+                    log.callerId.isNotBlank() -> log.callerId
+                    else -> log.peerUid
+                },
+                log.receiverId,
+                log.peerUid,
+                log.participantIds.firstOrNull { it != userId }.orEmpty(),
+            ).firstOrNull { it.isNotBlank() && it != userId }.orEmpty()
             if (!isGroupCall && otherUserId in blockedUserIds) {
                 return@mapNotNull null
             }
@@ -312,7 +321,10 @@ class CallHistoryViewModel : ViewModel() {
                 } else {
                     "Unknown" to null
                 }
-                val fallbackName = log.peerName.takeIf { it.isNotBlank() }
+                // peerName can come from a log's callerName, which is your own name on outgoing calls.
+                val fallbackName = log.peerName.takeIf {
+                    it.isNotBlank() && !(isOutgoing && it.equals(selfName, ignoreCase = true))
+                }
                 if (resolvedProfile.first == "Unknown" && fallbackName != null) {
                     fallbackName to resolvedProfile.second
                 } else {
@@ -321,11 +333,10 @@ class CallHistoryViewModel : ViewModel() {
             }
 
             val direction = when {
-                log.status.equals("missed", ignoreCase = true) &&
-                    (log.receiverId == userId || log.direction.equals("missed", ignoreCase = true)) -> CallDirection.MISSED
-                log.direction.equals("outgoing", ignoreCase = true) ||
-                    log.direction.equals("dialed", ignoreCase = true) ||
-                    log.callerId == userId -> CallDirection.DIALED
+                isOutgoing -> CallDirection.DIALED
+                log.status.equals("missed", ignoreCase = true) ||
+                    log.status.equals("declined", ignoreCase = true) ||
+                    log.direction.equals("missed", ignoreCase = true) -> CallDirection.MISSED
                 else -> CallDirection.RECEIVED
             }
 

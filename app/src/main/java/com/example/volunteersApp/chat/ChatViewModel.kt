@@ -126,6 +126,7 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
                 val latest = snapshots?.documents.orEmpty()
                     .map { it.toCallSession() }
                     .filter { session ->
+                        if (EndedCallRegistry.contains(session.id)) return@filter false
                         val maxAgeMs = when {
                             session.status.equals("ringing", ignoreCase = true) -> RINGING_CALL_MAX_AGE_MS
                             session.status.equals("accepted", ignoreCase = true) -> ACTIVE_CALL_MAX_AGE_MS

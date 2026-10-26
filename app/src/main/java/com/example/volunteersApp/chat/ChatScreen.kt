@@ -632,6 +632,7 @@ private fun shouldShowInChatActiveCallBanner(session: CallSession, currentUserId
     if (currentUserId in session.endedParticipantIds || currentUserId in session.declinedParticipantIds) {
         return false
     }
+    if (EndedCallRegistry.contains(session.id)) return false
     return session.status.equals("ringing", ignoreCase = true) ||
         session.status.equals("accepted", ignoreCase = true)
 }

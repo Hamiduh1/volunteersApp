@@ -123,7 +123,8 @@ fun ChatInboxScreen(
         selectedTab = persisted.selectedTab
         invitationStatusFilter = persisted.invitationStatusFilter
         callTypeFilter = persisted.callTypeFilter
-        callDirectionFilter = persisted.callDirectionFilter
+        // The Calls tab has a single All / Voice / Video / Missed row; a saved direction filter would hide calls.
+        callDirectionFilter = CallHistoryDirectionFilter.All
         inboxSearch = persisted.inboxSearch
         callSearch = persisted.callSearch
         allowPersist = true
@@ -488,7 +489,6 @@ private fun SocialInboxFilterControls(
     val scheme = MaterialTheme.colorScheme
     val invitationFilters = enumValues<InvitationStatusFilter>()
     val callTypeFilters = enumValues<CallHistoryTypeFilter>()
-    val directionFilters = enumValues<CallHistoryDirectionFilter>()
     when (selectedTab) {
         SocialInboxTab.Chats -> Unit
         SocialInboxTab.Invitations -> {
@@ -533,89 +533,23 @@ private fun SocialInboxFilterControls(
             }
         }
         SocialInboxTab.Calls -> {
-            var directionExpanded by remember { mutableStateOf(false) }
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = SocialInboxSurfaceSoft,
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-                border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.45f))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = "Call type",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = SocialInboxMutedInk
+                callTypeFilters.forEach { filter ->
+                    FilterChip(
+                        selected = callTypeFilter == filter,
+                        onClick = { onCallTypeFilterChange(filter) },
+                        label = { Text(filter.title) },
+                        shape = CircleShape,
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = WaGreen.copy(alpha = 0.16f),
+                            selectedLabelColor = WaGreenDark,
+                        ),
                     )
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        callTypeFilters.forEachIndexed { index, filter ->
-                            SegmentedButton(
-                                shape = SegmentedButtonDefaults.itemShape(
-                                    index = index,
-                                    count = callTypeFilters.size
-                                ),
-                                onClick = { onCallTypeFilterChange(filter) },
-                                selected = callTypeFilter == filter
-                            ) {
-                                Text(
-                                    text = filter.title,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
-                    Text(
-                        text = "Direction",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = SocialInboxMutedInk
-                    )
-                    ExposedDropdownMenuBox(
-                        expanded = directionExpanded,
-                        onExpandedChange = { directionExpanded = !directionExpanded }
-                    ) {
-                        OutlinedTextField(
-                            modifier = Modifier
-                                .menuAnchor()
-                                .fillMaxWidth(),
-                            readOnly = true,
-                            value = callDirectionFilter.title,
-                            onValueChange = {},
-                            label = { Text("Direction") },
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = directionExpanded)
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = SocialInboxSurfaceSoft,
-                                unfocusedContainerColor = SocialInboxSurfaceSoft,
-                                focusedBorderColor = accent,
-                                unfocusedBorderColor = scheme.outlineVariant,
-                            )
-                        )
-                        ExposedDropdownMenu(
-                            expanded = directionExpanded,
-                            onDismissRequest = { directionExpanded = false }
-                        ) {
-                            directionFilters.forEach { option ->
-                                DropdownMenuItem(
-                                    text = { Text(option.title) },
-                                    onClick = {
-                                        onCallDirectionFilterChange(option)
-                                        directionExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
                 }
             }
         }

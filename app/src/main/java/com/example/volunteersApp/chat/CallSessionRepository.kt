@@ -67,17 +67,9 @@ object CallSessionRepository {
     }
 
     suspend fun endSession(sessionId: String, isGroupCall: Boolean, isCaller: Boolean) {
-        val selfId = Firebase.auth.currentUser?.uid?.trim()
+        Firebase.auth.currentUser?.uid?.trim()
             ?: throw IllegalStateException("You must be signed in to end a call.")
-        val updates = mutableMapOf<String, Any>(
-            "endedParticipantIds" to FieldValue.arrayUnion(selfId),
-            "acceptedParticipantIds" to FieldValue.arrayRemove(selfId),
-            "declinedParticipantIds" to FieldValue.arrayRemove(selfId),
-            "updatedAt" to FieldValue.serverTimestamp(),
-        )
-        // Group members can leave independently; the caller ends the shared session.
-        if (!isGroupCall || isCaller) updates["status"] = "ended"
-        db.collection(FirestoreCollection.CALL_SESSIONS).document(sessionId.trim()).update(updates).await()
+        CallSessionWriter.end(sessionId, isGroupCall, isCaller)
     }
 
     private enum class ParticipantResponse { ACCEPT, DECLINE }
@@ -113,6 +105,10 @@ object CallSessionRepository {
                 updates["endedParticipantIds"] = FieldValue.arrayRemove(selfId)
                 if (!isGroupCall) updates["status"] = "declined"
             }
+        }
+        if (response == ParticipantResponse.DECLINE) {
+            CallSessionWriter.decline(sessionRef, selfId, isGroupCall, updates)
+            return
         }
         sessionRef.update(updates).await()
     }

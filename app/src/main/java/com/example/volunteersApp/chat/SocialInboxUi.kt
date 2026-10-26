@@ -125,8 +125,7 @@ data class CallActivityPalette(
 )
 
 fun CallHistoryItem.callActivityPalette(): CallActivityPalette {
-    val isMissed = direction == CallDirection.MISSED ||
-        call.status.equals("missed", ignoreCase = true)
+    val isMissed = direction == CallDirection.MISSED
     return when {
         isMissed -> CallActivityPalette(
             primary = InboxRed,
@@ -188,7 +187,7 @@ enum class InvitationStatusFilter(val title: String, val wireValue: String?) {
 
 enum class CallHistoryTypeFilter(val title: String) {
     All("All"),
-    Audio("Audio"),
+    Audio("Voice"),
     Video("Video"),
     Missed("Missed")
 }
@@ -301,7 +300,7 @@ fun CallHistoryItem.matchesCallType(filter: CallHistoryTypeFilter): Boolean {
         CallHistoryTypeFilter.All -> true
         CallHistoryTypeFilter.Audio -> !isVideo
         CallHistoryTypeFilter.Video -> isVideo
-        CallHistoryTypeFilter.Missed -> call.status.equals("missed", ignoreCase = true)
+        CallHistoryTypeFilter.Missed -> direction == CallDirection.MISSED
     }
 }
 
@@ -310,14 +309,37 @@ fun CallHistoryItem.matchesCallDirection(filter: CallHistoryDirectionFilter): Bo
         CallHistoryDirectionFilter.All -> true
         CallHistoryDirectionFilter.Incoming -> direction == CallDirection.RECEIVED
         CallHistoryDirectionFilter.Outgoing -> direction == CallDirection.DIALED
-        CallHistoryDirectionFilter.Missed ->
-            direction == CallDirection.MISSED ||
-                call.status.equals("missed", ignoreCase = true)
+        CallHistoryDirectionFilter.Missed -> direction == CallDirection.MISSED
     }
 }
 
+/** "Missed" means an unanswered incoming call; unanswered outgoing calls are not missed. */
 fun List<CallHistoryItem>.missedCallCount(): Int =
-    count {
-        it.direction == CallDirection.MISSED ||
-            it.call.status.equals("missed", ignoreCase = true)
+    count { it.direction == CallDirection.MISSED }
+
+/** Consecutive calls with the same person, direction and type collapse into one row, WhatsApp-style. */
+data class CallHistoryRowGroup(val items: List<CallHistoryItem>) {
+    val head: CallHistoryItem get() = items.first()
+    val count: Int get() = items.size
+}
+
+fun List<CallHistoryItem>.groupConsecutiveCalls(): List<CallHistoryRowGroup> {
+    val groups = mutableListOf<MutableList<CallHistoryItem>>()
+    for (item in this) {
+        val previous = groups.lastOrNull()?.lastOrNull()
+        if (
+            previous != null &&
+            previous.callPeerKey() == item.callPeerKey() &&
+            previous.direction == item.direction &&
+            previous.isVideo == item.isVideo
+        ) {
+            groups.last().add(item)
+        } else {
+            groups.add(mutableListOf(item))
+        }
     }
+    return groups.map { CallHistoryRowGroup(it) }
+}
+
+private fun CallHistoryItem.callPeerKey(): String =
+    if (isGroup) "group:${call.chatId}" else "user:${otherUserId.ifBlank { call.chatId }}"

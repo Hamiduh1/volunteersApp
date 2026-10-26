@@ -30,6 +30,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CallMade
+import androidx.compose.material.icons.automirrored.filled.CallMissed
+import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
@@ -215,18 +218,24 @@ fun ModernConversationItem(
     onVideoCall: () -> Unit
 ) {
     val currentUserId = Firebase.auth.currentUser?.uid
-    val dateLabel = remember(conversation.lastMessageTimestamp) {
-        formatConversationDate(conversation.lastMessageTimestamp)
+    val callPreview = remember(conversation, currentUserId) {
+        buildConversationCallPreview(conversation, currentUserId)
     }
-    val preview = remember(conversation) {
-        val base = buildConversationPreview(conversation)
-        if (conversation.isGroup) {
+    val dateLabel = remember(conversation.lastMessageTimestamp, callPreview) {
+        formatConversationDate(
+            if (callPreview != null) conversation.lastCallTimestamp else conversation.lastMessageTimestamp
+        )
+    }
+    val preview = remember(conversation, callPreview) {
+        val base = callPreview?.text ?: buildConversationPreview(conversation)
+        if (conversation.isGroup && callPreview == null) {
             "${conversation.groupMemberCount} members · $base"
         } else {
             base
         }
     }
-    val showReceipt = !conversation.isGroup &&
+    val showReceipt = callPreview == null &&
+        !conversation.isGroup &&
         !currentUserId.isNullOrBlank() &&
         conversation.lastMessageSenderId == currentUserId
 
@@ -291,10 +300,26 @@ fun ModernConversationItem(
                             read = conversation.lastMessageRead,
                         )
                     }
+                    if (callPreview != null) {
+                        Icon(
+                            imageVector = when {
+                                callPreview.isMissed -> Icons.AutoMirrored.Filled.CallMissed
+                                callPreview.isOutgoing -> Icons.AutoMirrored.Filled.CallMade
+                                else -> Icons.AutoMirrored.Filled.CallReceived
+                            },
+                            contentDescription = null,
+                            tint = if (callPreview.isMissed) WaRed else WaMeta,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                     Text(
                         text = preview,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (conversation.isUnread) WaInk else WaMeta,
+                        color = when {
+                            callPreview?.isMissed == true -> WaRed
+                            conversation.isUnread -> WaInk
+                            else -> WaMeta
+                        },
                         fontWeight = if (conversation.isUnread) FontWeight.Medium else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -303,11 +328,18 @@ fun ModernConversationItem(
                     if (conversation.isUnread) {
                         Box(
                             modifier = Modifier
-                                .size(12.dp)
                                 .clip(CircleShape)
                                 .background(WaGreen)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
                                 .semantics { contentDescription = "Unread" },
-                        )
+                        ) {
+                            Text(
+                                text = "New",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                            )
+                        }
                     }
                 }
             }
@@ -652,6 +684,35 @@ private fun buildConversationCallNote(conversation: ChatConversation): String? {
         if (typeLabel != null) append(" - $typeLabel")
         if (statusLabel != null) append(" - $statusLabel")
     }
+}
+
+private data class ConversationCallPreview(
+    val text: String,
+    val isMissed: Boolean,
+    val isOutgoing: Boolean,
+)
+
+/**
+ * WhatsApp-style last-call line, shown only when the call is newer than the last message.
+ * "Missed" applies to incoming calls only; calls left on "ringing" read as finished calls.
+ */
+private fun buildConversationCallPreview(
+    conversation: ChatConversation,
+    currentUserId: String?,
+): ConversationCallPreview? {
+    if (conversation.lastCallTimestamp <= 0L) return null
+    if (conversation.lastCallTimestamp <= conversation.lastMessageTimestamp) return null
+    val status = conversation.lastCallStatus?.trim()?.lowercase(Locale.ROOT).orEmpty()
+    if (status.isBlank() && conversation.lastCallType.isNullOrBlank()) return null
+    val kind = if (conversation.lastCallType.equals("video", ignoreCase = true)) "video" else "voice"
+    val isOutgoing = !currentUserId.isNullOrBlank() && conversation.lastCallInitiatorId == currentUserId
+    val isMissed = !isOutgoing && (status == "missed" || status == "declined")
+    val text = when {
+        isMissed -> "Missed $kind call"
+        isOutgoing -> "Outgoing $kind call"
+        else -> "Incoming $kind call"
+    }
+    return ConversationCallPreview(text = text, isMissed = isMissed, isOutgoing = isOutgoing)
 }
 
 private fun buildConversationPreview(conversation: ChatConversation): String {

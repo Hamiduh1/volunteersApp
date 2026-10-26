@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.volunteersApp.firebase.FirestoreCollection
 import com.example.volunteersApp.firebase.FirestoreSubcollection
+import com.example.volunteersApp.notifications.CallRingingReceipt
 import com.google.firebase.Firebase
 import com.google.firebase.app
 import com.google.firebase.auth.FirebaseAuth
@@ -448,8 +449,10 @@ class CallSessionViewModel : ViewModel() {
             .filter { userId !in it.declinedParticipantIds }
             .filter { userId !in it.acceptedParticipantIds }
             .filterNot { isIncomingSuppressed(it.id) }
+            .filterNot { EndedCallRegistry.contains(it.id) }
             .sortedByDescending { it.createdAt?.time ?: 0L }
             .firstOrNull()
+        candidate?.let { CallRingingReceipt.mark(it.id) }
         _incomingSession.value = candidate
     }
 

@@ -99,6 +99,15 @@ class CallViewModel(
                 else -> "Calling…"
             }
             _uiState.update { it.copy(isLoading = false, statusLabel = label) }
+            if (isCaller && !remoteJoined && !callHasFinished) {
+                appContext?.let { context ->
+                    if (calleeDeviceRinging || isGroupChat) {
+                        OutgoingCallRingbackHelper.start(context)
+                    } else {
+                        OutgoingCallRingbackHelper.startCalling(context)
+                    }
+                }
+            }
         }
 
         override fun onUserJoined(uid: Int, elapsed: Int) {
@@ -207,15 +216,10 @@ class CallViewModel(
         if (callHasFinished) return
         callHasFinished = true
         IncomingCallNotifications.dismiss(context.applicationContext, activeCallId, chatId)
+        CallSessionWriter.declineDetached(activeCallId)
         viewModelScope.launch {
-            try {
-                CallSessionRepository.declineIncomingSession(activeCallId)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to decline incoming call", e)
-            } finally {
-                leaveChannel()
-                _events.value = CallUiEvent.EndCall
-            }
+            leaveChannel()
+            _events.value = CallUiEvent.EndCall
         }
     }
 
@@ -226,22 +230,29 @@ class CallViewModel(
             var createdSessionThisAttempt = false
             try {
                 prepareCallContext()
+                if (abandonSetupIfHungUp(createdSessionThisAttempt)) return@launch
                 if (acceptIncomingFirst) {
                     step = "acceptCallSession"
                     acceptIncomingCallSessionIfNeeded()
+                    if (abandonSetupIfHungUp(createdSessionThisAttempt)) return@launch
                 }
                 if (isCaller) {
                     step = "createCallSession"
                     createCallSession()
                     createdSessionThisAttempt = true
+                    if (abandonSetupIfHungUp(createdSessionThisAttempt)) return@launch
+                    if (!isGroupChat) checkCalleeRecentlyActive()
                 }
                 step = "initializeAgora"
                 initializeAgora(context.applicationContext)
+                if (abandonSetupIfHungUp(createdSessionThisAttempt)) return@launch
                 step = "listenSessionMeta"
                 attachCallSessionMetadataListener()
                 step = "joinChannel"
                 joinChannel()
+                abandonSetupIfHungUp(createdSessionThisAttempt)
             } catch (e: FirebaseFirestoreException) {
+                if (abandonSetupIfHungUp(createdSessionThisAttempt)) return@launch
                 closeFailedOutgoingSession(createdSessionThisAttempt)
                 leaveChannel()
                 Log.e(TAG, "Failed to start call at step=$step (Firestore ${e.code})", e)
@@ -267,6 +278,7 @@ class CallViewModel(
                 }
                 _events.value = CallUiEvent.ShowError(msg)
             } catch (e: FirebaseFunctionsException) {
+                if (abandonSetupIfHungUp(createdSessionThisAttempt)) return@launch
                 closeFailedOutgoingSession(createdSessionThisAttempt)
                 leaveChannel()
                 Log.e(TAG, "Failed to start call at step=$step (Cloud Function ${e.code})", e)
@@ -282,6 +294,7 @@ class CallViewModel(
                 _uiState.update { it.copy(isLoading = false, error = msg) }
                 _events.value = CallUiEvent.ShowError(msg)
             } catch (e: Exception) {
+                if (abandonSetupIfHungUp(createdSessionThisAttempt)) return@launch
                 closeFailedOutgoingSession(createdSessionThisAttempt)
                 leaveChannel()
                 Log.e(TAG, "Failed to start call at step=$step", e)
@@ -537,14 +550,42 @@ class CallViewModel(
                 }
                 val ringingIds = (snapshot.get("ringingParticipantIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
                 val otherRinging = ringingIds.any { it.isNotBlank() && it != currentUser?.uid }
-                if (isCaller && !remoteJoined && !calleeDeviceRinging && otherRinging) {
-                    calleeDeviceRinging = true
-                    appContext?.let { OutgoingCallRingbackHelper.start(it) }
-                    _uiState.update { prev ->
-                        if (prev.statusLabel == "Calling…") prev.copy(statusLabel = "Ringing…") else prev
-                    }
-                }
+                if (otherRinging) markCalleeRinging()
             }
+    }
+
+    /** Switches the caller from "Calling" (two beeps) to "Ringing" (ringback) once the callee is reachable. */
+    private fun markCalleeRinging() {
+        if (!isCaller || remoteJoined || calleeDeviceRinging || callHasFinished) return
+        calleeDeviceRinging = true
+        appContext?.let { OutgoingCallRingbackHelper.start(it) }
+        _uiState.update { prev ->
+            if (prev.statusLabel == "Calling…") prev.copy(statusLabel = "Ringing…") else prev
+        }
+    }
+
+    /** A callee whose app checked in within the last 75 seconds is treated as ringing. */
+    private fun checkCalleeRecentlyActive() {
+        val calleeId = resolvedOtherUserId?.trim().orEmpty()
+        if (calleeId.isBlank()) return
+        viewModelScope.launch {
+            val lastActiveAt = runCatching {
+                db.collection(FirestoreCollection.USERS).document(calleeId).get().await().resolvePresence().lastActiveAt
+            }.onFailure { Log.w(TAG, "Unable to read callee presence", it) }.getOrNull() ?: return@launch
+            if (System.currentTimeMillis() - lastActiveAt <= CALLEE_RECENTLY_ACTIVE_MS) {
+                markCalleeRinging()
+            }
+        }
+    }
+
+    /** Stops a connection attempt that is still running after the user hung up, so no ghost call remains. */
+    private fun abandonSetupIfHungUp(createdSessionThisAttempt: Boolean): Boolean {
+        if (!callHasFinished) return false
+        if (createdSessionThisAttempt) {
+            CallSessionWriter.endDetached(activeCallId, isGroupChat, isCaller)
+        }
+        leaveChannel()
+        return true
     }
 
     private suspend fun joinChannel() {
@@ -688,15 +729,11 @@ class CallViewModel(
     fun endCall() {
         if (callHasFinished) return
         callHasFinished = true
+        OutgoingCallRingbackHelper.stop()
+        CallSessionWriter.endDetached(activeCallId, isGroupChat, isCaller)
         viewModelScope.launch {
-            try {
-                CallSessionRepository.endSession(activeCallId, isGroupChat, isCaller)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to update call log", e)
-            } finally {
-                leaveChannel()
-                _events.value = CallUiEvent.EndCall
-            }
+            leaveChannel()
+            _events.value = CallUiEvent.EndCall
         }
     }
 
@@ -780,6 +817,7 @@ class CallViewModel(
     companion object {
         private const val TAG = "CallViewModel"
         private const val CALL_ACTIVITY_HEARTBEAT_MS = 60_000L
+        private const val CALLEE_RECENTLY_ACTIVE_MS = 75_000L
         // Agora's documented USER_OFFLINE_QUIT reason. Other reasons can be a transient drop.
         private const val AGORA_USER_OFFLINE_REASON_QUIT = 0
 

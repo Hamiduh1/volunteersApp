@@ -22,8 +22,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.os.SystemClock
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallMade
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.CallMissed
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.Call
@@ -59,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -114,9 +117,9 @@ fun CallHistoryScreen(
                         contentPadding = PaddingValues(start = 16.dp, top = 6.dp, end = 16.dp, bottom = 100.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(visible, key = { "${it.call.chatId}:${it.call.id}" }) { item ->
+                        items(visible.groupConsecutiveCalls(), key = { "${it.head.call.chatId}:${it.head.call.id}" }) { group ->
                             DismissibleCallHistoryRow(
-                                item = item,
+                                group = group,
                                 onOpenChat = onOpenChat,
                                 onHide = viewModel::hideCallHistoryItem,
                             )
@@ -132,57 +135,111 @@ fun CallHistoryScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DismissibleCallHistoryRow(
-    item: CallHistoryItem,
+    group: CallHistoryRowGroup,
     onOpenChat: (chatId: String, otherUserId: String) -> Unit,
     onHide: (CallHistoryItem) -> Unit,
 ) {
+    val head = group.head
+    val canMessage = head.call.chatId.isNotBlank()
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) {
-                onHide(item)
-                true
-            } else {
-                false
+            when (value) {
+                SwipeToDismissBoxValue.EndToStart -> {
+                    group.items.forEach(onHide)
+                    true
+                }
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    if (canMessage) onOpenChat(head.call.chatId, head.otherUserId)
+                    false
+                }
+                else -> false
             }
         }
     )
 
     SwipeToDismissBox(
         state = dismissState,
-        enableDismissFromStartToEnd = false,
+        enableDismissFromStartToEnd = canMessage,
         backgroundContent = {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(InboxRed.copy(alpha = 0.14f))
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Remove from history",
-                    tint = InboxRed
-                )
+            if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(WaGreenDark)
+                        .padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Chat,
+                        contentDescription = null,
+                        tint = Color.White,
+                    )
+                    Text("Message", color = Color.White, fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(WaRed)
+                        .padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
+                    Text("Delete", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Remove from history",
+                        tint = Color.White,
+                    )
+                }
             }
         }
     ) {
         CallHistoryRow(
-            item = item,
+            group = group,
             onOpenChat = onOpenChat,
         )
     }
 }
 
+/** One redial at a time: a quick second tap must not start the same call twice. */
+private object CallRedialGuard {
+    private const val MIN_INTERVAL_MS = 2_000L
+    private var lastLaunchAtMs = 0L
+
+    @Synchronized
+    fun tryAcquire(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastLaunchAtMs < MIN_INTERVAL_MS) return false
+        lastLaunchAtMs = now
+        return true
+    }
+}
+
+private fun formatCallRowTime(date: Date): String {
+    val now = Calendar.getInstance()
+    val target = Calendar.getInstance().apply { time = date }
+    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    fun Calendar.sameDayAs(other: Calendar) =
+        get(Calendar.YEAR) == other.get(Calendar.YEAR) && get(Calendar.DAY_OF_YEAR) == other.get(Calendar.DAY_OF_YEAR)
+    return when {
+        target.sameDayAs(now) -> SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
+        target.sameDayAs(yesterday) -> "Yesterday"
+        target.get(Calendar.YEAR) == now.get(Calendar.YEAR) -> SimpleDateFormat("MMM d", Locale.getDefault()).format(date)
+        else -> SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(date)
+    }
+}
+
 @Composable
 private fun CallHistoryRow(
-    item: CallHistoryItem,
+    group: CallHistoryRowGroup,
     onOpenChat: (chatId: String, otherUserId: String) -> Unit,
 ) {
     val context = LocalContext.current
+    val item = group.head
     val call = item.call
-    val palette = item.callActivityPalette()
-    val isMissedCall = item.direction == CallDirection.MISSED ||
-        call.status.equals("missed", ignoreCase = true)
+    val isMissedCall = item.direction == CallDirection.MISSED
     val directionTint = if (isMissedCall) WaRed else WaGreenDark
     val typeIcon = if (item.isVideo) Icons.Default.Videocam else Icons.Default.Call
     val directionIcon = when (item.direction) {
@@ -191,23 +248,22 @@ private fun CallHistoryRow(
         CallDirection.MISSED -> Icons.AutoMirrored.Filled.CallMissed
     }
     val directionLabel = when (item.direction) {
-        CallDirection.DIALED -> "Dialed"
-        CallDirection.RECEIVED -> "Received"
+        CallDirection.DIALED -> "Outgoing"
+        CallDirection.RECEIVED -> "Incoming"
         CallDirection.MISSED -> "Missed"
     }
-val timestampLabel = remember(call.startedAt) {
-        call.startedAt?.let { SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(it) }.orEmpty()
+    val timestampLabel = remember(call.startedAt, call.endedAt) {
+        (call.startedAt ?: call.endedAt)?.let(::formatCallRowTime).orEmpty()
     }
-    val statusShort = remember(call.status, call.durationSeconds) {
-        val st = call.status.replaceFirstChar { char ->
-            if (char.isLowerCase()) char.titlecase(Locale.getDefault()) else char.toString()
-        }
-        when {
-            call.status.equals("missed", ignoreCase = true) -> "Missed"
-            call.durationSeconds > 0 -> "${formatDuration(call.durationSeconds)}"
-            else -> st
+    val detailLabel = remember(item.direction, call.durationSeconds) {
+        if (!isMissedCall && call.durationSeconds > 0) {
+            "$directionLabel · ${formatDuration(call.durationSeconds)}"
+        } else {
+            directionLabel
         }
     }
+    val nameLabel = item.otherUserName.ifBlank { "Unknown" } +
+        if (group.count > 1) " (${group.count})" else ""
 
     Surface(
         modifier = Modifier
@@ -221,7 +277,6 @@ val timestampLabel = remember(call.startedAt) {
                     Modifier
                 }
             ),
-        shape = RoundedCornerShape(16.dp),
         color = SocialInboxSurface,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
@@ -249,7 +304,7 @@ val timestampLabel = remember(call.startedAt) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = item.otherUserName.ifBlank { "Unknown" },
+                        text = nameLabel,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = if (isMissedCall) WaRed else WaInk,
@@ -279,7 +334,7 @@ val timestampLabel = remember(call.startedAt) {
                         modifier = Modifier.size(16.dp),
                     )
                     Text(
-                        text = "$directionLabel · $statusShort · ${if (item.isVideo) "Video" else "Voice"}",
+                        text = detailLabel,
                         style = MaterialTheme.typography.bodySmall,
                         color = WaMeta,
                         maxLines = 1,
@@ -290,6 +345,7 @@ val timestampLabel = remember(call.startedAt) {
 
             IconButton(
                 onClick = {
+                    if (!CallRedialGuard.tryAcquire()) return@IconButton
                     val callType = if (item.isVideo) CallType.VIDEO else CallType.AUDIO
                     context.startActivity(
                         CallActivity.newIntent(
@@ -449,9 +505,9 @@ fun LazyListScope.appendCallHistoryInboxItems(
                     }
                 }
             } else {
-                items(visible, key = { "${it.call.chatId}:${it.call.id}" }) { item ->
+                items(visible.groupConsecutiveCalls(), key = { "${it.head.call.chatId}:${it.head.call.id}" }) { group ->
                     DismissibleCallHistoryRow(
-                        item = item,
+                        group = group,
                         onOpenChat = onOpenChat,
                         onHide = onHideCall,
                     )
