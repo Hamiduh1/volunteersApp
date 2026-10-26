@@ -1196,6 +1196,21 @@ export const registerUserPushTokens = functions.runWith({enforceAppCheck: true})
     const apnsVoipToken = hasVoipToken ? String(data.apnsVoipToken).trim() : "";
     const deviceId = normalizedDeviceSessionId(data?.deviceId);
     const platform = normalizedDevicePlatform(data?.platform);
+    // Android builds without phone sessions send only fcmToken + platform. Rules block their
+    // Firestore fallback, so rejecting them here would stop all their push notifications.
+    if (!deviceId && typeof data?.deviceId === "undefined" && fcmToken) {
+      const legacyPayload: Record<string, unknown> = {
+        fcmToken,
+        fcmTokens: admin.firestore.FieldValue.arrayUnion(fcmToken),
+        fcmTokenUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (platform) {
+        legacyPayload.pushPlatform = platform;
+      }
+      await db.collection("users").doc(uid).set(legacyPayload, {merge: true});
+      return {ok: true, legacyRegistration: true};
+    }
     if (!deviceId || !platform) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -24762,14 +24777,17 @@ export const addPaymentMethod = functions.runWith({enforceAppCheck: true})
         if (fullAccountNumber.length < 4) {
           throw new functions.https.HttpsError("invalid-argument", "A valid bank account number is required.");
         }
-        privateBankFields = {
-          accountNumberRaw: fullAccountNumber,
-          routingNumberRaw: asNonEmptyString(payload.routingNumber) || null,
-          updatedAt: now,
-        };
-        payload.accountNumber = maskedBankAccountNumber(fullAccountNumber);
+        // Android's Stripe bank-token flow only sends a masked number; never store that as the raw one.
+        if (!fullAccountNumber.includes("*")) {
+          privateBankFields = {
+            accountNumberRaw: fullAccountNumber,
+            routingNumberRaw: asNonEmptyString(payload.routingNumber) || null,
+            updatedAt: now,
+          };
+          payload.accountNumber = maskedBankAccountNumber(fullAccountNumber);
+          delete payload.routingNumber;
+        }
         payload.last4 = fullAccountNumber.slice(-4);
-        delete payload.routingNumber;
       }
       if (methodType === "CARD") {
         payload.requiresRelinkForCharges = true;
