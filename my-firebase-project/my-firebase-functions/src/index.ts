@@ -19859,6 +19859,78 @@ const initiateTransferHandler = async (
   }
 };
 
+const TRANSFER_REQUEST_IN_PROGRESS_STALE_MS = 15 * 60 * 1000;
+const TRANSFER_REQUEST_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Runs a send at most once per sender + clientRequestId. A retry after a lost response
+ * (even with a fresh quote) returns the original result instead of paying out twice.
+ * Failed attempts are released so a retry behaves exactly like a new submission.
+ * @param {functions.https.CallableContext} context Callable context of the sender.
+ * @param {unknown} rawClientRequestId Client-generated id, stable across retries of one send.
+ * @param {Function} run Executes the transfer.
+ * @return {Promise<unknown>} The transfer result.
+ */
+const runIdempotentTransfer = async (
+  context: functions.https.CallableContext,
+  rawClientRequestId: unknown,
+  run: () => Promise<unknown>
+): Promise<unknown> => {
+  const senderId = context.auth?.uid;
+  const clientRequestId = typeof rawClientRequestId === "string" ? rawClientRequestId.trim() : "";
+  if (!senderId || !clientRequestId) return run();
+  if (!/^[A-Za-z0-9_-]{16,80}$/.test(clientRequestId)) {
+    throw new functions.https.HttpsError("invalid-argument", "Invalid transfer request id.");
+  }
+
+  const requestRef = db.collection("wallet_transfer_requests").doc(`${senderId}_${clientRequestId}`);
+  const existingResult = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(requestRef);
+    const nowMs = Date.now();
+    if (snapshot.exists) {
+      const status = String(snapshot.get("status") || "");
+      if (status === "COMPLETED") {
+        return {result: snapshot.get("result") as unknown};
+      }
+      const startedAtMs = toTimestampMillis(snapshot.get("startedAt")) || 0;
+      if (status === "IN_PROGRESS" && nowMs - startedAtMs < TRANSFER_REQUEST_IN_PROGRESS_STALE_MS) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "This transfer is already in progress. Check Activity for its status before sending again."
+        );
+      }
+    }
+    transaction.set(requestRef, {
+      senderId,
+      clientRequestId,
+      status: "IN_PROGRESS",
+      startedAt: admin.firestore.Timestamp.fromMillis(nowMs),
+      expiresAt: admin.firestore.Timestamp.fromMillis(nowMs + TRANSFER_REQUEST_RETENTION_MS),
+    });
+    return null;
+  });
+  if (existingResult) return existingResult.result;
+
+  try {
+    const result = await run();
+    if ((result as {success?: unknown} | null)?.success === false) {
+      await requestRef.delete();
+      return result;
+    }
+    await requestRef.set({
+      status: "COMPLETED",
+      result: JSON.parse(JSON.stringify(result ?? null)),
+      completedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+    return result;
+  } catch (error) {
+    await requestRef.delete().catch((deleteError) => {
+      functions.logger.error("Could not release failed transfer request.", {senderId, clientRequestId, deleteError});
+    });
+    throw error;
+  }
+};
+
 // Kept for mobile-bank and legacy callers. New App User sends use the
 // explicit callable below so the recipient lane cannot be confused with a
 // direct beneficiary or a Stripe Connect payout.
@@ -19871,7 +19943,11 @@ export const initiateTransfer = functions.runWith({enforceAppCheck: true})
         "Use sendToAppUser for an App User transfer."
       );
     }
-    return initiateTransferHandler(request, context);
+    return runIdempotentTransfer(
+      context,
+      (request as {clientRequestId?: unknown}).clientRequestId,
+      () => initiateTransferHandler(request, context)
+    );
   });
 
 export const sendToAppUser = functions.runWith({enforceAppCheck: true})
@@ -19883,11 +19959,15 @@ export const sendToAppUser = functions.runWith({enforceAppCheck: true})
         "sendToAppUser only accepts the App User delivery lane."
       );
     }
-    return initiateTransferHandler({
-      ...request,
-      destinationRoute: "APP_USER",
-      sendLane: "APP_USER",
-    }, context);
+    return runIdempotentTransfer(
+      context,
+      (request as {clientRequestId?: unknown}).clientRequestId,
+      () => initiateTransferHandler({
+        ...request,
+        destinationRoute: "APP_USER",
+        sendLane: "APP_USER",
+      }, context)
+    );
   });
 
 /**
