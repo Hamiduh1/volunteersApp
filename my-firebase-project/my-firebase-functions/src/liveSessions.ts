@@ -834,56 +834,59 @@ export const onLiveSessionEndedFinalizeArchive = functions.firestore
     return undefined;
   });
 
+const presenceTimestampMs = (value: unknown, nowMs: number): number => {
+  const ms = value && typeof (value as admin.firestore.Timestamp).toMillis === "function" ?
+    (value as admin.firestore.Timestamp).toMillis() : 0;
+  // Clients write their own presence timestamps; a future value must not keep a room alive.
+  return ms > nowMs + 60_000 ? 0 : ms;
+};
+
 export const reconcileStaleLiveSessions = functions.pubsub
-  .schedule("every 5 minutes")
+  .schedule("every 2 minutes")
   .onRun(async () => {
-    // Current host apps heartbeat every 60s; end rooms whose host vanished without ending.
-    const heartbeatCutoffMs = Date.now() - 5 * 60 * 1000;
+    // Hosts refresh viewers/{hostId}.lastSeenAt well under a minute apart; several missed beats
+    // means the broadcaster is gone without ending the room.
+    const staleAfterMs = 3 * 60 * 1000;
+    const startupGraceMs = 2 * 60 * 1000;
+    const nowMs = Date.now();
     const liveSnap = await getDb().collection("live_sessions")
-      .where("status", "in", ["live", "active", "LIVE", "ACTIVE"])
+      .where("status", "in", ["live", "active", "LIVE", "ACTIVE", "started"])
       .limit(200)
       .get();
+
     for (const doc of liveSnap.docs) {
-      const heartbeat = doc.get("hostHeartbeatAt") as admin.firestore.Timestamp | undefined;
-      if (!heartbeat || typeof heartbeat.toMillis !== "function") continue;
-      if (heartbeat.toMillis() >= heartbeatCutoffMs) continue;
-      await doc.ref.set({
-        status: "ended",
-        endedAt: admin.firestore.FieldValue.serverTimestamp(),
-        endTime: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        endedReason: "host_heartbeat_lost",
-      }, {merge: true});
-    }
-
-    const staleThresholdMs = 30 * 60 * 1000;
-    const cutoff = admin.firestore.Timestamp.fromDate(new Date(Date.now() - staleThresholdMs));
-    const staleSnap = await getDb().collection("live_sessions")
-      .where("status", "in", ["live", "active", "LIVE", "ACTIVE"])
-      .where("updatedAt", "<", cutoff)
-      .limit(25)
-      .get();
-
-    for (const doc of staleSnap.docs) {
       const data = doc.data();
       const hostId = String(data.hostId || data.hostUid || "").trim();
-      let shouldEnd = true;
+      const startedMs = Math.max(
+        presenceTimestampMs(data.startTime, nowMs),
+        presenceTimestampMs(data.createdAt, nowMs)
+      );
+      if (startedMs > 0 && nowMs - startedMs < startupGraceMs) continue;
+
+      let hostSeenMs = 0;
       if (hostId) {
         const viewerSnap = await doc.ref.collection("viewers").doc(hostId).get();
-        const hostSeen = viewerSnap.get("lastSeenAt") as admin.firestore.Timestamp | undefined;
-        if (hostSeen && hostSeen.toMillis() > Date.now() - staleThresholdMs) {
-          shouldEnd = false;
-        }
+        hostSeenMs = presenceTimestampMs(viewerSnap.get("lastSeenAt"), nowMs);
       }
-      if (!shouldEnd) continue;
+      const lastActivityMs = Math.max(
+        hostSeenMs,
+        presenceTimestampMs(data.hostHeartbeatAt, nowMs),
+        presenceTimestampMs(data.updatedAt, nowMs)
+      );
+      if (lastActivityMs > 0 && nowMs - lastActivityMs < staleAfterMs) continue;
+      if (lastActivityMs === 0 && startedMs > 0 && nowMs - startedMs < staleAfterMs) continue;
 
-      await doc.ref.set({
-        status: "ended",
-        endedAt: admin.firestore.FieldValue.serverTimestamp(),
-        endTime: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        endedReason: "stale_reconcile",
-      }, {merge: true});
+      try {
+        await doc.ref.set({
+          status: "ended",
+          endedAt: admin.firestore.FieldValue.serverTimestamp(),
+          endTime: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          endedReason: "host_heartbeat_lost",
+        }, {merge: true});
+      } catch (error) {
+        functions.logger.warn("reconcileStaleLiveSessions update failed", {sessionId: doc.id, error: String(error)});
+      }
     }
     return null;
   });

@@ -2562,40 +2562,67 @@ const notifyFollowers = async (params: {
     return;
   }
 
-  const tokens: string[] = [];
-  const batch = db.batch();
-  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+  const actorRef = db.collection("users").doc(actorId);
+  const [blockedA, blockedB, chatPrivacy] = await Promise.all([
+    actorRef.collection("blocked_users").get(),
+    actorRef.collection("blockedUsers").get(),
+    actorRef.collection("settings").doc("chat_privacy").get(),
+  ]);
+  const chatPrivacyBlocked = chatPrivacy.get("blockedUserIds");
+  const blockedIds = new Set<string>([
+    ...blockedA.docs.map((doc) => doc.id),
+    ...blockedB.docs.map((doc) => doc.id),
+    ...(Array.isArray(chatPrivacyBlocked) ?
+      chatPrivacyBlocked.filter((id): id is string => typeof id === "string") :
+      []),
+  ]);
+  const followerIds = followersSnap.docs
+    .map((doc) => doc.id)
+    .filter((id) => id && id !== actorId && !blockedIds.has(id));
 
-  for (const followerDoc of followersSnap.docs) {
-    const followerId = followerDoc.id;
-    const settingsDoc = await db.collection("users").doc(followerId)
-      .collection("settings").doc("notifications").get();
-    const settings = settingsDoc.data();
-
-    if (!shouldNotifyFollower(settings, settingsField)) {
-      continue;
+  const tokens = new Set<string>();
+  const recipients: string[] = [];
+  const READ_CONCURRENCY = 25;
+  for (let i = 0; i < followerIds.length; i += READ_CONCURRENCY) {
+    const slice = followerIds.slice(i, i + READ_CONCURRENCY);
+    const results = await Promise.all(slice.map(async (followerId) => {
+      const userRef = db.collection("users").doc(followerId);
+      const [settingsDoc, followerUserDoc] = await Promise.all([
+        userRef.collection("settings").doc("notifications").get(),
+        userRef.get(),
+      ]);
+      if (!shouldNotifyFollower(settingsDoc.data(), settingsField)) return null;
+      return {followerId, followerTokens: collectUserFcmTokens(followerUserDoc.data())};
+    }));
+    for (const result of results) {
+      if (!result) continue;
+      recipients.push(result.followerId);
+      result.followerTokens.forEach((token) => tokens.add(token));
     }
-
-    const followerUserDoc = await db.collection("users").doc(followerId).get();
-    collectUserFcmTokens(followerUserDoc.data()).forEach((token) => tokens.push(token));
-
-    const notificationRef = db.collection("users").doc(followerId).collection("notifications").doc();
-    batch.set(notificationRef, {
-      type,
-      title,
-      body,
-      actorId,
-      referenceId,
-      read: false,
-      createdAt: timestamp,
-    });
   }
 
-  await batch.commit();
+  // Firestore batches and FCM multicasts both cap at 500 entries.
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+  for (let i = 0; i < recipients.length; i += 450) {
+    const batch = db.batch();
+    for (const followerId of recipients.slice(i, i + 450)) {
+      batch.set(db.collection("users").doc(followerId).collection("notifications").doc(), {
+        type,
+        title,
+        body,
+        actorId,
+        referenceId,
+        read: false,
+        createdAt: timestamp,
+      });
+    }
+    await batch.commit();
+  }
 
-  if (tokens.length > 0) {
+  const tokenList = [...tokens];
+  for (let i = 0; i < tokenList.length; i += 500) {
     await admin.messaging().sendEachForMulticast({
-      tokens,
+      tokens: tokenList.slice(i, i + 500),
       notification: {title, body},
       data: {type, actorId, referenceId},
     });
@@ -3901,6 +3928,25 @@ export const processGarageSalePayment = functions.firestore
 //  2B. JOKES + LIVE NOTIFICATIONS (NEW)
 // =============================================================================
 
+const MINDLOOM_POST_PUSH_COOLDOWN_MS = 5 * 60 * 1000;
+
+/**
+ * Limits new-post pushes to one per author per cooldown, so post/delete loops cannot spam followers.
+ * @param {string} authorId Post author uid.
+ * @return {Promise<boolean>} True when this post may notify followers.
+ */
+const claimMindLoomPostPushCooldown = async (authorId: string): Promise<boolean> => {
+  const ref = db.collection("server_live_follower_pushes").doc(`mindloom_${authorId}`);
+  return db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    const nowMs = Date.now();
+    const last = snap.get("lastSentAt") as admin.firestore.Timestamp | undefined;
+    if (last && nowMs - last.toMillis() < MINDLOOM_POST_PUSH_COOLDOWN_MS) return false;
+    transaction.set(ref, {lastSentAt: admin.firestore.Timestamp.fromMillis(nowMs)});
+    return true;
+  });
+};
+
 export const onJokePostedNotifyFollowers = functions.firestore
   .document("users/{userId}/jokes/{jokeId}")
   .onCreate(async (snap, context) => {
@@ -3908,6 +3954,10 @@ export const onJokePostedNotifyFollowers = functions.firestore
     const joke = snap.data();
     if (!joke) return undefined;
     if (isHiddenMindLoomPost(joke)) {
+      return undefined;
+    }
+
+    if (!(await claimMindLoomPostPushCooldown(actorId))) {
       return undefined;
     }
 
@@ -3933,9 +3983,27 @@ export const onMindLoomCommentCreated = functions.firestore
   .onCreate(async (_snap, context) => {
     const {userId, jokeId} = context.params as {userId: string; jokeId: string};
     const postRef = db.collection("users").doc(userId).collection("jokes").doc(jokeId);
-    await postRef.set({
+    // update (not set/merge) so a comment on a deleted post cannot recreate it.
+    await postRef.update({
       commentsCount: admin.firestore.FieldValue.increment(1),
-    }, {merge: true});
+    }).catch((error) => {
+      if ((error as {code?: number}).code === 5) return;
+      throw error;
+    });
+    return undefined;
+  });
+
+export const onMindLoomCommentDeleted = functions.firestore
+  .document("users/{userId}/jokes/{jokeId}/comments/{commentId}")
+  .onDelete(async (_snap, context) => {
+    const {userId, jokeId} = context.params as {userId: string; jokeId: string};
+    const postRef = db.collection("users").doc(userId).collection("jokes").doc(jokeId);
+    await db.runTransaction(async (transaction) => {
+      const post = await transaction.get(postRef);
+      if (!post.exists) return;
+      const current = Number(post.get("commentsCount") || 0);
+      transaction.update(postRef, {commentsCount: Math.max(0, current - 1)});
+    });
     return undefined;
   });
 
@@ -3996,6 +4064,32 @@ export const onLiveSessionBecameLiveNotifyFollowers = functions.firestore
     return notifyLiveSessionFollowersIfNeeded(change.after.id, after);
   });
 
+const LIVE_FOLLOWER_PUSH_HOST_COOLDOWN_MS = 10 * 60 * 1000;
+
+/**
+ * Sends at most one "is live" push per session (onCreate and onUpdate can both fire)
+ * and at most one per host per cooldown, so restarting a live cannot spam followers.
+ * @param {string} sessionId Live session id.
+ * @param {string} hostId Host uid.
+ * @return {Promise<boolean>} True when this invocation may send the push.
+ */
+const claimLiveFollowerPush = async (sessionId: string, hostId: string): Promise<boolean> => {
+  const collection = db.collection("server_live_follower_pushes");
+  const sessionRef = collection.doc(`session_${sessionId}`);
+  const hostRef = collection.doc(`host_${hostId}`);
+  return db.runTransaction(async (transaction) => {
+    const [sessionSnap, hostSnap] = await Promise.all([transaction.get(sessionRef), transaction.get(hostRef)]);
+    if (sessionSnap.exists) return false;
+    const nowMs = Date.now();
+    transaction.set(sessionRef, {hostId, claimedAt: admin.firestore.Timestamp.fromMillis(nowMs)});
+    const lastSent = hostSnap.get("lastSentAt") as admin.firestore.Timestamp | undefined;
+    const lastSentMs = lastSent ? lastSent.toMillis() : 0;
+    if (nowMs - lastSentMs < LIVE_FOLLOWER_PUSH_HOST_COOLDOWN_MS) return false;
+    transaction.set(hostRef, {lastSentAt: admin.firestore.Timestamp.fromMillis(nowMs)});
+    return true;
+  });
+};
+
 const notifyLiveSessionFollowersIfNeeded = async (
   sessionId: string,
   session: admin.firestore.DocumentData
@@ -4009,6 +4103,12 @@ const notifyLiveSessionFollowersIfNeeded = async (
 
   const actorId = String(session.hostId || session.hostUid || "").trim();
   if (!actorId) return undefined;
+
+  // Invite-only and event-only streams must not announce their title to every follower.
+  const viewAccessMode = String(session.viewAccessMode || "public").trim().toLowerCase();
+  if (viewAccessMode !== "public" && viewAccessMode !== "followers_only") return undefined;
+
+  if (!(await claimLiveFollowerPush(sessionId, actorId))) return undefined;
 
   const title = session.title || "Live now";
   const hostName = session.hostName || "Someone";

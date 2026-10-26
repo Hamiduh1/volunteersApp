@@ -8255,7 +8255,7 @@ const getLiveArchiveStorageBucketName = (): string | undefined => {
 };
 
 /** Buckets that received recordings under earlier configs; replays stored there must stay playable. */
-const LIVE_ARCHIVE_LEGACY_BUCKETS = String(process.env.AGORA_RECORDING_LEGACY_BUCKETS ?? "agora_recording_storage_bucket")
+const LIVE_ARCHIVE_LEGACY_BUCKETS = String(process.env.AGORA_RECORDING_LEGACY_BUCKETS ?? "")
   .split(",")
   .map((bucket) => bucket.trim())
   .filter((bucket) => bucket.length > 0);
