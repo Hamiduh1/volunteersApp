@@ -6749,7 +6749,25 @@ export const acceptBlindDateInvitation = functions.runWith({enforceAppCheck: tru
         if (invitationStatus !== "pending") throw new functions.https.HttpsError("failed-precondition", "This invitation is no longer pending.");
 
         const now = admin.firestore.Timestamp.now();
-        const chatData = {chatId: newChatRef.id, participants: [acceptorId, senderId], lastMessageText: "Blind Date match! Say hi.", lastMessageTimestamp: now};
+        const seedPreview = "Blind Date match! Say hi.";
+        const acceptorName = String(acceptorProfile.data()?.name || "").trim() || "Blind Date match";
+        const senderName = String(senderProfile.data()?.name || "").trim() || "Blind Date match";
+        const chatData = {
+          chatId: newChatRef.id,
+          chatType: "direct",
+          source: "blind_date",
+          participants: [acceptorId, senderId],
+          participantPairKey: [acceptorId, senderId].sort().join("_"),
+          participantDisplayNames: {[acceptorId]: acceptorName, [senderId]: senderName},
+          exitedParticipantIds: [],
+          lastMessage: seedPreview,
+          lastMessageText: seedPreview,
+          lastMessageTimestamp: now,
+          lastMessageSenderId: acceptorId,
+          lastMessageType: "TEXT",
+          createdAt: now,
+          updatedAt: now,
+        };
         transaction.set(newChatRef, chatData);
         transaction.update(acceptorProfileRef, {
           status: "matched",

@@ -496,7 +496,9 @@ service cloud.firestore {
     function isSafeBlindDateProfileClientPatch() {
       let next = request.resource.data;
       return next.diff(resource.data).affectedKeys()
-          .hasOnly(['bio', 'gender', 'media', 'profilePictureUrl', 'name', 'updatedAt'])
+          .hasOnly(['bio', 'gender', 'lookingFor', 'media', 'profilePictureUrl', 'name', 'updatedAt'])
+        && (!next.diff(resource.data).affectedKeys().hasAny(['lookingFor'])
+          || next.lookingFor in ['MEN', 'WOMEN', 'EVERYONE'])
         && (!('bio' in next) || (next.bio is string && next.bio.size() <= 1000))
         && (!('name' in next) || (next.name is string && next.name.size() <= 80))
         && (!('gender' in next) || (next.gender is string && next.gender.size() <= 40))
