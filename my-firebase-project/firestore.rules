@@ -1957,8 +1957,14 @@ service cloud.firestore {
     match /call_sessions/{sessionId} {
       allow read: if isCallSessionChatParticipant(resource.data)
         && isCallSessionChatAllowed(resource.data);
-      // createCallSession validates the backing chat, blocks, and recipients server-side.
-      allow create: if false;
+      // iOS and released Android builds still create sessions client-side. Switch to `if false`
+      // (createCallSession only) once both apps call the callable.
+      allow create: if isSignedIn()
+        && request.resource.data.callerId == request.auth.uid
+        && canCreateChatCallFor(request.resource.data.chatId, request.resource.data.receiverId)
+        && isValidCallSessionSeed(request.resource.data)
+        && request.resource.data.status == 'ringing'
+        && request.resource.data.callType in ['audio', 'video'];
       // Allow participants to update session state (Agora join/leave signaling).
       allow update: if isCallSessionChatParticipant(resource.data)
         && isCallSessionChatAllowed(resource.data)
