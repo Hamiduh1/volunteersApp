@@ -1538,6 +1538,20 @@ class DateEvaViewModel(
 
                 profileRef.set(profileData, SetOptions.merge()).await()
 
+                // Accepting a Blind Date invite compares the stored Blind Date profiles, so keep them in step.
+                // Separate best-effort write: a missing Blind Date profile must never fail the Dating Loop save.
+                runCatching {
+                    db.collection(FirestoreCollection.BLIND_DATE_PROFILES).document(user.uid)
+                        .update(
+                            mapOf(
+                                "gender" to gender.name,
+                                "lookingFor" to lookingFor.name,
+                                "updatedAt" to FieldValue.serverTimestamp(),
+                            )
+                        )
+                        .await()
+                }
+
                 val contactData = hashMapOf<String, Any>(
                     "birthDate" to com.google.firebase.Timestamp(birthDate),
                     "updatedAt" to FieldValue.serverTimestamp(),

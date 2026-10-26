@@ -531,7 +531,18 @@ class BlindDateViewModel : ViewModel() {
                     Log.w("BlindDateVM", "Registered-user filtering failed. Hiding profiles to avoid unsafe exposure.", e)
                     emptyList()
                 }
-                val viewerProfile = loadViewerDatingProfile()
+                val viewerProfile = loadViewerDatingProfile()?.let { dating ->
+                    // The accept check compares stored Blind Date profiles, so filter on mine when present.
+                    val myBlind = currentUserId?.let { uid ->
+                        runCatching {
+                            db.collection(FirestoreCollection.BLIND_DATE_PROFILES).document(uid).get().await()
+                        }.getOrNull()
+                    }
+                    dating.copy(
+                        gender = myBlind?.getString("gender")?.takeIf { it.isNotBlank() } ?: dating.gender,
+                        lookingFor = myBlind?.getString("lookingFor")?.takeIf { it.isNotBlank() } ?: dating.lookingFor,
+                    )
+                }
                 val compatibleProfiles = if (viewerProfile == null) {
                     registeredProfiles
                 } else {
