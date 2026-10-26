@@ -126,7 +126,7 @@ class LiveArchivePlayerActivity : ComponentActivity() {
 private const val CHAT_REPLAY_LIMIT = 300L
 
 /** YouTube-style watch page: 16:9 player on top, details and actions underneath. */
-@OptIn(ExperimentalMaterial3Api::class, UnstableApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LiveArchivePlayerScreen(
     sessionId: String,

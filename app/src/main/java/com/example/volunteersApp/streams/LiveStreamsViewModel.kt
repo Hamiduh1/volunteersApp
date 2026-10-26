@@ -276,15 +276,15 @@ class LiveStreamsViewModel : ViewModel() {
 
                 preflightRetryCount = 0
 
-                refreshLiveSessionsAfterAccessCheck()
+        refreshLiveSessionsAfterAccessCheck()
 
-                listenForUserRequests()
+        listenForUserRequests()
 
-                refreshBlockedHosts()
+        refreshBlockedHosts()
 
-                listenForFollowingHosts()
+        listenForFollowingHosts()
 
-                listenForAcceptedEventApplications()
+        listenForAcceptedEventApplications()
 
             }
 

@@ -1,7 +1,4 @@
-@file:OptIn(
-    androidx.compose.foundation.ExperimentalFoundationApi::class,
-    androidx.media3.common.util.UnstableApi::class
-)
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 
 package com.example.volunteersApp.advertisement
 

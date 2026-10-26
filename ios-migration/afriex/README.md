@@ -69,6 +69,7 @@ User Acceptance Testing (UAT) workbook for businesses integrating with Afriex.
 | [12_MOBILE_MONEY_RECIPIENT_VERIFICATION_UAT_2026-09-06.md](./12_MOBILE_MONEY_RECIPIENT_VERIFICATION_UAT_2026-09-06.md) | 19-corridor recipient-registration parity, provider-resolution behavior, and production evidence requirements |
 | [13_SUPPORTED_COUNTRIES_REFRESH_2026-09-06.md](./13_SUPPORTED_COUNTRIES_REFRESH_2026-09-06.md) | Current provider mobile, local-bank, and SWIFT coverage with account-entitlement safeguards |
 | [14_PAYMENT_METHOD_RESOLUTION_PRODUCTION_2026-09-07.md](./14_PAYMENT_METHOD_RESOLUTION_PRODUCTION_2026-09-07.md) | Afriex production recipient-resolution contract, diagnostics, and provider escalation evidence |
+| [15_MOBILE_MONEY_COLLECTION_SETTLEMENT_2026-10-19.md](./15_MOBILE_MONEY_COLLECTION_SETTLEMENT_2026-10-19.md) | Non-custodial MM collection-to-payout contract, API constraint, and pending Afriex production confirmation |
 | [99_SIGN_OFF.md](./99_SIGN_OFF.md) | UAT acceptance sign-off |
 | [ANDROID_WALLET_WORKFLOW.md](./ANDROID_WALLET_WORKFLOW.md) | How VolunteersApp Android maps to this UAT (callable-only) |
 

@@ -141,6 +141,12 @@ data class DateEvaUiState(
     val sendingCommentIds: Set<String> = emptySet(),
     /** The match whose row Blind Date highlights after "Chat on Blind Date". */
     val blindDateFocusPartnerId: String? = null,
+    /** False until the first dating-profiles snapshot (or its error) arrives; People shows a skeleton until then. */
+    val profilesLoaded: Boolean = false,
+    /** Match IDs already celebrated, so a reload never replays the same celebration. */
+    val celebratedMatchIds: Set<String> = emptySet(),
+    /** Super Likes claimed before their network write finishes; released if the write fails. */
+    val reservedSuperLikeIds: Set<String> = emptySet(),
 )
 
 val DateEvaUiState.visibleDatingComments: List<DatingComment>
@@ -168,11 +174,15 @@ class DateEvaViewModel(
         private const val DATING_PRIVATE_SWIPES_DOC = "swipes"
         private const val DATING_PREFS = "dating_loop_prefs"
         private const val PREF_BROWSE_LAYOUT = "browseLayout"
+        private const val PREF_CELEBRATED_MATCHES = "celebratedMatches_"
+        private const val DATING_COMMENT_EDIT_INTERVAL_MS = 24L * 60 * 60 * 1000
         private const val MAX_SENT_LIKE_LISTENERS = 60
     }
 
     private var sentLikesRefreshJob: kotlinx.coroutines.Job? = null
     private var sentLikesProfileKey: Set<String> = emptySet()
+    /** Only the newest profiles snapshot may finish; an older one finishing last would overwrite fresher data. */
+    private var profilesJob: kotlinx.coroutines.Job? = null
     private val sentLikeListeners = mutableMapOf<String, ListenerRegistration>()
     private var ownAgeRefreshed = false
 
@@ -203,7 +213,11 @@ class DateEvaViewModel(
     init {
         datingPrefs?.getString(PREF_BROWSE_LAYOUT, null)
             ?.let { saved -> DatingBrowseLayout.entries.firstOrNull { it.name == saved } }
-            ?.let { saved -> _uiState.update { it.copy(browseLayout = saved) } }
+            ?.let { saved -> _uiState.update { it.copy(browseLayout = saved.asBrowseMode()) } }
+        auth.currentUser?.uid?.let { uid ->
+            datingPrefs?.getStringSet(PREF_CELEBRATED_MATCHES + uid, null)
+                ?.let { saved -> _uiState.update { it.copy(celebratedMatchIds = saved.toSet()) } }
+        }
         listenForDatingAccessEligibility()
         listenForSystemConfig()
         refreshBlockedUsers()
@@ -214,7 +228,7 @@ class DateEvaViewModel(
         val uid = auth.currentUser?.uid ?: return
         viewModelScope.launch {
             runCatching {
-                db.fetchBlockedUserIds(uid)
+                db.fetchDatingBlockedUserIds(uid)
             }.onSuccess { blocked ->
                 _uiState.update { state ->
                     recomputeLoopProfiles(state.copy(blockedUserIds = blocked))
@@ -253,7 +267,8 @@ class DateEvaViewModel(
         }
     }
 
-    fun setDatingBrowseLayout(layout: DatingBrowseLayout) {
+    fun setDatingBrowseLayout(requested: DatingBrowseLayout) {
+        val layout = requested.asBrowseMode()
         _uiState.update { it.copy(browseLayout = layout) }
         datingPrefs?.edit()?.putString(PREF_BROWSE_LAYOUT, layout.name)?.apply()
     }
@@ -276,7 +291,10 @@ class DateEvaViewModel(
             onComplete(false, "Invalid user.")
             return
         }
-        if (targetUserId in _uiState.value.blockingUserIds) return
+        if (targetUserId in _uiState.value.blockingUserIds) {
+            onComplete(false, "Already blocking this member.")
+            return
+        }
 
         viewModelScope.launch {
             _uiState.update { it.copy(blockingUserIds = it.blockingUserIds + targetUserId) }
@@ -288,7 +306,8 @@ class DateEvaViewModel(
                     .document(CHAT_PRIVACY_SETTINGS_DOC)
                     .set(
                         mapOf(
-                            "blockedUserIds" to updated.toList().sorted(),
+                            // arrayUnion so a stale local list can never wipe earlier blocks.
+                            "blockedUserIds" to FieldValue.arrayUnion(targetUserId),
                             "updatedAt" to FieldValue.serverTimestamp()
                         ),
                         SetOptions.merge()
@@ -328,12 +347,34 @@ class DateEvaViewModel(
         val uid = auth.currentUser?.uid ?: return
         viewModelScope.launch {
             runCatching {
-                val userDoc = db.collection(FirestoreCollection.USERS).document(uid).get().await()
-                userDoc.getString("datingContactPhone")
-                    ?: userDoc.getString("phoneNumber")
-                    ?: ""
+                val contactRef = datingPrivateDoc(uid, DATING_PRIVATE_CONTACT_DOC)
+                val privatePhone = contactRef.get().await().getString("phone")?.trim().orEmpty()
+                if (privatePhone.isNotBlank()) {
+                    privatePhone
+                } else {
+                    // Older Android releases copied this optional Dating Loop
+                    // contact number to the public user document. Move that
+                    // value into the owner-only record and remove the mirror.
+                    val userRef = db.collection(FirestoreCollection.USERS).document(uid)
+                    val legacyPhone = userRef.get().await().getString("datingContactPhone")?.trim().orEmpty()
+                    if (legacyPhone.isNotBlank()) {
+                        contactRef.set(
+                            mapOf(
+                                "phone" to legacyPhone,
+                                "updatedAt" to FieldValue.serverTimestamp(),
+                            ),
+                            SetOptions.merge()
+                        ).await()
+                        runCatching { userRef.update("datingContactPhone", FieldValue.delete()).await() }
+                            .onFailure { Log.w("DateEvaViewModel", "Could not remove legacy public dating contact.", it) }
+                    }
+                    legacyPhone
+                }
             }.onSuccess { phone ->
                 _uiState.update { it.copy(ownerPrivatePhone = phone.orEmpty()) }
+            }.onFailure { error ->
+                Log.w("DateEvaViewModel", "Could not load private dating contact.", error)
+                _uiState.update { it.copy(ownerPrivatePhone = "") }
             }
         }
     }
@@ -365,40 +406,47 @@ class DateEvaViewModel(
             .filter { it.isNotBlank() && it != currentUserId && it !in blocked }
             .toSet()
 
-        val matches = matchedIds.map { uid ->
-            val profile = profilesById[uid]
+        val matches = matchedIds.mapNotNull { uid ->
+            // A deleted profile must not remain a usable match through an
+            // old invitation document.
+            val profile = profilesById[uid] ?: return@mapNotNull null
             val received = receivedAccepted.firstOrNull { it.senderId == uid }
             val sent = sentAccepted.firstOrNull { it.recipientId == uid }
             DatingMatch(
                 uid = uid,
-                name = profile?.name?.takeIf { it.isNotBlank() } ?: received?.senderName.orEmpty().ifBlank { "Your match" },
-                photoUrl = profile?.resolvedImageUrls()?.firstOrNull() ?: received?.senderPhotoUrl.orEmpty(),
+                name = profile.name.takeIf { it.isNotBlank() } ?: received?.senderName.orEmpty().ifBlank { "Your match" },
+                photoUrl = profile.resolvedImageUrls().firstOrNull() ?: received?.senderPhotoUrl.orEmpty(),
                 chatId = received?.matchedChatId ?: sent?.matchedChatId,
                 matchedAt = received?.timestamp ?: sent?.timestamp,
             )
         }.sortedByDescending { it.matchedAt?.time ?: 0L }
 
         val likesYou = state.receivedDatingInvites
-            .filter { invite ->
-                invite.status.equals("pending", ignoreCase = true) &&
-                    invite.senderId !in state.passedProfileIds &&
-                    invite.senderId !in blocked &&
-                    invite.senderId !in matchedIds
-            }
-            .sortedWith(
-                compareByDescending<DatingReceivedInvite> { it.isSuperLike }
-                    .thenByDescending { it.timestamp?.time ?: 0L }
-            )
-            .map { invite ->
+            .mapNotNull { invite ->
                 val profile = profilesById[invite.senderId]
+                if (
+                    profile == null ||
+                    state.myProfile == null ||
+                    !isMutuallyCompatibleDating(state.myProfile, profile) ||
+                    !invite.status.equals("pending", ignoreCase = true) ||
+                    invite.senderId in state.passedProfileIds ||
+                    invite.senderId in blocked ||
+                    invite.senderId in matchedIds
+                ) {
+                    return@mapNotNull null
+                }
                 DatingIncomingLike(
                     senderId = invite.senderId,
-                    senderName = profile?.name?.takeIf { it.isNotBlank() } ?: invite.senderName.ifBlank { "Someone" },
-                    senderPhotoUrl = profile?.resolvedImageUrls()?.firstOrNull() ?: invite.senderPhotoUrl,
+                    senderName = profile.name.takeIf { it.isNotBlank() } ?: invite.senderName.ifBlank { "Someone" },
+                    senderPhotoUrl = profile.resolvedImageUrls().firstOrNull() ?: invite.senderPhotoUrl,
                     isSuperLike = invite.isSuperLike,
                     timestamp = invite.timestamp,
                 )
             }
+            .sortedWith(
+                compareByDescending<DatingIncomingLike> { it.isSuperLike }
+                    .thenByDescending { it.timestamp?.time ?: 0L }
+            )
 
         // Already-liked, passed and matched people leave the deck; declined likes stay out too.
         val swipeDeck = filtered.filter { profile ->
@@ -409,7 +457,7 @@ class DateEvaViewModel(
 
         val superLikesUsedToday = state.sentDatingLikes.values.count { like ->
             like.isSuperLike && like.timestamp?.let { isSameLocalDay(it) } == true
-        }
+        } + state.reservedSuperLikeIds.count { it !in state.sentDatingLikes }
         val superLikedByIds = state.receivedDatingInvites
             .filter { it.isSuperLike && it.status.equals("pending", ignoreCase = true) }
             .map { it.senderId }
@@ -434,8 +482,16 @@ class DateEvaViewModel(
         _uiState.update { it.copy(datingLoopTab = tab) }
     }
 
-    fun dismissMatchCelebration() {
+    fun dismissMatchCelebration(seen: Boolean = true) {
+        val unseenUid = if (seen) null else _uiState.value.matchCelebration?.uid
         _uiState.update { it.copy(matchCelebration = null) }
+        if (unseenUid != null) {
+            val updated = _uiState.value.celebratedMatchIds - unseenUid
+            _uiState.update { it.copy(celebratedMatchIds = it.celebratedMatchIds - unseenUid) }
+            auth.currentUser?.uid?.let { me ->
+                datingPrefs?.edit()?.putStringSet(PREF_CELEBRATED_MATCHES + me, updated.toSet())?.apply()
+            }
+        }
     }
 
     /** Hides a profile from the deck and Likes You, synced via users/{uid}/dating_private/swipes. */
@@ -546,7 +602,7 @@ class DateEvaViewModel(
                     return@addSnapshotListener
                 }
                 val comments = snapshots?.documents.orEmpty()
-                    .mapNotNull { it.toDatingCommentOrNull() }
+                    .mapNotNull { doc -> runCatching { doc.toDatingCommentOrNull() }.getOrNull() }
                     .sortedByDescending { (it.updatedAt ?: it.createdAt)?.time ?: 0L }
                 _uiState.update { it.copy(receivedDatingComments = comments) }
             }
@@ -574,6 +630,10 @@ class DateEvaViewModel(
             onComplete(false, "Create your dating profile before commenting.")
             return
         }
+        if (!isMutuallyCompatibleDating(mine, profile)) {
+            onComplete(false, "This profile no longer matches your shared preferences.")
+            return
+        }
         if (recipientId in _uiState.value.blockedUserIds) {
             onComplete(false, "This user is blocked.")
             return
@@ -583,6 +643,16 @@ class DateEvaViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(sendingCommentIds = it.sendingCommentIds + recipientId) }
             try {
+                val existing = runCatching {
+                    datingCommentsCollection(recipientId).document(currentUid).get().await()
+                }.getOrNull()
+                val lastWrite = existing?.getTimestamp("updatedAt")?.toDate()
+                    ?: existing?.getTimestamp("createdAt")?.toDate()
+                if (lastWrite != null && System.currentTimeMillis() - lastWrite.time < DATING_COMMENT_EDIT_INTERVAL_MS) {
+                    _uiState.update { it.copy(sendingCommentIds = it.sendingCommentIds - recipientId) }
+                    onComplete(false, "You already commented on this profile today. You can update it once every 24 hours.")
+                    return@launch
+                }
                 datingCommentsCollection(recipientId).document(currentUid)
                     .set(
                         mapOf(
@@ -670,6 +740,72 @@ class DateEvaViewModel(
         }
     }
 
+    /**
+     * iOS report sheet: one reason, optional details, written with the shared user_reports fields.
+     * [alsoBlock] blocks them once the report is stored.
+     */
+    fun submitDatingReport(
+        reportedUserId: String,
+        reportedUserName: String,
+        reason: String,
+        details: String,
+        alsoBlock: Boolean,
+        context: String,
+        onComplete: (Boolean, String) -> Unit,
+    ) {
+        val currentUser = auth.currentUser
+        if (currentUser == null || reportedUserId.isBlank() || reportedUserId == currentUser.uid) {
+            onComplete(false, "Invalid user.")
+            return
+        }
+        if (reportedUserId in _uiState.value.reportingUserIds) return
+        val cleanReason = reason.trim().ifBlank { "Something else" }
+        val cleanDetails = details.trim().take(DATING_REPORT_DETAILS_MAX)
+        viewModelScope.launch {
+            _uiState.update { it.copy(reportingUserIds = it.reportingUserIds + reportedUserId) }
+            try {
+                val reporterName = _uiState.value.myProfile?.name?.takeIf { it.isNotBlank() }
+                    ?: currentUser.displayName?.takeIf { it.isNotBlank() }
+                    ?: "Anonymous"
+                db.collection(FirestoreCollection.USER_REPORTS).add(
+                    mapOf(
+                        "reportingUserId" to currentUser.uid,
+                        "reportedByUid" to currentUser.uid,
+                        "reportingUserDisplayName" to reporterName,
+                        "reportedUserId" to reportedUserId,
+                        "reportedUserName" to reportedUserName,
+                        "reason" to cleanReason,
+                        "reasonForReport" to if (cleanDetails.isBlank()) cleanReason else "$cleanReason: $cleanDetails",
+                        "description" to cleanDetails,
+                        "category" to "Dating",
+                        "eventName" to context,
+                        "context" to context,
+                        "source" to "android",
+                        "status" to "open",
+                        "createdAt" to FieldValue.serverTimestamp(),
+                    )
+                ).await()
+                var blockFailed = false
+                if (alsoBlock && reportedUserId !in _uiState.value.blockedUserIds) {
+                    val blockDone = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                    blockDatingUser(reportedUserId) { blocked, _ -> blockDone.complete(blocked) }
+                    blockFailed = kotlinx.coroutines.withTimeoutOrNull(10_000L) { blockDone.await() } != true &&
+                        reportedUserId !in _uiState.value.blockedUserIds
+                }
+                onComplete(
+                    true,
+                    if (blockFailed) "Thanks. Our team will review your report. We couldn't block them; try again from their profile."
+                    else "Thanks. Our team will review your report."
+                )
+            } catch (e: Exception) {
+                Log.e("DateEvaViewModel", "Dating report failed.", e)
+                onComplete(false, "We couldn't send the report. Please try again.")
+            } finally {
+                _uiState.update { it.copy(reportingUserIds = it.reportingUserIds - reportedUserId) }
+            }
+        }
+    }
+
     fun reportDatingUser(profile: DatingProfile, reason: String, onComplete: (Boolean, String) -> Unit) {
         val currentUser = auth.currentUser
         if (currentUser == null || profile.uid.isBlank() || profile.uid == currentUser.uid) {
@@ -724,6 +860,20 @@ class DateEvaViewModel(
     private fun datingPrivateDoc(uid: String, docId: String) =
         db.collection(FirestoreCollection.USERS).document(uid)
             .collection(DATING_PRIVATE_SUBCOLLECTION).document(docId)
+
+    /**
+     * Invitation rules accept only the sender name stored on users/{uid}; an
+     * Auth display name can be stale or differ from that public profile field.
+     * Returning null is intentional: the field is optional in the shared
+     * invitation contract, while an incorrect name would reject the whole like.
+     */
+    private suspend fun loadCurrentPublicInvitationName(uid: String): String? {
+        val user = db.collection(FirestoreCollection.USERS).document(uid).get().await()
+        return listOf("name", "username", "email")
+            .asSequence()
+            .mapNotNull { key -> user.getString(key)?.trim()?.takeIf { it.isNotEmpty() } }
+            .firstOrNull()
+    }
 
     private fun loadPrivateDatingState() {
         val uid = auth.currentUser?.uid ?: return
@@ -780,6 +930,7 @@ class DateEvaViewModel(
     ) {
         val previous = _uiState.value.sentDatingLikes[recipientId] ?: return
         if (snap == null) return
+        if (!snap.exists() && snap.metadata.isFromCache) return
         // Declined invites may be deleted; keep them out of the deck like iOS does.
         val status = if (!snap.exists()) "declined" else snap.getString("status").orEmpty().ifBlank { "pending" }
         if (status.equals(previous.status, ignoreCase = true)) return
@@ -813,7 +964,7 @@ class DateEvaViewModel(
                     Log.w("DateEvaViewModel", "Dating likes listen failed.", error)
                     return@addSnapshotListener
                 }
-                val invites = snapshots?.documents.orEmpty().mapNotNull { doc ->
+                val invites = snapshots?.documents.orEmpty().mapNotNull { doc -> runCatching {
                     val context = doc.getString("context")
                     if (!isDatingLoopInvitationContext(context)) return@mapNotNull null
                     DatingReceivedInvite(
@@ -828,10 +979,21 @@ class DateEvaViewModel(
                         timestamp = doc.getTimestamp("lastUpdatedAt")?.toDate() ?: doc.getTimestamp("timestamp")?.toDate(),
                         matchedChatId = doc.getString("matchedChatId")?.takeIf { it.isNotBlank() },
                     )
+                }.onFailure { Log.w("DateEvaViewModel", "Skipping malformed dating like ${doc.id}.", it) }.getOrNull()
                 }
                 _uiState.update { state -> recomputeLoopProfiles(state.copy(receivedDatingInvites = invites)) }
             }
         listenerRegistrations += registration
+    }
+
+    /** Pull to refresh. Profiles already stream live, so this re-reads blocks and sent likes. */
+    fun refreshDatingLoop(onDone: () -> Unit) {
+        refreshBlockedUsers()
+        refreshSentDatingLikes(_uiState.value.allProfiles.map { it.uid })
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(700)
+            onDone()
+        }
     }
 
     /**
@@ -919,6 +1081,18 @@ class DateEvaViewModel(
             onComplete(false, "You must be logged in.")
             return
         }
+        val state = _uiState.value
+        val myProfile = state.myProfile
+        val senderProfile = state.allProfiles.firstOrNull { it.uid == like.senderId }
+        if (
+            myProfile == null ||
+            senderProfile == null ||
+            !isMutuallyCompatibleDating(myProfile, senderProfile) ||
+            like.senderId in state.blockedUserIds
+        ) {
+            onComplete(false, "This profile is no longer available for a match.")
+            return
+        }
         if (like.senderId in _uiState.value.invitingUserIds) return
         viewModelScope.launch {
             _uiState.update { it.copy(invitingUserIds = it.invitingUserIds + like.senderId) }
@@ -935,7 +1109,17 @@ class DateEvaViewModel(
         }
     }
 
+    private fun rememberCelebratedMatch(uid: String) {
+        val updated = _uiState.value.celebratedMatchIds + uid
+        _uiState.update { it.copy(celebratedMatchIds = it.celebratedMatchIds + uid) }
+        auth.currentUser?.uid?.let { me ->
+            datingPrefs?.edit()?.putStringSet(PREF_CELEBRATED_MATCHES + me, updated.toSet())?.apply()
+        }
+    }
+
     private fun celebrateMatch(uid: String, name: String, photoUrl: String, chatId: String?) {
+        if (uid in _uiState.value.celebratedMatchIds) return
+        rememberCelebratedMatch(uid)
         _uiState.update { state ->
             val profile = state.allProfiles.firstOrNull { it.uid == uid }
             state.copy(
@@ -1165,6 +1349,7 @@ class DateEvaViewModel(
                 completePendingDatingRoute()
             } catch (error: Exception) {
                 Log.w("DateEvaViewModel", "Dating eligibility verification failed.", error)
+                legacyEligibilityCheckStarted = false
                 _uiState.update { state ->
                     state.copy(
                         isLoading = false,
@@ -1353,6 +1538,20 @@ class DateEvaViewModel(
 
                 profileRef.set(profileData, SetOptions.merge()).await()
 
+                // Accepting a Blind Date invite compares the stored Blind Date profiles, so keep them in step.
+                // Separate best-effort write: a missing Blind Date profile must never fail the Dating Loop save.
+                runCatching {
+                    db.collection(FirestoreCollection.BLIND_DATE_PROFILES).document(user.uid)
+                        .update(
+                            mapOf(
+                                "gender" to gender.name,
+                                "lookingFor" to lookingFor.name,
+                                "updatedAt" to FieldValue.serverTimestamp(),
+                            )
+                        )
+                        .await()
+                }
+
                 val contactData = hashMapOf<String, Any>(
                     "birthDate" to com.google.firebase.Timestamp(birthDate),
                     "updatedAt" to FieldValue.serverTimestamp(),
@@ -1363,15 +1562,6 @@ class DateEvaViewModel(
                         .set(contactData, SetOptions.merge())
                         .await()
                 }.onFailure { Log.w("DateEvaViewModel", "Could not save private dating contact.", it) }
-
-                if (normalizedPhone.isNotBlank()) {
-                    db.collection(FirestoreCollection.USERS).document(user.uid)
-                        .set(
-                            mapOf("datingContactPhone" to normalizedPhone),
-                            SetOptions.merge()
-                        )
-                        .await()
-                }
 
                 _uiState.update { current ->
                     val returnRoute = when (profileReturnRoute) {
@@ -1396,24 +1586,24 @@ class DateEvaViewModel(
                     )
                     val updatedProfiles = listOf(savedProfile) + current.allProfiles.filterNot { it.uid == user.uid }
                     recomputeLoopProfiles(
-                        current.copy(
-                            isLoading = false,
-                            route = returnRoute,
+                    current.copy(
+                        isLoading = false,
+                        route = returnRoute,
                             allProfiles = updatedProfiles,
                             myProfile = savedProfile,
                             privateBirthDate = birthDate,
                             ownerPrivatePhone = normalizedPhone,
-                            bannerMessage = DateHubBannerMessage(
+                        bannerMessage = DateHubBannerMessage(
                                 text = if (existingProfile == null) "Dating profile created." else "Dating profile updated.",
-                                tone = DateHubBannerTone.Success
-                            ),
-                            userGender = gender,
-                            lookingFor = lookingFor,
-                            hasVerifiedAge = when (current.accountCanAccessDating) {
-                                true -> true
-                                false -> false
-                                null -> current.hasVerifiedAge
-                            }
+                            tone = DateHubBannerTone.Success
+                        ),
+                        userGender = gender,
+                        lookingFor = lookingFor,
+                        hasVerifiedAge = when (current.accountCanAccessDating) {
+                            true -> true
+                            false -> false
+                            null -> current.hasVerifiedAge
+                        }
                         )
                     )
                 }
@@ -1442,16 +1632,16 @@ class DateEvaViewModel(
                 _uiState.update { state ->
                     recomputeLoopProfiles(
                         state.copy(
-                            isLoading = false,
-                            route = DateHubRoute.DASHBOARD,
+                        isLoading = false,
+                        route = DateHubRoute.DASHBOARD,
                             allProfiles = state.allProfiles.filterNot { it.uid == currentUserId },
-                            myProfile = null,
-                            userGender = null,
-                            lookingFor = null,
-                            hasVerifiedAge = false,
-                            bannerMessage = DateHubBannerMessage(
-                                text = "Dating profile deleted.",
-                                tone = DateHubBannerTone.Success
+                        myProfile = null,
+                        userGender = null,
+                        lookingFor = null,
+                        hasVerifiedAge = false,
+                        bannerMessage = DateHubBannerMessage(
+                            text = "Dating profile deleted.",
+                            tone = DateHubBannerTone.Success
                             )
                         )
                     )
@@ -1496,11 +1686,12 @@ class DateEvaViewModel(
                 return@launch
             }
 
-            if (_uiState.value.myProfile == null) {
+            val myProfile = _uiState.value.myProfile
+            if (myProfile == null) {
                 onComplete(false, "Create your dating profile before sending invitations.")
                 return@launch
             }
-            if (!isMutuallyCompatibleDating(_uiState.value.myProfile!!, profile)) {
+            if (!isMutuallyCompatibleDating(myProfile, profile)) {
                 onComplete(false, "This profile no longer matches your shared preferences.")
                 return@launch
             }
@@ -1515,6 +1706,10 @@ class DateEvaViewModel(
             if (superLike && _uiState.value.superLikesUsedToday >= DATING_SUPER_LIKES_PER_DAY) {
                 onComplete(false, "You've used today's Super Like. Send a regular like or try again tomorrow.")
                 return@launch
+            }
+            // Claim today's Super Like before any network call so two quick swipes can't both spend it.
+            if (superLike) {
+                _uiState.update { recomputeLoopProfiles(it.copy(reservedSuperLikeIds = it.reservedSuperLikeIds + recipientId)) }
             }
 
             val invitationRef = db.collection(FirestoreCollection.USERS).document(recipientId)
@@ -1554,15 +1749,19 @@ class DateEvaViewModel(
                     return@launch
                 }
 
-                val invitationData = hashMapOf(
+                val invitationData = hashMapOf<String, Any>(
                     "senderId" to inviterId,
-                    "senderName" to (currentUser.displayName ?: "A User"),
                     "senderProfilePicUrl" to (currentUser.photoUrl?.toString().orEmpty()),
                     "senderProfileImageUrl" to (currentUser.photoUrl?.toString().orEmpty()),
                     "status" to "pending",
                     "timestamp" to FieldValue.serverTimestamp(),
                     "context" to if (superLike) DATING_LOOP_SUPER_LIKE_CONTEXT else DATING_LOOP_LIKE_CONTEXT
                 )
+                // Do not send an Auth-only display name: it may not match the
+                // public user document and would be rejected by Firestore rules.
+                loadCurrentPublicInvitationName(inviterId)?.let { publicName ->
+                    invitationData["senderName"] = publicName
+                }
 
                 invitationRef.set(invitationData, SetOptions.merge()).await()
                 _uiState.update { state ->
@@ -1589,6 +1788,9 @@ class DateEvaViewModel(
                 onComplete(false, "Failed to send chat invitation.")
             } finally {
                 _uiState.update { it.copy(invitingUserIds = it.invitingUserIds - recipientId) }
+                if (superLike) {
+                    _uiState.update { recomputeLoopProfiles(it.copy(reservedSuperLikeIds = it.reservedSuperLikeIds - recipientId)) }
+                }
             }
         }
     }
@@ -1615,6 +1817,7 @@ class DateEvaViewModel(
                         error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED
                     _uiState.update {
                         it.copy(
+                            profilesLoaded = true,
                             bannerMessage = DateHubBannerMessage(
                                 text = if (permissionDenied) {
                                     "Dating collections are restricted for this account. Other hub areas may still be available."
@@ -1632,9 +1835,12 @@ class DateEvaViewModel(
                     val rawProfiles = snapshots.documents
                         .mapNotNull { doc -> doc.toDatingProfileOrNull() }
                         .sortedByDescending { (it.updatedAt ?: it.createdAt)?.time ?: 0L }
-                    viewModelScope.launch {
+                    profilesJob?.cancel()
+                    profilesJob = viewModelScope.launch {
                         val profiles = try {
                             filterRegisteredDatingProfiles(rawProfiles)
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             Log.w(
                                 "DateEvaViewModel",
@@ -1644,8 +1850,14 @@ class DateEvaViewModel(
                             emptyList()
                         }
 
+                        kotlinx.coroutines.currentCoroutineContext().let { ctx ->
+                            if (ctx[kotlinx.coroutines.Job]?.isActive == false) return@launch
+                        }
                         val currentUserId = auth.currentUser?.uid
+                        // Own profile comes from the raw snapshot so a failed member filter can't make the
+                        // editor think it has no photos and wipe them on save.
                         val myProfile = profiles.find { it.uid == currentUserId }
+                            ?: rawProfiles.find { it.uid == currentUserId }
                         val profileKey = profiles.map { it.uid }.toSet()
                         if (profileKey != sentLikesProfileKey) {
                             sentLikesProfileKey = profileKey
@@ -1654,16 +1866,17 @@ class DateEvaViewModel(
                         _uiState.update { state ->
                             val storedAccess = state.accountCanAccessDating
                             recomputeLoopProfiles(
-                                state.copy(
-                                    allProfiles = profiles,
-                                    myProfile = myProfile,
-                                    userGender = myProfile?.let { Gender.fromRaw(it.gender) },
-                                    lookingFor = myProfile?.let { LookingFor.fromRaw(it.lookingFor) },
-                                    hasVerifiedAge = when (storedAccess) {
-                                        false -> false
-                                        true -> true
-                                        null -> state.hasVerifiedAge
-                                    }
+                            state.copy(
+                                allProfiles = profiles,
+                                profilesLoaded = true,
+                                myProfile = myProfile,
+                                userGender = myProfile?.let { Gender.fromRaw(it.gender) },
+                                lookingFor = myProfile?.let { LookingFor.fromRaw(it.lookingFor) },
+                                hasVerifiedAge = when (storedAccess) {
+                                    false -> false
+                                    true -> true
+                                    null -> state.hasVerifiedAge
+                                }
                                 )
                             )
                         }

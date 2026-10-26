@@ -172,12 +172,12 @@ fun UserDirectoryScreen(
                 .fillMaxSize()
                 .background(gradient)
                 .padding(padding)
-        ) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+            ) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+                ) {
                     item {
                         DirectoryInboxHeroBlock(
                             visibleTotal = uiState.visibleUserCount,
@@ -220,8 +220,8 @@ fun UserDirectoryScreen(
                             onInviteClick = viewModel::sendInvitation,
                             onRequestBlock = { pendingBlockUser = it }
                         )
-                    }
                 }
+            }
         }
     }
 }
@@ -262,39 +262,39 @@ private fun DirectoryInboxHeroBlock(
                 .padding(horizontal = 18.dp, vertical = 16.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Surface(
                             shape = RoundedCornerShape(999.dp),
                             color = Color.White.copy(alpha = 0.85f)
-                        ) {
-                            Text(
+                ) {
+                    Text(
                                 text = "Directory",
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelMedium,
                                 color = SocialInboxMutedInk,
                                 fontWeight = FontWeight.SemiBold
-                            )
+                    )
                         }
-                        Text(
+                    Text(
                             text = "Find people",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
                             color = SocialInboxInk
-                        )
-                        Text(
+                    )
+                    Text(
                             text = "Browse members and start conversations.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = SocialInboxMutedInk
-                        )
-                        Row(
+                    )
+                    Row(
                             modifier = Modifier.horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
@@ -552,9 +552,9 @@ private fun CompactSpotlightSection(
                 fontWeight = FontWeight.SemiBold,
                 color = DirectoryA11yPalette.textPrimary
             )
-            Text(
+                Text(
                 text = users.size.toString(),
-                style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelMedium,
                 color = DirectoryA11yPalette.textSecondary
             )
         }
@@ -702,18 +702,18 @@ private fun DirectorySendIconButton(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    when {
-        isSending -> {
+            when {
+                isSending -> {
             Box(
                 modifier = Modifier.size(32.dp),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-            }
-        }
-        isSent -> {
+                    }
+                }
+                isSent -> {
             Box(
-                modifier = Modifier
+                        modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
                     .background(DirectoryA11yPalette.invitedChipBackground),
@@ -725,16 +725,16 @@ private fun DirectorySendIconButton(
                     tint = DirectoryA11yPalette.invitedChipText,
                     modifier = Modifier.size(16.dp)
                 )
-            }
-        }
-        else -> {
+                    }
+                }
+                else -> {
             IconButton(
                 onClick = onClick,
                 enabled = enabled,
                 modifier = Modifier.size(32.dp)
             ) {
                 Box(
-                    modifier = Modifier
+                modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
                         .background(DirectoryA11yPalette.inviteButtonContainer),
@@ -847,31 +847,31 @@ private fun DirectoryLetterSection(
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Row(
+        ) {
+            Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(DirectoryA11yPalette.letterSectionBackground),
-                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = letter,
+                Box(
+                    modifier = Modifier
+                    .size(28.dp)
+                        .clip(CircleShape)
+                    .background(DirectoryA11yPalette.letterSectionBackground),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = letter,
                     color = DirectoryA11yPalette.accent,
-                    fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.labelLarge
-                )
-            }
-            Text(
+                    )
+                }
+                    Text(
                 text = "${users.size} members",
-                style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = DirectoryA11yPalette.textSecondary
             )
@@ -883,20 +883,20 @@ private fun DirectoryLetterSection(
             border = BorderStroke(1.dp, DirectoryA11yPalette.letterSectionBorder)
         ) {
             Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                users.forEachIndexed { index, user ->
-                    DirectoryUserRow(
-                        user = user,
-                        isSent = user.uid in sentIds,
-                        isSending = user.uid in sendingIds,
-                        isBlocking = user.uid in blockingIds,
-                        onInviteClick = { onInviteClick(user) },
-                        onRequestBlock = { onRequestBlock(user) }
-                    )
-                    if (index < users.lastIndex) {
-                        HorizontalDivider(
+            users.forEachIndexed { index, user ->
+                DirectoryUserRow(
+                    user = user,
+                    isSent = user.uid in sentIds,
+                    isSending = user.uid in sendingIds,
+                    isBlocking = user.uid in blockingIds,
+                    onInviteClick = { onInviteClick(user) },
+                    onRequestBlock = { onRequestBlock(user) }
+                )
+                if (index < users.lastIndex) {
+                    HorizontalDivider(
                             modifier = Modifier.padding(horizontal = 12.dp),
-                            color = DirectoryA11yPalette.cardBorder
-                        )
+                        color = DirectoryA11yPalette.cardBorder
+                    )
                     }
                 }
             }
@@ -940,38 +940,38 @@ private fun DirectoryUserRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
         DirectoryAvatar(user = user, size = 44.dp)
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = user.name.ifBlank { "Member" },
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = user.name.ifBlank { "Member" },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = DirectoryA11yPalette.textPrimary,
-                maxLines = 1,
+                        color = DirectoryA11yPalette.textPrimary,
+                        maxLines = 1,
                 overflow = TextOverflow.Ellipsis
-            )
-            Text(
+                    )
+                    Text(
                 text = usernameText(user),
-                style = MaterialTheme.typography.bodySmall,
-                color = DirectoryA11yPalette.textSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DirectoryA11yPalette.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
         if (isBlocking) {
             CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
         } else {
             DirectorySendIconButton(
                 isSending = isSending,
                 isSent = isSent,
-                enabled = inviteEnabled,
+                            enabled = inviteEnabled,
                 onClick = onInviteClick
             )
-        }
-        Box {
+                }
+                Box {
             IconButton(
                 onClick = { actionsExpanded = true },
                 enabled = !isBlocking,
@@ -983,15 +983,15 @@ private fun DirectoryUserRow(
                     tint = DirectoryA11yPalette.textSecondary,
                     modifier = Modifier.size(20.dp)
                 )
-            }
-            DropdownMenu(expanded = actionsExpanded, onDismissRequest = { actionsExpanded = false }) {
-                DropdownMenuItem(
-                    text = { Text("Block user", color = MaterialTheme.colorScheme.error) },
-                    onClick = {
-                        actionsExpanded = false
-                        onRequestBlock()
                     }
-                )
+                    DropdownMenu(expanded = actionsExpanded, onDismissRequest = { actionsExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Block user", color = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                actionsExpanded = false
+                                onRequestBlock()
+                            }
+                        )
             }
         }
     }

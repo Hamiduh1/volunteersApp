@@ -9,10 +9,8 @@ import com.google.firebase.Firebase
 import com.google.firebase.app
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -462,19 +460,7 @@ class CallSessionViewModel : ViewModel() {
         }
         viewModelScope.launch {
             try {
-                val updates = mutableMapOf<String, Any>(
-                    "acceptedParticipantIds" to FieldValue.arrayUnion(userId),
-                    "declinedParticipantIds" to FieldValue.arrayRemove(userId),
-                    "endedParticipantIds" to FieldValue.arrayRemove(userId),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                if (!session.isGroupCall()) {
-                    updates["status"] = "accepted"
-                }
-
-                db.collection(FirestoreCollection.CALL_SESSIONS).document(session.id)
-                    .update(updates)
-                    .await()
+                CallSessionRepository.acceptIncomingSession(session.id)
                 removeSession(session.id)
                 _incomingSession.value = null
                 onComplete(true, null)
@@ -494,51 +480,7 @@ class CallSessionViewModel : ViewModel() {
         emitIncomingSession(userId)
         viewModelScope.launch {
             try {
-                if (session.isGroupCall()) {
-                    db.collection(FirestoreCollection.CALL_SESSIONS).document(session.id)
-                        .update(
-                            mapOf(
-                                "declinedParticipantIds" to FieldValue.arrayUnion(userId),
-                                "acceptedParticipantIds" to FieldValue.arrayRemove(userId),
-                                "endedParticipantIds" to FieldValue.arrayRemove(userId),
-                                "updatedAt" to FieldValue.serverTimestamp()
-                            )
-                        )
-                        .await()
-                    removeSession(session.id)
-                    emitIncomingSession(userId)
-                    return@launch
-                }
-
-                val sessionRef = db.collection(FirestoreCollection.CALL_SESSIONS).document(session.id)
-                val logRef = db.collection(FirestoreCollection.CHATS).document(session.chatId)
-                    .collection(FirestoreSubcollection.CALL_LOGS).document(session.id)
-                val chatRef = db.collection(FirestoreCollection.CHATS).document(session.chatId)
-
-                db.runBatch { batch ->
-                    batch.update(
-                        sessionRef,
-                        mapOf(
-                            "status" to "declined",
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    )
-                    batch.set(
-                        logRef,
-                        mapOf(
-                            "status" to "missed",
-                            "endedAt" to FieldValue.serverTimestamp()
-                        ),
-                        SetOptions.merge()
-                    )
-                    batch.update(
-                        chatRef,
-                        mapOf(
-                            "lastCallStatus" to "missed",
-                            "lastCallTimestamp" to FieldValue.serverTimestamp()
-                        )
-                    )
-                }.await()
+                CallSessionRepository.declineIncomingSession(session.id)
                 removeSession(session.id)
                 emitIncomingSession(userId)
             } catch (e: Exception) {

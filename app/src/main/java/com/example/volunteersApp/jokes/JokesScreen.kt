@@ -151,7 +151,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -1277,8 +1276,6 @@ private fun ActionButton(text: String, icon: ImageVector, isActive: Boolean, onC
     }
 }
 
-@androidx.annotation.OptIn(UnstableApi::class)
-@OptIn(UnstableApi::class)
 @Composable
 fun VideoPlayer(
     modifier: Modifier = Modifier,

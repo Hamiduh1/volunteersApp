@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,7 +27,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.content.Context
 import android.widget.Toast
@@ -204,7 +202,28 @@ fun PaymentMethodsScreen(
             mobile.appUserReceiveRouteVerified && mobile.id !in fundingMobileIds
         }
     }
+    val pendingMobileMethods = remember(mobileMethods, fundingMobileIds, receiveMobileMethods) {
+        val receiveMobileIds = receiveMobileMethods.map { it.id }.toSet()
+        mobileMethods.filter { it.id !in fundingMobileIds && it.id !in receiveMobileIds }
+    }
     var expandedSection by remember { mutableStateOf<PaymentMethodsAccordionSection?>(PaymentMethodsAccordionSection.FUNDING) }
+
+    val verifyMobileMethod: (PaymentMethod.MobileMoney) -> Unit = { method ->
+        scope.launch {
+            if (verifyingMethodId != null) return@launch
+            verifyingMethodId = method.id
+            try {
+                val result = viewModel.requestMobileMoneyVerification(method.id)
+                Toast.makeText(
+                    context,
+                    result.message,
+                    if (result.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                ).show()
+            } finally {
+                verifyingMethodId = null
+            }
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -355,6 +374,83 @@ fun PaymentMethodsScreen(
                                             modifier = Modifier.weight(1f)
                                         ) { Text("Link funding bank", maxLines = 1) }
                                     }
+                                    OutlinedButton(
+                                        onClick = {
+                                            expandedSection = PaymentMethodsAccordionSection.FUNDING
+                                            showAddMobileMoneyDialog = true
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("Add mobile money") }
+
+                                    if (cardMethods.isEmpty() && fundingBankMethods.isEmpty() &&
+                                        fundingMobileMethods.isEmpty() && pendingMobileMethods.isEmpty()
+                                    ) {
+                                        Text(
+                                            "No funding methods yet. Add a card, verified US ACH bank, or eligible mobile-money account.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray
+                                        )
+                                    }
+
+                                    if (cardMethods.isNotEmpty()) {
+                                        PaymentMethodsInlineHeader(
+                                            title = "Saved cards",
+                                            subtitle = "Charge-ready cards fund Send Money; they never receive it."
+                                        )
+                                        cardMethods.forEach { method ->
+                                            CreditCardItem(
+                                                card = method,
+                                                onDelete = { onDeleteMethod(method.id) },
+                                                onSetDefault = { onSetDefaultMethod(method.id) }
+                                            )
+                                        }
+                                    }
+
+                                    if (fundingBankMethods.isNotEmpty()) {
+                                        PaymentMethodsInlineHeader(
+                                            title = "US ACH funding banks",
+                                            subtitle = "Verified US ACH only. SWIFT and local-bank receive routes never fund."
+                                        )
+                                        fundingBankMethods.forEach { method ->
+                                            BankAccountItem(
+                                                bank = method,
+                                                onDelete = { onDeleteMethod(method.id) },
+                                                onSetDefault = { onSetDefaultMethod(method.id) }
+                                            )
+                                        }
+                                    }
+
+                                    if (fundingMobileMethods.isNotEmpty()) {
+                                        PaymentMethodsInlineHeader(
+                                            title = "Mobile-money funding",
+                                            subtitle = "Verified numbers in live deposit countries can fund Send Money."
+                                        )
+                                        fundingMobileMethods.forEach { method ->
+                                            MobileMoneyItem(
+                                                mobile = method,
+                                                onDelete = { onDeleteMethod(method.id) },
+                                                onSetDefault = { onSetDefaultMethod(method.id) },
+                                                isVerifying = verifyingMethodId == method.id,
+                                                onVerifyNow = { verifyMobileMethod(method) }
+                                            )
+                                        }
+                                    }
+
+                                    if (pendingMobileMethods.isNotEmpty()) {
+                                        PaymentMethodsInlineHeader(
+                                            title = "Mobile-money setup in progress",
+                                            subtitle = "Verify these numbers before using an eligible funding or App User receive route."
+                                        )
+                                        pendingMobileMethods.forEach { method ->
+                                            MobileMoneyItem(
+                                                mobile = method,
+                                                onDelete = { onDeleteMethod(method.id) },
+                                                onSetDefault = { onSetDefaultMethod(method.id) },
+                                                isVerifying = verifyingMethodId == method.id,
+                                                onVerifyNow = { verifyMobileMethod(method) }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -422,6 +518,44 @@ fun PaymentMethodsScreen(
                                         color = MaterialTheme.colorScheme.primary,
                                         fontWeight = FontWeight.Medium
                                     )
+
+                                    if (receiveBankMethods.isEmpty() && receiveMobileMethods.isEmpty()) {
+                                        Text(
+                                            "No verified receive routes yet. Add a local bank, SWIFT bank, or mobile-money route.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray
+                                        )
+                                    }
+
+                                    if (receiveBankMethods.isNotEmpty()) {
+                                        PaymentMethodsInlineHeader(
+                                            title = "Saved bank receive routes",
+                                            subtitle = "SWIFT is payout-only. Local and SWIFT routes never fund a transfer."
+                                        )
+                                        receiveBankMethods.forEach { method ->
+                                            BankAccountItem(
+                                                bank = method,
+                                                onDelete = { onDeleteMethod(method.id) },
+                                                onSetDefault = { onSetDefaultMethod(method.id) }
+                                            )
+                                        }
+                                    }
+
+                                    if (receiveMobileMethods.isNotEmpty()) {
+                                        PaymentMethodsInlineHeader(
+                                            title = "Saved mobile-money receive routes",
+                                            subtitle = "Use a provider-verified route for delivery from another app member."
+                                        )
+                                        receiveMobileMethods.forEach { method ->
+                                            MobileMoneyItem(
+                                                mobile = method,
+                                                onDelete = { onDeleteMethod(method.id) },
+                                                onSetDefault = { onSetDefaultMethod(method.id) },
+                                                isVerifying = verifyingMethodId == method.id,
+                                                onVerifyNow = { verifyMobileMethod(method) }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -632,118 +766,6 @@ fun PaymentMethodsScreen(
                         }
                     }
 
-                    if (methods.isEmpty()) {
-                        item {
-                            EmptyMethodsView(modifier = Modifier.fillMaxWidth())
-                        }
-                    } else {
-                        if (cardMethods.isNotEmpty()) {
-                            item(key = "cards_header") {
-                                PaymentMethodsSectionHeader(
-                                    title = "Cards",
-                                    subtitle = "Fund Send Money and Stripe withdrawals. Cards never receive Afriex Send Money."
-                                )
-                            }
-                            items(cardMethods, key = { it.id }) { method ->
-                                CreditCardItem(
-                                    card = method,
-                                    onDelete = { onDeleteMethod(method.id) },
-                                    onSetDefault = { onSetDefaultMethod(method.id) }
-                                )
-                            }
-                        }
-
-                        if (fundingBankMethods.isNotEmpty()) {
-                            item(key = "funding_banks_header") {
-                                PaymentMethodsSectionHeader(
-                                    title = "US ACH funding banks",
-                                    subtitle = "Verified US ACH only. SWIFT and Afriex local-bank receive routes cannot fund."
-                                )
-                            }
-                            items(fundingBankMethods, key = { "fund-${it.id}" }) { method ->
-                                BankAccountItem(
-                                    bank = method,
-                                    onDelete = { onDeleteMethod(method.id) },
-                                    onSetDefault = { onSetDefaultMethod(method.id) }
-                                )
-                            }
-                        }
-
-                        if (fundingMobileMethods.isNotEmpty()) {
-                            item(key = "funding_mobile_header") {
-                                PaymentMethodsSectionHeader(
-                                    title = "Mobile money funding",
-                                    subtitle = "Verified numbers in live deposit countries can fund Send Money. Dual-role numbers that also receive App User transfers appear here once."
-                                )
-                            }
-                            items(fundingMobileMethods, key = { "fund-mm-${it.id}" }) { method ->
-                                MobileMoneyItem(
-                                    mobile = method,
-                                    onDelete = { onDeleteMethod(method.id) },
-                                    onSetDefault = { onSetDefaultMethod(method.id) },
-                                    isVerifying = verifyingMethodId == method.id,
-                                    onVerifyNow = {
-                                        scope.launch {
-                                            if (verifyingMethodId != null) return@launch
-                                            verifyingMethodId = method.id
-                                            try {
-                                                val result = viewModel.requestMobileMoneyVerification(method.id)
-                                                Toast.makeText(
-                                                    context,
-                                                    result.message,
-                                                    if (result.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
-                                                ).show()
-                                            } finally {
-                                                verifyingMethodId = null
-                                            }
-                                        }
-                                    }
-                                )
-                            }
-                        }
-
-                        if (receiveBankMethods.isNotEmpty() || receiveMobileMethods.isNotEmpty()) {
-                            item(key = "receive_header") {
-                                PaymentMethodsSectionHeader(
-                                    title = "Member receive routes",
-                                    subtitle = "Local bank, SWIFT (payout-only — cannot fund), and mobile money for App User delivery."
-                                )
-                            }
-                        }
-
-                        items(receiveBankMethods, key = { "recv-${it.id}" }) { method ->
-                            BankAccountItem(
-                                bank = method,
-                                onDelete = { onDeleteMethod(method.id) },
-                                onSetDefault = { onSetDefaultMethod(method.id) }
-                            )
-                        }
-
-                        items(receiveMobileMethods, key = { "recv-mm-${it.id}" }) { method ->
-                            MobileMoneyItem(
-                                mobile = method,
-                                onDelete = { onDeleteMethod(method.id) },
-                                onSetDefault = { onSetDefaultMethod(method.id) },
-                                isVerifying = verifyingMethodId == method.id,
-                                onVerifyNow = {
-                                    scope.launch {
-                                        if (verifyingMethodId != null) return@launch
-                                        verifyingMethodId = method.id
-                                        try {
-                                            val result = viewModel.requestMobileMoneyVerification(method.id)
-                                            Toast.makeText(
-                                                context,
-                                                result.message,
-                                                if (result.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
-                                            ).show()
-                                        } finally {
-                                            verifyingMethodId = null
-                                        }
-                                    }
-                                }
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -887,6 +909,20 @@ private fun PaymentMethodsSectionHeader(
             style = MaterialTheme.typography.bodySmall,
             color = Color.Gray
         )
+    }
+}
+
+@Composable
+private fun PaymentMethodsInlineHeader(
+    title: String,
+    subtitle: String,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
     }
 }
 
@@ -1184,16 +1220,6 @@ private fun AddMethodSelectionDialog(onDismiss: () -> Unit, onCardSelected: () -
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
-}
-
-@Composable
-private fun EmptyMethodsView(modifier: Modifier) {
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Default.Payment, null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
-        Spacer(Modifier.height(16.dp))
-        Text("No payment methods linked", color = Color.Gray)
-        Text("Tap the '+' button to add one.", color = Color.Gray, fontSize = 12.sp)
-    }
 }
 
 @OptIn(DelicateCardDetailsApi::class)

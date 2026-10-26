@@ -30,10 +30,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Work
@@ -77,6 +76,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -101,8 +101,8 @@ private val SwipeLikeColor = Color(0xFF1B8A5A)
 private val SwipePassColor = Color(0xFFC62828)
 internal val SwipeSuperLikeColor = Color(0xFF1565C0)
 private val SwipeUndoColor = Color(0xFFB7791F)
-/** Keeps the name and details above the floating action buttons on the full-screen card. */
-private val SwipeOverlayInfoBottomPadding = 100.dp
+/** Keeps the card identity comfortably above the floating decision controls. */
+private val SwipeOverlayInfoBottomPadding = 112.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -118,6 +118,8 @@ internal fun DatingLoopTabRow(
                 DatingLoopTab.Discover -> 0
                 DatingLoopTab.LikesYou -> likesYouCount
                 DatingLoopTab.Matches -> matchesCount
+
+
             }
             SegmentedButton(
                 selected = tab == selected,
@@ -161,6 +163,7 @@ internal fun DatingSwipeDeck(
     onResetPasses: () -> Unit = {},
     onChangeFilters: () -> Unit = {},
     onComment: ((DatingProfile) -> Unit)? = null,
+    onShowList: (() -> Unit)? = null,
 ) {
     val visible = profiles.filter { it.uid !in inFlightIds }
     val top = visible.firstOrNull()
@@ -176,6 +179,7 @@ internal fun DatingSwipeDeck(
                 hasPasses = hasPasses,
                 onResetPasses = onResetPasses,
                 onChangeFilters = onChangeFilters,
+                onShowList = onShowList,
             )
             return@Column
         }
@@ -189,6 +193,7 @@ internal fun DatingSwipeDeck(
                     profile = behind,
                     viewer = viewer,
                     superLikedYou = behind.uid in superLikedByIds,
+                    fullBleed = fillHeight,
                     contentBottomPadding = if (fillHeight) SwipeOverlayInfoBottomPadding else 18.dp,
                     modifier = Modifier
                         .fillMaxSize()
@@ -213,8 +218,8 @@ internal fun DatingSwipeDeck(
                     superLikedYou = top.uid in superLikedByIds,
                     canUndo = canUndo,
                     onUndo = onUndo,
-                    onComment = onComment?.let { comment -> { comment(top) } },
                     onDragFraction = { topDragFraction = it },
+                    onComment = onComment?.let { comment -> { comment(top) } },
                 )
             }
         }
@@ -234,12 +239,16 @@ private fun SwipeableTopCard(
     superLikedYou: Boolean = false,
     canUndo: Boolean = false,
     onUndo: () -> Unit = {},
-    onComment: (() -> Unit)? = null,
     onDragFraction: (Float) -> Unit = {},
+    onComment: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
     val offsetY = remember { Animatable(0f) }
+    // Animation completes before the ViewModel applies its network-action lock.
+    // This local guard closes that small window so rapid taps cannot launch
+    // overlapping Animatable mutations or duplicate Like/Super Like writes.
+    var actionInFlight by remember(profile.uid) { mutableStateOf(false) }
     var showSuperLikeLimit by remember { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
     val velocityTracker = remember { VelocityTracker() }
@@ -249,7 +258,10 @@ private fun SwipeableTopCard(
             onDismissRequest = { showSuperLikeLimit = false },
             icon = { Icon(Icons.Default.Star, contentDescription = null, tint = SwipeSuperLikeColor) },
             title = { Text("No Super Likes left today") },
-            text = { Text("You get $DATING_SUPER_LIKES_PER_DAY free Super Like per day. Send a regular like, or come back tomorrow.") },
+            text = {
+                val allowance = if (DATING_SUPER_LIKES_PER_DAY == 1) "1 free Super Like" else "$DATING_SUPER_LIKES_PER_DAY free Super Likes"
+                Text("You get $allowance per day. Send a regular like, or come back tomorrow.")
+            },
             confirmButton = { TextButton(onClick = { showSuperLikeLimit = false }) { Text("OK") } }
         )
     }
@@ -266,14 +278,22 @@ private fun SwipeableTopCard(
 
         // If the action is rejected (no profile yet, network error) the card is still here: bring it back.
         fun flingOut(targetX: Float, targetY: Float, action: () -> Unit) {
+            if (actionInFlight) return
+            actionInFlight = true
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             scope.launch {
-                launch { offsetY.animateTo(targetY, tween(220)) }
-                offsetX.animateTo(targetX, tween(220))
-                action()
-                delay(450)
-                offsetX.snapTo(0f)
-                offsetY.snapTo(0f)
+                try {
+                    launch { offsetY.animateTo(targetY, tween(220)) }
+                    offsetX.animateTo(targetX, tween(220))
+                    action()
+                    delay(450)
+                    offsetX.snapTo(0f)
+                    offsetY.snapTo(0f)
+                } finally {
+                    // A successful action removes this keyed card. If it fails,
+                    // restore the same card and allow an intentional retry.
+                    actionInFlight = false
+                }
             }
         }
 
@@ -363,6 +383,7 @@ private fun SwipeableTopCard(
                     viewer = viewer,
                     onOpenProfile = onOpenProfile,
                     superLikedYou = superLikedYou,
+                    fullBleed = allowSwipeUp,
                     modifier = Modifier.fillMaxSize(),
                     contentBottomPadding = if (allowSwipeUp) SwipeOverlayInfoBottomPadding else 18.dp,
                 )
@@ -397,16 +418,16 @@ private fun SwipeableTopCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = if (allowSwipeUp) 16.dp else 0.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                    .padding(start = 20.dp, end = 20.dp, bottom = if (allowSwipeUp) 18.dp else 0.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 SwipeActionButton(
                     icon = Icons.AutoMirrored.Filled.Undo,
-                    label = "Undo last pass",
+                    label = if (canUndo) "Undo last pass" else "Nothing to undo",
                     tint = SwipeUndoColor,
-                    size = if (onComment != null) 40 else 44,
-                    enabled = canUndo,
+                    size = 44,
+                    enabled = canUndo && !actionInFlight,
                     onClick = onUndo
                 )
                 SwipeActionButton(
@@ -414,12 +435,15 @@ private fun SwipeableTopCard(
                     label = "Pass",
                     tint = SwipePassColor,
                     size = 62,
+                    enabled = !actionInFlight,
                     onClick = { flingOut(-widthPx * 1.6f, 0f, onPass) }
                 )
                 BadgedBox(
                     badge = {
-                        Badge(containerColor = SwipeSuperLikeColor, contentColor = Color.White) {
-                            Text(superLikesLeft.toString())
+                        if (superLikesLeft > 0) {
+                            Badge(containerColor = SwipeSuperLikeColor, contentColor = Color.White) {
+                                Text(superLikesLeft.toString())
+                            }
                         }
                     }
                 ) {
@@ -428,6 +452,7 @@ private fun SwipeableTopCard(
                         label = if (superLikesLeft > 0) "Super Like, $superLikesLeft left today" else "No Super Likes left today",
                         tint = SwipeSuperLikeColor,
                         size = 50,
+                        enabled = !actionInFlight,
                         dimmed = superLikesLeft <= 0,
                         onClick = {
                             if (superLikesLeft > 0) flingOut(0f, -widthPx * 2.2f, onSuperLike)
@@ -440,24 +465,19 @@ private fun SwipeableTopCard(
                     label = "Like",
                     tint = SwipeLikeColor,
                     size = 62,
+                    enabled = !actionInFlight,
                     onClick = { flingOut(widthPx * 1.6f, 0f, onLike) }
                 )
                 onComment?.let { comment ->
                     SwipeActionButton(
                         icon = Icons.AutoMirrored.Filled.Comment,
-                        label = "Comment with a like",
+                        label = "Comment on ${profile.name.ifBlank { "this profile" }}",
                         tint = CommentPurple,
-                        size = 40,
+                        size = 44,
+                        enabled = !actionInFlight,
                         onClick = comment
                     )
                 }
-                SwipeActionButton(
-                    icon = Icons.Default.Person,
-                    label = "View profile",
-                    tint = SwipeUndoColor,
-                    size = if (onComment != null) 40 else 44,
-                    onClick = onOpenProfile
-                )
             }
         }
     }
@@ -524,6 +544,7 @@ internal fun DatingSwipeCard(
     modifier: Modifier = Modifier,
     onOpenProfile: (() -> Unit)? = null,
     superLikedYou: Boolean = false,
+    fullBleed: Boolean = false,
     contentBottomPadding: Dp = 18.dp,
 ) {
     val photos = remember(profile.uid, profile.imageUrls) { profile.resolvedImageUrls() }
@@ -534,12 +555,16 @@ internal fun DatingSwipeCard(
         viewer?.interests.orEmpty().map { it.lowercase(Locale.ROOT) }.toSet()
     }
     val prompt = profile.visiblePrompts().firstOrNull()
+    val sharedCount = interests.count { it.lowercase(Locale.ROOT) in viewerInterests }
+    val isNewHere = remember(profile.createdAt) {
+        profile.createdAt?.let { System.currentTimeMillis() - it.time < 7L * 24 * 60 * 60 * 1000 } == true
+    }
 
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
+        shape = if (fullBleed) RectangleShape else RoundedCornerShape(24.dp),
         color = DateA11yPalette.photoPlaceholder,
-        shadowElevation = 6.dp
+        shadowElevation = if (fullBleed) 0.dp else 6.dp
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             AsyncImageDisplayUrl(
@@ -613,37 +638,56 @@ internal fun DatingSwipeCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        profile.displayNameWithAge(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                Text(
+                    profile.displayNameWithAge(),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
                     if (onOpenProfile != null) {
                         IconButton(onClick = onOpenProfile) {
-                            Icon(Icons.Default.Info, contentDescription = "Open full profile", tint = Color.White)
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.22f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowUp,
+                                    contentDescription = "Open ${profile.name.ifBlank { "this member" }}'s full profile",
+                                    tint = Color.White
+                                )
+                            }
                         }
                     }
                 }
-                val workLine = listOf(profile.jobTitle, profile.school).filter { it.isNotBlank() }.joinToString(" · ")
+                val workLine = listOf(profile.jobTitle, profile.school, profile.country)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · ")
                 if (workLine.isNotBlank()) {
-                    Text(workLine, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
-                }
-                if (profile.country.isNotBlank()) {
-                    Text(profile.country, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        workLine,
+                        color = Color.White.copy(alpha = 0.9f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (isNewHere) DatingOverlayChip("\u2728 New here", highlighted = true)
+                    if (sharedCount > 0) DatingOverlayChip("$sharedCount in common", highlighted = true)
                     goal?.let { DatingOverlayChip(it.label, highlighted = true) }
                         ?: profile.lookingFor.takeIf { it.isNotBlank() }?.let { raw ->
                             DatingOverlayChip("Looking for ${lookingForLabel(raw)}", highlighted = false)
                         }
-                    interests.take(3).forEach { interest ->
+                    interests.take(2).forEach { interest ->
                         DatingOverlayChip(interest, highlighted = interest.lowercase(Locale.ROOT) in viewerInterests)
                     }
                 }
@@ -652,14 +696,14 @@ internal fun DatingSwipeCard(
                         "${prompt.question}: ${prompt.answer}",
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     profile.bio.isNotBlank() -> Text(
                         profile.bio,
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -694,6 +738,7 @@ private fun DatingDeckEmptyState(
     hasPasses: Boolean = false,
     onResetPasses: () -> Unit = {},
     onChangeFilters: () -> Unit = {},
+    onShowList: (() -> Unit)? = null,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -721,6 +766,9 @@ private fun DatingDeckEmptyState(
                         Button(onClick = onResetPasses) { Text("Reset passes") }
                     }
                     OutlinedButton(onClick = onChangeFilters) { Text("Change filters") }
+                    onShowList?.let { showList ->
+                        OutlinedButton(onClick = showList) { Text("Show list") }
+                    }
                     if (canUndo) {
                         TextButton(onClick = onUndo) { Text("Undo last pass") }
                     }

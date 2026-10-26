@@ -1,5 +1,9 @@
 package com.example.volunteersApp.date
 
+import com.example.volunteersApp.chat.fetchBlockedUserIds
+import com.example.volunteersApp.firebase.FirestoreCollection
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.tasks.await
 import java.util.Locale
 
 enum class DatingBrowseLayout(val label: String) {
@@ -7,6 +11,48 @@ enum class DatingBrowseLayout(val label: String) {
     People("People"),
     Photos("Photos"),
     Discover("Quick view"),
+}
+
+/** The modes offered in the switcher; a saved [DatingBrowseLayout.Discover] opens as Swipe, like iOS. */
+val DatingBrowseModes: List<DatingBrowseLayout> =
+    listOf(DatingBrowseLayout.Swipe, DatingBrowseLayout.People, DatingBrowseLayout.Photos)
+
+fun DatingBrowseLayout.asBrowseMode(): DatingBrowseLayout =
+    if (this == DatingBrowseLayout.Discover) DatingBrowseLayout.Swipe else this
+
+const val DATING_REPORT_DETAILS_MAX = 1000
+const val BLIND_DATE_BIO_MAX = 1000
+
+/** iOS report reasons, in display order. */
+val DatingReportReasons: List<String> = listOf(
+    "Fake profile or scam",
+    "Inappropriate photos",
+    "Harassment or hate",
+    "May be under 18",
+    "Spam or selling",
+    "Something else",
+)
+
+/**
+ * Everyone this user has blocked, from all three stores: chat privacy settings (Android),
+ * users/{uid}/blocked_users (iOS and the rules) and the legacy users/{uid}/blockedUsers
+ * subcollection or field. Any store that can't be read is skipped.
+ */
+suspend fun FirebaseFirestore.fetchDatingBlockedUserIds(uid: String): Set<String> {
+    if (uid.isBlank()) return emptySet()
+    val fromSettings = runCatching { fetchBlockedUserIds(uid) }.getOrDefault(emptySet())
+    val userRef = collection(FirestoreCollection.USERS).document(uid)
+    val fromSubcollections = listOf("blocked_users", "blockedUsers").flatMap { name ->
+        runCatching { userRef.collection(name).get().await().documents.map { it.id } }
+            .getOrDefault(emptyList())
+    }
+    val fromLegacyField = runCatching {
+        (userRef.get().await().get("blockedUsers") as? List<*>).orEmpty().filterIsInstance<String>()
+    }.getOrDefault(emptyList())
+    return (fromSettings + fromSubcollections + fromLegacyField)
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .toSet()
 }
 
 data class DatingLoopFilters(
@@ -131,7 +177,7 @@ fun applyDatingLoopFilters(
 
 fun normalizeBlindDateBackendStatus(raw: String?): BlindDateUserStatus {
     return when (raw?.trim()?.lowercase(Locale.US)) {
-        "matched" -> BlindDateUserStatus.Matched
+        "matched", "awaiting_rejoin_payment", "awaiting rejoin payment" -> BlindDateUserStatus.Matched
         "active" -> BlindDateUserStatus.Active
         "expired" -> BlindDateUserStatus.Expired
         "awaiting_payment", "awaiting payment" -> BlindDateUserStatus.AwaitingPayment

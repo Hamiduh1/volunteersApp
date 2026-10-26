@@ -255,6 +255,11 @@ class LoginViewModel : ViewModel() {
                         }
                     }
 
+                    // A password sign-in intentionally takes ownership of this account's device lease.
+                    withStepTimeout("securing this device") {
+                        AccountDeviceSessionManager.claimCurrentDeviceSession()
+                    }
+
                     // 5. Update state on success
                     _uiState.update {
                         it.copy(
@@ -306,6 +311,19 @@ class LoginViewModel : ViewModel() {
 
                 if (currentUser.isEmailVerified) {
                     syncEmailVerifiedAsync(currentUser.uid, "auto-login")
+                }
+
+                val isActiveDevice = withStepTimeout("checking device session") {
+                    AccountDeviceSessionManager.ensureCurrentDeviceSession()
+                }
+                if (!isActiveDevice) {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "This account is active on another phone. Sign in here to make this phone active."
+                        )
+                    }
+                    return@launch
                 }
 
                 val firestoreUserType = withStepTimeout("resolving account role") {

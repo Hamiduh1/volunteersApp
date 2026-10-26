@@ -903,6 +903,43 @@ export const createCallSession = functions.runWith({enforceAppCheck: true})
     return {sessionId, ...result};
   });
 
+export const claimAccountDeviceSession = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    const userId = context.auth?.uid;
+    if (!userId) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be signed in to secure this device.");
+    }
+
+    const request = (data || {}) as {deviceId?: unknown; platform?: unknown};
+    const deviceId = typeof request.deviceId === "string" ? request.deviceId.trim() : "";
+    const platform = typeof request.platform === "string" ? request.platform.trim().toLowerCase() : "";
+    if (!/^[a-zA-Z0-9_-]{16,128}$/.test(deviceId)) {
+      throw new functions.https.HttpsError("invalid-argument", "A valid device session id is required.");
+    }
+    if (platform && !/^[a-z0-9_-]{2,32}$/.test(platform)) {
+      throw new functions.https.HttpsError("invalid-argument", "A valid device platform is required.");
+    }
+
+    const deviceRef = db.collection("users").doc(userId)
+      .collection("account_security").doc("active_device");
+    const result = await db.runTransaction(async (transaction) => {
+      const existing = await transaction.get(deviceRef);
+      const existingDeviceId = typeof existing.get("deviceId") === "string" ?
+        existing.get("deviceId").trim() : "";
+      const replacedExistingDevice = existing.exists && existingDeviceId !== deviceId;
+      transaction.set(deviceRef, {
+        deviceId,
+        platform: platform || "unknown",
+        createdAt: existing.exists ? existing.get("createdAt") || admin.firestore.FieldValue.serverTimestamp() :
+          admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+      return {replacedExistingDevice};
+    });
+
+    return {active: true, replacedExistingDevice: result.replacedExistingDevice};
+  });
+
 // Reports whether this chat can start a new call, or should reopen its current session.
 export const getConversationCallAvailability = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
@@ -2787,7 +2824,8 @@ export const onCallSessionCreated = functions.firestore
       .filter((value: unknown): value is string => typeof value === "string")
       .map((value) => value.trim())
       .filter((value) => value.length > 0);
-    const recipientIds = participantIds.length > 0 ? participantIds : (receiverId ? [receiverId] : []);
+    const recipientIds = (participantIds.length > 0 ? participantIds : [receiverId])
+      .filter((participantId) => participantId && participantId !== callerId);
 
     if (!callerId || !chatId || !callType || recipientIds.length === 0) return undefined;
     const isGroupCall = session.isGroup === true || participantIds.length > 2;
@@ -2808,6 +2846,62 @@ export const onCallSessionCreated = functions.firestore
   });
 
 /** Syncs or clears incoming_call_sessions mirrors when call_sessions change (replaces legacy onUpdate-only handler). */
+/**
+ * Writes the final server-owned call history after a caller ends or a direct callee declines.
+ * @param {string} sessionId call_sessions document id.
+ * @param {admin.firestore.DocumentData | undefined} session Current session payload.
+ * @return {Promise<void>} Resolves after the call log and chat summary are synchronized.
+ */
+async function syncTerminalCallHistory(
+  sessionId: string,
+  session: admin.firestore.DocumentData | undefined,
+): Promise<void> {
+  if (!session) return;
+  const sessionStatus = String(session.status || "").trim().toLowerCase();
+  if (sessionStatus !== "ended" && sessionStatus !== "declined") return;
+
+  const chatId = typeof session.chatId === "string" ? session.chatId.trim() : "";
+  const callerId = typeof session.callerId === "string" ? session.callerId.trim() : "";
+  if (!chatId || !callerId) return;
+
+  const participantIds = Array.isArray(session.participantIds) ?
+    session.participantIds
+      .filter((value: unknown): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0) :
+    [];
+  const acceptedParticipantIds = Array.isArray(session.acceptedParticipantIds) ?
+    session.acceptedParticipantIds
+      .filter((value: unknown): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0) :
+    [];
+  const wasAnswered = acceptedParticipantIds.some((participantId) => participantId !== callerId);
+  const historyStatus = sessionStatus === "ended" && wasAnswered ? "completed" : "missed";
+  const chatRef = db.collection("chats").doc(chatId);
+  const logRef = chatRef.collection("call_logs").doc(sessionId);
+  const existingLog = await logRef.get();
+  const startedAt = existingLog.get("startedAt") as admin.firestore.Timestamp | undefined;
+  const durationSeconds = startedAt && historyStatus === "completed" ?
+    Math.max(0, Math.floor((Date.now() - startedAt.toMillis()) / 1000)) : 0;
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  const batch = db.batch();
+  batch.set(logRef, {
+    status: historyStatus,
+    endedAt: now,
+    durationSeconds,
+    participantIds,
+    isGroupCall: session.isGroup === true || participantIds.length > 2,
+    groupName: typeof session.groupName === "string" ? session.groupName : "",
+  }, {merge: true});
+  batch.set(chatRef, {
+    lastCallStatus: historyStatus,
+    lastCallTimestamp: now,
+  }, {merge: true});
+  await batch.commit();
+}
+
 export const onCallSessionUpdated = functions.firestore
   .document("call_sessions/{sessionId}")
   .onWrite(async (change, context) => {
@@ -2816,6 +2910,8 @@ export const onCallSessionUpdated = functions.firestore
     const after = change.after.exists ? change.after.data() : undefined;
     const wasRinging = before?.status === "ringing";
     const isRinging = after?.status === "ringing";
+
+    await syncTerminalCallHistory(sessionId, after);
 
     if (!after || !isRinging) {
       await clearIncomingCallSessionMirrors(
@@ -8518,15 +8614,10 @@ const buildRecipientPayoutMethodPublicPayload = (
   id: string,
   data: FirebaseFirestore.DocumentData
 ): Record<string, unknown> | null => {
-  const rawMethodType = String(data.type || data.methodType || "")
-    .trim()
-    .replace(/[\s-]+/g, "_")
-    .toUpperCase();
-  const methodType =
-    rawMethodType === "BANK_ACCOUNT" || rawMethodType === "BANKACCOUNT" || rawMethodType === "ACH" ?
-      "BANK" :
-      (rawMethodType === "CREDIT_CARD" || rawMethodType === "DEBIT_CARD" ? "CARD" :
-        (rawMethodType === "SWIFT" || rawMethodType === "SWIFT_BANK" ? "SWIFT_BANK" : rawMethodType));
+  // Shared iOS/Android documents use several historical type aliases. Normalize
+  // before filtering so a verified route does not disappear on the other client.
+  const normalizedMethodType = normalizeMethodType(data.type || data.methodType);
+  const methodType = normalizedMethodType === "SWIFT" ? "SWIFT_BANK" : normalizedMethodType;
   const deliveryRoute =
     methodType === "SWIFT_BANK" ? "SWIFT" :
       (methodType === "BANK" ? "BANK" :
@@ -9283,18 +9374,20 @@ const buildMobileMoneyProviderPayload = (
     asNonEmptyString(recipientInfo["country"], payoutData.country)
   );
   const transferType = String(payoutData.type || "").trim().toUpperCase();
+  const isCashIn = transferType === "CASH_IN";
   const walletAmount = Number(payoutData.amount || 0);
   const localAmountRaw = Number(payoutData.localAmount || 0);
-  const sourceAmount = transferType === "CASH_IN" ?
+  const cashInCurrency = asNonEmptyString(payoutData.localCurrency, payoutData.currency)?.toUpperCase() || null;
+  const sourceAmount = isCashIn ?
     (Number.isFinite(localAmountRaw) && localAmountRaw > 0 ? localAmountRaw : walletAmount) :
     Number(payoutData.sourceAmount || walletAmount);
-  const destinationAmount = transferType === "CASH_IN" ? walletAmount :
+  // An Afriex DEPOSIT is a single-currency provider collection. It is not an
+  // app-wallet credit and cannot convert a sender's local mobile-money amount to USD.
+  const destinationAmount = isCashIn ? sourceAmount :
     Number(payoutData.destinationAmount || walletAmount);
-  const sourceCurrency = transferType === "CASH_IN" ?
-    asNonEmptyString(payoutData.localCurrency, payoutData.currency)?.toUpperCase() || null :
+  const sourceCurrency = isCashIn ? cashInCurrency :
     asNonEmptyString(payoutData.sourceCurrency, "USD")?.toUpperCase() || null;
-  const destinationCurrency = transferType === "CASH_IN" ?
-    asNonEmptyString(payoutData.currency, "USD")?.toUpperCase() || null :
+  const destinationCurrency = isCashIn ? cashInCurrency :
     asNonEmptyString(payoutData.destinationCurrency, payoutData.currency, payoutData.localCurrency)?.toUpperCase() || null;
 
   return {
@@ -12239,6 +12332,14 @@ const submitAfriexTransaction = async (
   }
 
   const transactionType = transferType === "CASH_IN" ? "DEPOSIT" : "WITHDRAW";
+  if (
+    transactionType === "DEPOSIT" &&
+    (sourceCurrency !== destinationCurrency || Math.abs(sourceAmount - destinationAmount) > 0.000001)
+  ) {
+    throw new Error(
+      "Afriex mobile-money collections must use one local currency and one local amount."
+    );
+  }
   const transactionPayload: Record<string, unknown> = {
     customerId,
     type: transactionType,
@@ -15992,7 +16093,7 @@ const initiateExternallyFundedAppUserTransfer = async (params: {
     throw new functions.https.HttpsError("not-found", "The selected funding method was not found.");
   }
   const fundingData = (fundingMethodSnap.data() || {}) as Record<string, unknown>;
-  const fundingMethodType = String(fundingData.type || fundingData.methodType || "").trim().toUpperCase();
+  const fundingMethodType = normalizeMethodType(fundingData.type || fundingData.methodType);
   if (request.fundingSourceType === "EXTERNAL_CARD") {
     const cardPaymentMethodId = asNonEmptyString(
       fundingData.chargePaymentMethodId,
@@ -16086,7 +16187,7 @@ const initiateExternallyFundedAppUserTransfer = async (params: {
 
   if (request.fundingSourceType === "EXTERNAL_CARD") {
     if (
-      String(fundingData.type || fundingData.methodType || "").trim().toUpperCase() !== "CARD" ||
+      normalizeMethodType(fundingData.type || fundingData.methodType) !== "CARD" ||
       fundingData.requiresRelinkForCharges === true
     ) {
       await cancelAppUserTransferBeforeFunding({
@@ -16604,7 +16705,7 @@ const initiateAfriexBankSwiftTransfer = async (params: {
   };
 
   if (fundingSource === "EXTERNAL_CARD") {
-    const fundingMethodType = String(fundingData.type || "").trim().toUpperCase();
+    const fundingMethodType = normalizeMethodType(fundingData.type || fundingData.methodType);
     if (fundingMethodType !== "CARD" || fundingData.requiresRelinkForCharges === true) {
       throw new functions.https.HttpsError(
         "failed-precondition",
@@ -16615,7 +16716,10 @@ const initiateAfriexBankSwiftTransfer = async (params: {
       fundingData.chargePaymentMethodId,
       fundingData.stripePaymentMethodId
     );
-    const stripeCustomerId = asNonEmptyString(params.senderData.paymentCustomerId);
+    const stripeCustomerId = asNonEmptyString(
+      fundingData.chargeCustomerId,
+      params.senderData.paymentCustomerId
+    );
     if (!paymentMethodId || !stripeCustomerId) {
       throw new functions.https.HttpsError(
         "failed-precondition",
@@ -16683,7 +16787,7 @@ const initiateAfriexBankSwiftTransfer = async (params: {
     }
     fundingPaymentIntentId = fundingIntent.id;
   } else {
-    const fundingType = String(fundingData.type || "").trim().toUpperCase();
+    const fundingType = normalizeMethodType(fundingData.type || fundingData.methodType);
     const fundingCountry = resolveStripeConnectCountryCode(asNonEmptyString(fundingData.country));
     const chargeSourceId = asNonEmptyString(fundingData.chargeSourceId);
     const chargeSourceStatus = String(fundingData.chargeSourceStatus || "").trim().toLowerCase();
@@ -22985,8 +23089,38 @@ const optionalString = (value: unknown): string | undefined => {
   return normalized || undefined;
 };
 
-const normalizeMethodType = (value: unknown): string =>
-  String(value || "").trim().toUpperCase();
+const normalizeMethodType = (value: unknown): string => {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
+  switch (normalized) {
+  case "CARD":
+  case "CREDIT_CARD":
+  case "DEBIT_CARD":
+    return "CARD";
+  case "BANK":
+  case "BANK_ACCOUNT":
+  case "BANKACCOUNT":
+  case "ACH":
+  case "ACH_BANK":
+  case "US_BANK_ACCOUNT":
+  case "US_ACH":
+  case "US_ACH_BANK":
+    return "BANK";
+  case "MOBILE_MONEY":
+  case "MOBILEMONEY":
+  case "MOMO":
+  case "MM":
+    return "MOBILE_MONEY";
+  case "SWIFT":
+  case "SWIFT_BANK":
+  case "WIRE":
+    return "SWIFT";
+  default:
+    return normalized;
+  }
+};
 
 const normalizeText = (value: unknown): string =>
   String(value || "").trim().toLowerCase();
@@ -23049,7 +23183,7 @@ const sanitizeAddPaymentMethodRequest = (requestData: AddPaymentMethodRequest): 
   case "CARD":
     return {
       ...base,
-      cardHolderName: optionalString(requestData.cardHolderName),
+      cardHolderName: optionalString(requestData.cardHolderName || requestData.holderName),
       cardNumber: optionalString(requestData.cardNumber),
       expiryDate: optionalString(requestData.expiryDate),
       brand: optionalString(requestData.brand),
@@ -23058,24 +23192,30 @@ const sanitizeAddPaymentMethodRequest = (requestData: AddPaymentMethodRequest): 
   case "BANK":
     return {
       ...base,
-      bankName: optionalString(requestData.bankName),
-      accountHolderName: optionalString(requestData.accountHolderName),
-      accountNumber: optionalString(requestData.accountNumber),
-      routingNumber: optionalString(requestData.routingNumber),
-      country: optionalString(requestData.country),
-      currency: optionalString(requestData.currency),
+      bankName: optionalString(
+        requestData.bankName || requestData.institutionName || requestData.providerBankLabel
+      ),
+      accountHolderName: optionalString(requestData.accountHolderName || requestData.holderName),
+      accountNumber: optionalString(requestData.accountNumber || requestData.iban),
+      routingNumber: optionalString(requestData.routingNumber || requestData.routingCode),
+      country: optionalString(requestData.country || requestData.countryCode),
+      currency: optionalString(requestData.currency || requestData.localCurrency),
       last4: optionalString(requestData.last4),
       institutionCode: optionalString(requestData.institutionCode),
     };
   case "MOBILE_MONEY":
     return {
       ...base,
-      phoneNumber: optionalString(requestData.phoneNumber),
-      network: optionalString(requestData.network),
-      registeredName: optionalString(requestData.registeredName),
-      country: optionalString(requestData.country),
+      phoneNumber: optionalString(
+        requestData.phoneNumber || requestData.phone || requestData.mobileNumber || requestData.accountNumber
+      ),
+      network: optionalString(requestData.network || requestData.providerNetwork),
+      registeredName: optionalString(
+        requestData.registeredName || requestData.providerResolvedName || requestData.accountName
+      ),
+      country: optionalString(requestData.country || requestData.countryCode),
       dialCode: optionalString(requestData.dialCode),
-      currency: optionalString(requestData.currency),
+      currency: optionalString(requestData.currency || requestData.localCurrency),
       institutionCode: optionalString(requestData.institutionCode),
     };
   default:
@@ -25768,6 +25908,78 @@ const resolveQuoteRecipientCurrency = (
   return "USD";
 };
 
+const loadQuoteEligibleFundingMethod = async (args: {
+  senderId: string;
+  senderData: Record<string, unknown>;
+  fundingSourceType: string;
+  fundingPaymentMethodId?: string | null;
+}): Promise<{id: string; data: Record<string, unknown>}> => {
+  const fundingPaymentMethodId = asNonEmptyString(args.fundingPaymentMethodId);
+  if (!fundingPaymentMethodId) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Select a saved funding method before requesting live pricing."
+    );
+  }
+
+  const methodSnap = await db.collection("users").doc(args.senderId)
+    .collection("payment_methods").doc(fundingPaymentMethodId).get();
+  if (!methodSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "The selected funding method was not found.");
+  }
+
+  const method = (methodSnap.data() || {}) as Record<string, unknown>;
+  const type = normalizeMethodType(method.type || method.methodType);
+  const fundingSourceType = args.fundingSourceType.trim().toUpperCase();
+  if (fundingSourceType === "EXTERNAL_CARD") {
+    const paymentMethodId = asNonEmptyString(
+      method.chargePaymentMethodId,
+      method.stripePaymentMethodId
+    );
+    const customerId = asNonEmptyString(method.chargeCustomerId, args.senderData.paymentCustomerId);
+    if (type !== "CARD" || !paymentMethodId || !customerId || method.requiresRelinkForCharges === true) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Select a linked card that is ready for transfer funding."
+      );
+    }
+  } else if (fundingSourceType === "EXTERNAL_BANK") {
+    const country = resolveStripeConnectCountryCode(
+      asNonEmptyString(method.country, method.billingCountry)
+    );
+    const sourceStatus = String(method.chargeSourceStatus || "").trim().toLowerCase();
+    const customerId = asNonEmptyString(method.chargeCustomerId, args.senderData.paymentCustomerId);
+    if (
+      type !== "BANK" ||
+      country !== "US" ||
+      !asNonEmptyString(method.chargeSourceId) ||
+      sourceStatus !== "verified" ||
+      !customerId ||
+      method.requiresRelinkForCharges === true
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Select a verified US ACH bank account for transfer funding."
+      );
+    }
+  } else if (fundingSourceType === "EXTERNAL_MOBILE_MONEY") {
+    if (
+      type !== "MOBILE_MONEY" ||
+      method.phoneOwnershipVerified !== true ||
+      String(method.verificationStatus || "").trim().toUpperCase() !== "VERIFIED"
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Select a verified mobile money funding source."
+      );
+    }
+  } else {
+    throw new functions.https.HttpsError("failed-precondition", "Unsupported funding source.");
+  }
+
+  return {id: fundingPaymentMethodId, data: method};
+};
+
 /** Customer-safe conversion preview backed by Afriex's current business rate. */
 export const getAfriexRates = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
@@ -26197,6 +26409,12 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
         "Local bank and SWIFT delivery require a card or verified US ACH bank funding source."
       );
     }
+    if (fundingSourceType === "EXTERNAL_MOBILE_MONEY" && providerDeliveryRoute !== "MOBILE_MONEY") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Mobile money funding is available only for verified mobile money delivery."
+      );
+    }
     if ((providerDeliveryRoute === "BANK" || providerDeliveryRoute === "SWIFT") && !isAfriexBankSwiftPayoutExecutionEnabled()) {
       throw new functions.https.HttpsError(
         "failed-precondition",
@@ -26221,6 +26439,13 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
       senderData,
       (context.auth?.token || {}) as Record<string, unknown>
     );
+    const quoteFunding = await loadQuoteEligibleFundingMethod({
+      senderId: context.auth.uid,
+      senderData,
+      fundingSourceType,
+      fundingPaymentMethodId: asNonEmptyString(payload.fundingPaymentMethodId),
+    });
+    const fundingPaymentMethodId = quoteFunding.id;
 
     const recipientCurrency = resolveQuoteRecipientCurrency(
       providerDeliveryRoute,
@@ -26254,7 +26479,6 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
     const totalFee = roundMoney(corridorFee + topUpFeeUsd);
     const totalDebit = roundMoney(amount + corridorFee + topUpFeeUsd);
     const recipientAmount = roundMoney(amount * fxRate);
-    const fundingPaymentMethodId = asNonEmptyString(payload.fundingPaymentMethodId);
     let fundingCollectionAmount: number | null = null;
     let fundingCollectionCurrency: string | null = null;
     let fundingCollectionRate: number | null = null;
@@ -26265,21 +26489,8 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
           "Select a verified mobile money funding source."
         );
       }
-      const fundingMethodSnap = await db.collection("users").doc(context.auth.uid)
-        .collection("payment_methods").doc(fundingPaymentMethodId).get();
-      const fundingData = (fundingMethodSnap.data() || {}) as Record<string, unknown>;
+      const fundingData = quoteFunding.data;
       const fundingCurrency = asNonEmptyString(fundingData.currency)?.toUpperCase() || "USD";
-      if (
-        !fundingMethodSnap.exists ||
-        normalizeMethodType(fundingData.type || fundingData.methodType) !== "MOBILE_MONEY" ||
-        fundingData.phoneOwnershipVerified !== true ||
-        String(fundingData.verificationStatus || "").trim().toUpperCase() !== "VERIFIED"
-      ) {
-        throw new functions.https.HttpsError(
-          "failed-precondition",
-          "Select a verified mobile money funding source."
-        );
-      }
       const fundingCountry = asNonEmptyString(fundingData.country);
       if (!fundingCountry) {
         throw new functions.https.HttpsError(

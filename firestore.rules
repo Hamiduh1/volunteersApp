@@ -807,6 +807,12 @@ service cloud.firestore {
         allow delete: if request.auth != null && request.auth.uid == userId;
       }
 
+      // Only the App Check-protected callable may grant or replace a device lease.
+      match /account_security/active_device {
+        allow get: if isOwner(userId);
+        allow list, create, update, delete: if false;
+      }
+
       // Literal path: any authenticated user may read (mutual block checks for calls/chats).
       match /settings/chat_privacy {
         allow read: if request.auth != null;
@@ -990,7 +996,9 @@ service cloud.firestore {
             request.auth.uid in resource.data.get('participantIds', [])
           )
         );
-      allow create: if callSessionCreateAllowed();
+      // The createCallSession callable owns session creation after validating
+      // membership and block state. Clients only record their own response.
+      allow create: if false;
       allow update: if isCallSessionParticipant(resource.data) && callSessionParticipantUpdateAllowed();
       allow delete: if false;
     }

@@ -129,49 +129,171 @@ class PaymentsViewModel : ViewModel() {
         val methodType = resolveMethodType(doc)
         return when (methodType) {
             "BANK" -> {
-                val rawType = (doc.getString("type") ?: doc.getString("methodType")).orEmpty()
+                val rawType = doc.firstNonBlankString("type", "methodType")
                 val isSwift = rawType.contains("SWIFT", ignoreCase = true) ||
-                    !doc.getString("swiftCode").isNullOrBlank() ||
-                    !doc.getString("swiftBic").isNullOrBlank() ||
-                    doc.getString("deliveryRoute").equals("SWIFT", ignoreCase = true)
+                    rawType.contains("WIRE", ignoreCase = true) ||
+                    doc.firstNonBlankString("swiftCode", "swiftBic", "bic").isNotBlank() ||
+                    doc.firstNonBlankString("deliveryRoute", "providerChannel")
+                        .equals("SWIFT", ignoreCase = true)
+                val verificationStatus = doc.firstNonBlankString(
+                    "verificationStatus",
+                    "providerVerificationStatus",
+                    "status"
+                )
+                val routeVerified = doc.firstBoolean(
+                    "appUserReceiveRouteVerified",
+                    "accountRouteVerified",
+                    "providerRouteVerified"
+                ) || isVerifiedPaymentRoute(verificationStatus)
                 doc.toObject(PaymentMethod.BankAccount::class.java)
                     ?.copy(
                         id = doc.id,
+                        label = doc.firstNonBlankString("label", "displayName", "providerBankLabel")
+                            .ifBlank { if (isSwift) "SWIFT Bank" else "Bank Account" },
                         type = if (isSwift) "SWIFT_BANK" else "BANK",
-                        deliveryRoute = doc.getString("deliveryRoute")
-                            ?.takeIf { it.isNotBlank() }
+                        holderName = doc.firstNonBlankString("holderName", "accountHolderName")
+                            .ifBlank { null },
+                        accountHolderName = doc.firstNonBlankString("accountHolderName", "holderName"),
+                        bankName = doc.firstNonBlankString(
+                            "bankName",
+                            "institutionName",
+                            "providerBankLabel",
+                            "bankLabel"
+                        ),
+                        country = doc.firstNonBlankString("country", "countryCode"),
+                        accountNumber = doc.firstNonBlankString("accountNumber", "iban"),
+                        routingNumber = doc.firstNonBlankString("routingNumber", "routingCode"),
+                        deliveryRoute = doc.firstNonBlankString("deliveryRoute", "providerChannel")
+                            .takeIf { it.isNotBlank() }
                             ?: if (isSwift) "SWIFT" else "BANK",
-                        swiftBic = doc.getString("swiftBic")
-                            ?: doc.getString("swiftCode"),
-                        externalAccountId = doc.getString("externalAccountId")
-                            ?: doc.getString("stripeExternalAccountId"),
-                        last4 = doc.getString("last4").takeUnless { it.isNullOrBlank() }
-                            ?: extractLast4(doc.getString("accountNumber")).orEmpty()
+                        swiftBic = doc.firstNonBlankString("swiftBic", "swiftCode", "bic").ifBlank { null },
+                        externalAccountId = doc.firstNonBlankString(
+                            "externalAccountId",
+                            "stripeExternalAccountId"
+                        ).ifBlank { null },
+                        chargeSourceId = doc.firstNonBlankString("chargeSourceId", "stripeSourceId").ifBlank { null },
+                        chargeCustomerId = doc.firstNonBlankString("chargeCustomerId", "stripeCustomerId").ifBlank { null },
+                        chargeSourceStatus = doc.firstNonBlankString("chargeSourceStatus", "fundingStatus").ifBlank { null },
+                        institutionCode = doc.firstNonBlankString("institutionCode", "bankCode", "providerInstitutionCode")
+                            .ifBlank { null },
+                        institutionName = doc.firstNonBlankString("institutionName", "providerBankLabel", "bankLabel")
+                            .ifBlank { null },
+                        providerResolvedName = doc.firstNonBlankString("providerResolvedName", "accountName")
+                            .ifBlank { null },
+                        accountRouteVerified = routeVerified,
+                        appUserReceiveRouteVerified = routeVerified,
+                        payoutReady = doc.firstBoolean("payoutReady", "externalAccountAttached") || routeVerified,
+                        last4 = doc.firstNonBlankString("last4")
+                            .ifBlank { extractLast4(doc.firstNonBlankString("accountNumber", "iban")).orEmpty() }
                     )
             }
             "MOBILE_MONEY" -> {
-                val phoneOwnershipVerified = doc.getBoolean("phoneOwnershipVerified")
-                    ?: doc.getBoolean("isPhoneVerified")
-                    ?: false
-                val verificationStatus = doc.getString("verificationStatus")
-                    ?: if (phoneOwnershipVerified) "VERIFIED" else "UNVERIFIED"
+                val phoneOwnershipVerified = doc.firstBoolean(
+                    "phoneOwnershipVerified",
+                    "isPhoneVerified",
+                    "phoneVerified"
+                )
+                val verificationStatus = doc.firstNonBlankString(
+                    "verificationStatus",
+                    "providerVerificationStatus"
+                ).ifBlank { if (phoneOwnershipVerified) "VERIFIED" else "UNVERIFIED" }
+                val routeVerified = doc.firstBoolean(
+                    "appUserReceiveRouteVerified",
+                    "accountRouteVerified",
+                    "providerRouteVerified"
+                ) || (phoneOwnershipVerified && isVerifiedPaymentRoute(verificationStatus))
                 doc.toObject(PaymentMethod.MobileMoney::class.java)
                     ?.copy(
                         id = doc.id,
+                        label = doc.firstNonBlankString("label", "displayName").ifBlank { "Mobile Money" },
+                        phoneNumber = doc.firstNonBlankString(
+                            "phoneNumber",
+                            "phone",
+                            "mobileNumber",
+                            "accountNumber"
+                        ),
+                        network = doc.firstNonBlankString(
+                            "network",
+                            "providerNetwork",
+                            "institutionName",
+                            "provider"
+                        ),
+                        registeredName = doc.firstNonBlankString(
+                            "registeredName",
+                            "providerResolvedName",
+                            "accountName"
+                        ),
+                        country = doc.firstNonBlankString("country", "countryCode"),
+                        dialCode = doc.firstNonBlankString("dialCode", "countryDialCode"),
+                        currency = doc.firstNonBlankString("currency", "localCurrency").ifBlank { "USD" },
                         phoneOwnershipVerified = phoneOwnershipVerified,
-                        verificationStatus = verificationStatus
+                        verificationStatus = verificationStatus,
+                        institutionCode = doc.firstNonBlankString("institutionCode", "bankCode", "providerCode")
+                            .ifBlank { null },
+                        institutionName = doc.firstNonBlankString("institutionName", "providerNetwork", "network")
+                            .ifBlank { null },
+                        providerResolvedName = doc.firstNonBlankString("providerResolvedName", "accountName")
+                            .ifBlank { null },
+                        accountRouteVerified = routeVerified,
+                        appUserReceiveRouteVerified = routeVerified,
+                        payoutReady = doc.firstBoolean("payoutReady", "externalAccountAttached") || routeVerified
                     )
             }
             "CARD" -> doc.toObject(PaymentMethod.CreditCard::class.java)
                 ?.copy(
                     id = doc.id,
-                    externalAccountId = doc.getString("externalAccountId")
-                        ?: doc.getString("stripeExternalAccountId"),
-                    last4 = doc.getString("last4").takeUnless { it.isNullOrBlank() }
-                        ?: extractLast4(doc.getString("cardNumber")).orEmpty()
+                    label = doc.firstNonBlankString("label", "displayName").ifBlank { "My Card" },
+                    holderName = doc.firstNonBlankString("holderName", "cardHolderName").ifBlank { null },
+                    cardHolderName = doc.firstNonBlankString("cardHolderName", "holderName"),
+                    externalAccountId = doc.firstNonBlankString(
+                        "externalAccountId",
+                        "stripeExternalAccountId"
+                    ).ifBlank { null },
+                    chargePaymentMethodId = doc.firstNonBlankString(
+                        "chargePaymentMethodId",
+                        "stripePaymentMethodId",
+                        "paymentMethodId"
+                    ).ifBlank { null },
+                    stripePaymentMethodId = doc.firstNonBlankString(
+                        "stripePaymentMethodId",
+                        "chargePaymentMethodId",
+                        "paymentMethodId"
+                    ).ifBlank { null },
+                    last4 = doc.firstNonBlankString("last4")
+                        .ifBlank { extractLast4(doc.firstNonBlankString("cardNumber")).orEmpty() }
                 )
             else -> null
         }
+    }
+
+    private fun DocumentSnapshot.firstNonBlankString(vararg keys: String): String = keys.asSequence()
+        .map { get(it)?.toString()?.trim().orEmpty() }
+        .firstOrNull { it.isNotEmpty() }
+        .orEmpty()
+
+    private fun DocumentSnapshot.firstBoolean(vararg keys: String): Boolean = keys.asSequence()
+        .mapNotNull { key ->
+            when (val value = get(key)) {
+                is Boolean -> value
+                is Number -> value.toInt() != 0
+                is String -> when {
+                    value.equals("true", ignoreCase = true) -> true
+                    value.equals("false", ignoreCase = true) -> false
+                    else -> null
+                }
+                else -> null
+            }
+        }
+        .firstOrNull()
+        ?: false
+
+    private fun isVerifiedPaymentRoute(status: String): Boolean {
+        val normalized = status.trim().uppercase(Locale.US)
+        return normalized == "ACTIVE" || normalized == "VERIFIED" ||
+            // A customer confirmation may acknowledge a route-only lookup, but
+            // it is not provider verification and must not expose this method
+            // as another member's App User receive route.
+            normalized.startsWith("VERIFIED_")
     }
 
     fun refresh() {
@@ -210,8 +332,8 @@ class PaymentsViewModel : ViewModel() {
             ?: ""
         return when (normalized) {
             "CARD", "CREDIT_CARD", "DEBIT_CARD" -> "CARD"
-            "BANK", "BANK_ACCOUNT", "BANKACCOUNT", "ACH", "ACH_BANK",
-            "SWIFT", "SWIFT_BANK" -> "BANK"
+            "BANK", "BANK_ACCOUNT", "BANKACCOUNT", "ACH", "ACH_BANK", "US_BANK_ACCOUNT", "US_ACH", "US_ACH_BANK",
+            "SWIFT", "SWIFT_BANK", "WIRE" -> "BANK"
             "MOBILE_MONEY", "MOBILEMONEY", "MOMO", "MM" -> "MOBILE_MONEY"
             else -> normalized
         }

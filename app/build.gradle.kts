@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.google.gms.google.services)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
     id("kotlin-parcelize")
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.androidx.navigation.safeargs.kotlin)
@@ -68,10 +69,9 @@ android {
         applicationId = "com.volunteersapp.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20
-        versionName = "1.0.16"
+        versionCode = 25
+        versionName = "1.0.20"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
         // --- Improvement 2: Set manifest placeholders here ---
         // This reads the key from the properties loaded at the top.
         manifestPlaceholders["MAPS_API_KEY"] = localProperties.getProperty("MAPS_API_KEY", "")
@@ -191,10 +191,7 @@ android {
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
-            freeCompilerArgs.addAll(
-                "-Xjvm-default=all",
-                "-Xopt-in=androidx.media3.common.util.UnstableApi"
-            )
+            freeCompilerArgs.add("-Xjvm-default=all")
         }
     }
 
@@ -203,10 +200,6 @@ android {
         dataBinding = false
         buildConfig = true
         compose = true
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
     }
 
     lint {

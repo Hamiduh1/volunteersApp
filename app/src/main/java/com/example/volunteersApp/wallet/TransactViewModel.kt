@@ -349,7 +349,7 @@ class TransactViewModel : ViewModel() {
         funding: PaymentMethod?,
         destinationRoute: String?,
     ): Boolean {
-        if (funding == null) return true
+        if (funding == null) return false
         if (!isFundingMethodEligible(funding)) return false
         val route = destinationRoute?.trim()?.uppercase(Locale.US)
         val requiresCardOrAch = route == "BANK" || route == "SWIFT"
@@ -692,74 +692,146 @@ class TransactViewModel : ViewModel() {
         val methods = rawMethods as? List<*> ?: return emptyList()
         return methods.mapNotNull { entry ->
             val map = entry as? Map<*, *> ?: return@mapNotNull null
-            when (normalizeStoredMethodType(stringValue(map["type"]))) {
+            val rawType = mapFirstString(map, "type", "methodType")
+            when (normalizeStoredMethodType(rawType)) {
                 // Cards fund sends; they never appear as App User receive routes.
                 "CARD" -> null
                 "BANK", "SWIFT_BANK" -> {
-                    val deliveryRoute = stringValue(map["deliveryRoute"]).ifBlank {
-                        if (normalizeStoredMethodType(stringValue(map["type"])) == "SWIFT_BANK") {
+                    val deliveryRoute = mapFirstString(map, "deliveryRoute", "providerChannel").ifBlank {
+                        if (normalizeStoredMethodType(rawType) == "SWIFT_BANK") {
                             "SWIFT"
                         } else {
                             "BANK"
                         }
                     }
+                    val verificationStatus = mapFirstString(
+                        map,
+                        "verificationStatus",
+                        "providerVerificationStatus",
+                        "status"
+                    )
+                    val routeVerified = mapFirstBoolean(
+                        map,
+                        "appUserReceiveRouteVerified",
+                        "accountRouteVerified",
+                        "providerRouteVerified"
+                    ) || isVerifiedSharedPaymentRoute(verificationStatus)
                     PaymentMethod.BankAccount(
-                    id = stringValue(map["id"]),
-                    label = stringValue(map["label"]).ifBlank {
+                    id = mapFirstString(map, "id", "paymentMethodId"),
+                    label = mapFirstString(map, "label", "displayName", "providerBankLabel").ifBlank {
                         if (deliveryRoute == "SWIFT") "SWIFT Bank" else "Bank Account"
                     },
-                    isDefault = booleanValue(map["isDefault"]),
+                    isDefault = mapFirstBoolean(map, "isDefault", "default"),
                     type = if (deliveryRoute == "SWIFT") "SWIFT_BANK" else "BANK",
-                    holderName = stringValue(map["holderName"]).ifBlank { null },
-                    accountHolderName = stringValue(map["accountHolderName"]),
-                    bankName = stringValue(map["bankName"]),
-                    country = stringValue(map["country"]),
-                    accountNumber = stringValue(map["accountNumber"]),
-                    routingNumber = stringValue(map["routingNumber"]),
-                    last4 = stringValue(map["last4"]),
-                    status = stringValue(map["status"]).ifBlank { null },
-                    swiftBic = stringValue(map["swiftBic"]).ifBlank {
-                        stringValue(map["swiftCode"]).ifBlank { null }
+                    holderName = mapFirstString(map, "holderName", "accountHolderName").ifBlank { null },
+                    accountHolderName = mapFirstString(map, "accountHolderName", "holderName"),
+                    bankName = mapFirstString(map, "bankName", "institutionName", "providerBankLabel", "bankLabel"),
+                    country = mapFirstString(map, "country", "countryCode"),
+                    accountNumber = mapFirstString(map, "accountNumber", "iban"),
+                    routingNumber = mapFirstString(map, "routingNumber", "routingCode"),
+                    last4 = mapFirstString(map, "last4"),
+                    status = verificationStatus.ifBlank { null },
+                    swiftBic = mapFirstString(map, "swiftBic", "swiftCode", "bic").ifBlank {
+                        null
                     },
                     deliveryRoute = deliveryRoute,
-                    externalAccountId = stringValue(map["externalAccountId"]).ifBlank { null },
-                    payoutReady = booleanValue(map["payoutReady"]) || booleanValue(map["externalAccountAttached"]),
-                    chargeSourceId = stringValue(map["chargeSourceId"]).ifBlank { null },
-                    chargeCustomerId = stringValue(map["chargeCustomerId"]).ifBlank { null },
-                    achDebitEnabled = booleanValue(map["achDebitEnabled"]),
+                    externalAccountId = mapFirstString(map, "externalAccountId", "stripeExternalAccountId").ifBlank { null },
+                    payoutReady = mapFirstBoolean(map, "payoutReady", "externalAccountAttached") || routeVerified,
+                    chargeSourceId = mapFirstString(map, "chargeSourceId", "stripeSourceId").ifBlank { null },
+                    chargeCustomerId = mapFirstString(map, "chargeCustomerId", "stripeCustomerId").ifBlank { null },
+                    achDebitEnabled = mapFirstBoolean(map, "achDebitEnabled"),
                     achCreditEnabled = nullableBooleanValue(map["achCreditEnabled"]),
-                    chargeSourceStatus = stringValue(map["chargeSourceStatus"]).ifBlank { null },
-                    institutionCode = stringValue(map["institutionCode"]).ifBlank { null },
-                    institutionName = stringValue(map["institutionName"]).ifBlank { null },
-                    providerResolvedName = stringValue(map["providerResolvedName"]).ifBlank { null },
-                    accountRouteVerified = booleanValue(map["accountRouteVerified"]),
-                    appUserReceiveRouteVerified = booleanValue(map["appUserReceiveRouteVerified"])
-                )
+                    chargeSourceStatus = mapFirstString(map, "chargeSourceStatus", "fundingStatus").ifBlank { null },
+                    institutionCode = mapFirstString(map, "institutionCode", "bankCode", "providerInstitutionCode")
+                        .ifBlank { null },
+                    institutionName = mapFirstString(map, "institutionName", "providerBankLabel", "bankLabel")
+                        .ifBlank { null },
+                    providerResolvedName = mapFirstString(map, "providerResolvedName", "accountName").ifBlank { null },
+                    accountRouteVerified = routeVerified,
+                    appUserReceiveRouteVerified = routeVerified
+                    )
                 }
                 "MOBILE_MONEY" -> PaymentMethod.MobileMoney(
-                    id = stringValue(map["id"]),
-                    label = stringValue(map["label"]).ifBlank { "Mobile Money" },
-                    isDefault = booleanValue(map["isDefault"]),
-                    phoneNumber = stringValue(map["phoneNumber"]),
-                    network = stringValue(map["network"]),
-                    registeredName = stringValue(map["registeredName"]),
-                    country = stringValue(map["country"]),
-                    currency = stringValue(map["currency"]).ifBlank { "USD" },
-                    verificationStatus = stringValue(map["verificationStatus"]),
-                    status = stringValue(map["status"]).ifBlank { null },
-                    institutionCode = stringValue(map["institutionCode"]).ifBlank { null },
-                    institutionName = stringValue(map["institutionName"]).ifBlank { null },
-                    providerResolvedName = stringValue(map["providerResolvedName"]).ifBlank { null },
-                    accountRouteVerified = booleanValue(map["accountRouteVerified"]),
-                    appUserReceiveRouteVerified = booleanValue(map["appUserReceiveRouteVerified"]),
+                    id = mapFirstString(map, "id", "paymentMethodId"),
+                    label = mapFirstString(map, "label", "displayName").ifBlank { "Mobile Money" },
+                    isDefault = mapFirstBoolean(map, "isDefault", "default"),
+                    phoneNumber = mapFirstString(map, "phoneNumber", "phone", "mobileNumber", "accountNumber"),
+                    network = mapFirstString(map, "network", "providerNetwork", "institutionName", "provider"),
+                    registeredName = mapFirstString(map, "registeredName", "providerResolvedName", "accountName"),
+                    country = mapFirstString(map, "country", "countryCode"),
+                    currency = mapFirstString(map, "currency", "localCurrency").ifBlank { "USD" },
+                    phoneOwnershipVerified = mapFirstBoolean(
+                        map,
+                        "phoneOwnershipVerified",
+                        "isPhoneVerified",
+                        "phoneVerified"
+                    ),
+                    verificationStatus = mapFirstString(
+                        map,
+                        "verificationStatus",
+                        "providerVerificationStatus"
+                    ).ifBlank { "UNVERIFIED" },
+                    status = mapFirstString(map, "status").ifBlank { null },
+                    institutionCode = mapFirstString(map, "institutionCode", "bankCode", "providerCode").ifBlank { null },
+                    institutionName = mapFirstString(map, "institutionName", "providerNetwork", "network").ifBlank { null },
+                    providerResolvedName = mapFirstString(map, "providerResolvedName", "accountName").ifBlank { null },
+                    accountRouteVerified = mapFirstBoolean(
+                        map,
+                        "appUserReceiveRouteVerified",
+                        "accountRouteVerified",
+                        "providerRouteVerified"
+                    ) || (
+                        mapFirstBoolean(map, "phoneOwnershipVerified", "isPhoneVerified", "phoneVerified") &&
+                            isVerifiedSharedPaymentRoute(
+                                mapFirstString(map, "verificationStatus", "providerVerificationStatus")
+                            )
+                        ),
+                    appUserReceiveRouteVerified = mapFirstBoolean(
+                        map,
+                        "appUserReceiveRouteVerified",
+                        "accountRouteVerified",
+                        "providerRouteVerified"
+                    ) || (
+                        mapFirstBoolean(map, "phoneOwnershipVerified", "isPhoneVerified", "phoneVerified") &&
+                            isVerifiedSharedPaymentRoute(
+                                mapFirstString(map, "verificationStatus", "providerVerificationStatus")
+                            )
+                        ),
                     // Public recipient payload always sets payoutReady for verified MM routes.
-                    payoutReady = booleanValue(map["payoutReady"]) ||
-                        booleanValue(map["appUserReceiveRouteVerified"]),
+                    payoutReady = mapFirstBoolean(map, "payoutReady", "externalAccountAttached") ||
+                        mapFirstBoolean(map, "appUserReceiveRouteVerified", "accountRouteVerified", "providerRouteVerified") || (
+                        mapFirstBoolean(map, "phoneOwnershipVerified", "isPhoneVerified", "phoneVerified") &&
+                            isVerifiedSharedPaymentRoute(
+                                mapFirstString(map, "verificationStatus", "providerVerificationStatus")
+                            )
+                        ),
                 )
                 else -> null
             }
         }
     }
+
+    private fun mapFirstString(map: Map<*, *>, vararg keys: String): String = keys.asSequence()
+        .map { key -> stringValue(map[key]) }
+        .firstOrNull { it.isNotEmpty() }
+        .orEmpty()
+
+    private fun mapFirstBoolean(map: Map<*, *>, vararg keys: String): Boolean = keys.asSequence()
+        .mapNotNull { key ->
+            val value = map[key]
+            when (value) {
+                is Boolean -> value
+                is Number -> value.toInt() != 0
+                is String -> when {
+                    value.equals("true", ignoreCase = true) -> true
+                    value.equals("false", ignoreCase = true) -> false
+                    else -> null
+                }
+                else -> null
+            }
+        }
+        .firstOrNull()
+        ?: false
 
     private fun stringValue(value: Any?): String = when (value) {
         null -> ""
@@ -795,11 +867,20 @@ class TransactViewModel : ViewModel() {
             ?: ""
         return when (normalized) {
             "CARD", "CREDIT_CARD", "DEBIT_CARD" -> "CARD"
-            "BANK", "BANK_ACCOUNT", "BANKACCOUNT", "ACH", "ACH_BANK" -> "BANK"
-            "SWIFT", "SWIFT_BANK" -> "SWIFT_BANK"
+            "BANK", "BANK_ACCOUNT", "BANKACCOUNT", "ACH", "ACH_BANK", "US_BANK_ACCOUNT", "US_ACH", "US_ACH_BANK" -> "BANK"
+            "SWIFT", "SWIFT_BANK", "WIRE" -> "SWIFT_BANK"
             "MOBILE_MONEY", "MOBILEMONEY", "MOMO", "MM" -> "MOBILE_MONEY"
             else -> normalized
         }
+    }
+
+    private fun isVerifiedSharedPaymentRoute(status: String): Boolean {
+        val normalized = status.trim().uppercase(Locale.US)
+        return normalized == "ACTIVE" || normalized == "VERIFIED" ||
+            // Customer acknowledgement is not equivalent to a provider-verified
+            // payout route. Only the server-issued verification state can make
+            // a shared method selectable for App User delivery.
+            normalized.startsWith("VERIFIED_")
     }
 
     /** Provider delivery rail for an App User receive method (BANK / SWIFT / MOBILE_MONEY). */
@@ -1135,24 +1216,122 @@ class TransactViewModel : ViewModel() {
 
     private fun parseTransactPaymentMethod(doc: DocumentSnapshot): PaymentMethod? {
         return runCatching {
-            when (normalizeStoredMethodType(doc.getString("type") ?: doc.getString("methodType"))) {
+            when (normalizeStoredMethodType(doc.sharedString("type", "methodType"))) {
                 "BANK", "SWIFT_BANK" -> {
-                    val rawType = (doc.getString("type") ?: doc.getString("methodType")).orEmpty()
+                    val rawType = doc.sharedString("type", "methodType")
                     val isSwift = rawType.contains("SWIFT", ignoreCase = true) ||
-                        !doc.getString("swiftCode").isNullOrBlank() ||
-                        !doc.getString("swiftBic").isNullOrBlank() ||
-                        doc.getString("deliveryRoute").equals("SWIFT", ignoreCase = true)
+                        rawType.contains("WIRE", ignoreCase = true) ||
+                        doc.sharedString("swiftCode", "swiftBic", "bic").isNotBlank() ||
+                        doc.sharedString("deliveryRoute", "providerChannel")
+                            .let { it.equals("SWIFT", ignoreCase = true) || it.equals("WIRE", ignoreCase = true) }
+                    val verificationStatus = doc.sharedString(
+                        "verificationStatus",
+                        "providerVerificationStatus",
+                        "status"
+                    )
+                    val routeVerified = doc.sharedBoolean(
+                        "appUserReceiveRouteVerified",
+                        "accountRouteVerified",
+                        "providerRouteVerified"
+                    ) || isVerifiedSharedPaymentRoute(verificationStatus)
                     doc.toObject(PaymentMethod.BankAccount::class.java)?.copy(
                         id = doc.id,
+                        label = doc.sharedString("label", "displayName", "providerBankLabel")
+                            .ifBlank { if (isSwift) "SWIFT Bank" else "Bank Account" },
                         type = if (isSwift) "SWIFT_BANK" else "BANK",
-                        deliveryRoute = doc.getString("deliveryRoute")
-                            ?.takeIf { it.isNotBlank() }
+                        holderName = doc.sharedString("holderName", "accountHolderName").ifBlank { null },
+                        accountHolderName = doc.sharedString("accountHolderName", "holderName"),
+                        bankName = doc.sharedString(
+                            "bankName",
+                            "institutionName",
+                            "providerBankLabel",
+                            "bankLabel"
+                        ),
+                        country = doc.sharedString("country", "countryCode"),
+                        accountNumber = doc.sharedString("accountNumber", "iban"),
+                        routingNumber = doc.sharedString("routingNumber", "routingCode"),
+                        deliveryRoute = doc.sharedString("deliveryRoute", "providerChannel")
+                            .takeIf { it.isNotBlank() }
                             ?: if (isSwift) "SWIFT" else "BANK",
-                        swiftBic = doc.getString("swiftBic") ?: doc.getString("swiftCode"),
+                        swiftBic = doc.sharedString("swiftBic", "swiftCode", "bic").ifBlank { null },
+                        externalAccountId = doc.sharedString("externalAccountId", "stripeExternalAccountId")
+                            .ifBlank { null },
+                        chargeSourceId = doc.sharedString("chargeSourceId", "stripeSourceId").ifBlank { null },
+                        chargeCustomerId = doc.sharedString("chargeCustomerId", "stripeCustomerId").ifBlank { null },
+                        chargeSourceStatus = doc.sharedString("chargeSourceStatus", "fundingStatus").ifBlank { null },
+                        institutionCode = doc.sharedString("institutionCode", "bankCode", "providerInstitutionCode")
+                            .ifBlank { null },
+                        institutionName = doc.sharedString("institutionName", "providerBankLabel", "bankLabel")
+                            .ifBlank { null },
+                        providerResolvedName = doc.sharedString("providerResolvedName", "accountName")
+                            .ifBlank { null },
+                        accountRouteVerified = routeVerified,
+                        appUserReceiveRouteVerified = routeVerified,
+                        payoutReady = doc.sharedBoolean("payoutReady", "externalAccountAttached") || routeVerified,
+                        last4 = doc.sharedString("last4")
+                            .ifBlank { sharedLast4(doc.sharedString("accountNumber", "iban")) },
                     )
                 }
-                "MOBILE_MONEY" -> doc.toObject(PaymentMethod.MobileMoney::class.java)?.copy(id = doc.id)
-                "CARD" -> doc.toObject(PaymentMethod.CreditCard::class.java)?.copy(id = doc.id)
+                "MOBILE_MONEY" -> {
+                    val phoneOwnershipVerified = doc.sharedBoolean(
+                        "phoneOwnershipVerified",
+                        "isPhoneVerified",
+                        "phoneVerified"
+                    )
+                    val verificationStatus = doc.sharedString(
+                        "verificationStatus",
+                        "providerVerificationStatus"
+                    ).ifBlank { if (phoneOwnershipVerified) "VERIFIED" else "UNVERIFIED" }
+                    val routeVerified = doc.sharedBoolean(
+                        "appUserReceiveRouteVerified",
+                        "accountRouteVerified",
+                        "providerRouteVerified"
+                    ) || (phoneOwnershipVerified && isVerifiedSharedPaymentRoute(verificationStatus))
+                    doc.toObject(PaymentMethod.MobileMoney::class.java)?.copy(
+                        id = doc.id,
+                        label = doc.sharedString("label", "displayName").ifBlank { "Mobile Money" },
+                        phoneNumber = doc.sharedString("phoneNumber", "phone", "mobileNumber", "accountNumber"),
+                        network = doc.sharedString("network", "providerNetwork", "institutionName", "provider"),
+                        registeredName = doc.sharedString(
+                            "registeredName",
+                            "providerResolvedName",
+                            "accountName"
+                        ),
+                        country = doc.sharedString("country", "countryCode"),
+                        dialCode = doc.sharedString("dialCode", "countryDialCode"),
+                        currency = doc.sharedString("currency", "localCurrency").ifBlank { "USD" },
+                        phoneOwnershipVerified = phoneOwnershipVerified,
+                        verificationStatus = verificationStatus,
+                        institutionCode = doc.sharedString("institutionCode", "bankCode", "providerCode")
+                            .ifBlank { null },
+                        institutionName = doc.sharedString("institutionName", "providerNetwork", "network")
+                            .ifBlank { null },
+                        providerResolvedName = doc.sharedString("providerResolvedName", "accountName")
+                            .ifBlank { null },
+                        accountRouteVerified = routeVerified,
+                        appUserReceiveRouteVerified = routeVerified,
+                        payoutReady = doc.sharedBoolean("payoutReady", "externalAccountAttached") || routeVerified,
+                    )
+                }
+                "CARD" -> doc.toObject(PaymentMethod.CreditCard::class.java)?.copy(
+                    id = doc.id,
+                    label = doc.sharedString("label", "displayName").ifBlank { "My Card" },
+                    holderName = doc.sharedString("holderName", "cardHolderName").ifBlank { null },
+                    cardHolderName = doc.sharedString("cardHolderName", "holderName"),
+                    externalAccountId = doc.sharedString("externalAccountId", "stripeExternalAccountId")
+                        .ifBlank { null },
+                    chargePaymentMethodId = doc.sharedString(
+                        "chargePaymentMethodId",
+                        "stripePaymentMethodId",
+                        "paymentMethodId"
+                    ).ifBlank { null },
+                    stripePaymentMethodId = doc.sharedString(
+                        "stripePaymentMethodId",
+                        "chargePaymentMethodId",
+                        "paymentMethodId"
+                    ).ifBlank { null },
+                    last4 = doc.sharedString("last4").ifBlank { sharedLast4(doc.sharedString("cardNumber")) },
+                )
                 else -> doc.toObject(PaymentMethod.Unknown::class.java)?.copy(id = doc.id)
             }
         }.onFailure { parseError ->
@@ -1160,6 +1339,31 @@ class TransactViewModel : ViewModel() {
             Log.w("TransactVM", "Skipping unreadable payment method ${doc.id}", parseError)
         }.getOrNull()
     }
+
+    private fun DocumentSnapshot.sharedString(vararg keys: String): String = keys.asSequence()
+        .map { get(it)?.toString()?.trim().orEmpty() }
+        .firstOrNull { it.isNotEmpty() }
+        .orEmpty()
+
+    private fun DocumentSnapshot.sharedBoolean(vararg keys: String): Boolean = keys.asSequence()
+        .mapNotNull { key ->
+            when (val value = get(key)) {
+                is Boolean -> value
+                is Number -> value.toInt() != 0
+                is String -> when {
+                    value.equals("true", ignoreCase = true) -> true
+                    value.equals("false", ignoreCase = true) -> false
+                    else -> null
+                }
+                else -> null
+            }
+        }
+        .firstOrNull()
+        ?: false
+
+    private fun sharedLast4(rawValue: String): String = rawValue
+        .filter { it.isDigit() }
+        .takeLast(4)
 
     fun onRecipientSelected(user: User) {
         val selectionVersion = ++recipientSelectionVersion

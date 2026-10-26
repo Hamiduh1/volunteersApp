@@ -485,6 +485,39 @@ service cloud.firestore {
         && userData.get('requiresParentalConsent', false) != true;
     }
 
+    function isDatingLoopLikeInvitation(data) {
+      return ('context' in data)
+        && data.context is string
+        && data.context.matches('(?i)^dating loop( profile| super like)?$');
+    }
+
+    function datingPreferenceAcceptsGender(preference, gender) {
+      return preference == 'EVERYONE'
+        || (preference == 'MEN' && gender == 'MALE')
+        || (preference == 'WOMEN' && gender == 'FEMALE');
+    }
+
+    function hasCompatibleDatingLoopProfiles(senderUid, recipientUid) {
+      let senderPath = /databases/$(database)/documents/dating_profiles/$(senderUid);
+      let recipientPath = /databases/$(database)/documents/dating_profiles/$(recipientUid);
+      let senderProfile = exists(senderPath) ? get(senderPath).data : {};
+      let recipientProfile = exists(recipientPath) ? get(recipientPath).data : {};
+      let senderGender = senderProfile.get('gender', 'OTHER');
+      let recipientGender = recipientProfile.get('gender', 'OTHER');
+      let senderPreference = senderProfile.get('lookingFor', 'EVERYONE');
+      let recipientPreference = recipientProfile.get('lookingFor', 'EVERYONE');
+      return userCanAccessDating(senderUid)
+        && userCanAccessDating(recipientUid)
+        && exists(senderPath)
+        && exists(recipientPath)
+        && senderGender is string
+        && recipientGender is string
+        && senderPreference is string
+        && recipientPreference is string
+        && datingPreferenceAcceptsGender(senderPreference, recipientGender)
+        && datingPreferenceAcceptsGender(recipientPreference, senderGender);
+    }
+
     // Birthdate stays in users/{uid}/dating_private; only the derived age is public.
     function isSafeDatingProfilePayload() {
       let data = request.resource.data;
@@ -660,8 +693,26 @@ service cloud.firestore {
         && (!('timestamp' in request.resource.data) || request.resource.data.timestamp is timestamp)
         && (!('context' in request.resource.data) || request.resource.data.context is string)
         && (userCanAccessDating(request.auth.uid) || chatInvitationSkipsDatingGate())
+        && (!isDatingLoopLikeInvitation(request.resource.data) ||
+          hasCompatibleDatingLoopProfiles(senderUid, recipientUid))
         && !hasUserBlocked(recipientUid, senderUid)
         && !hasUserBlocked(senderUid, recipientUid);
+    }
+
+    // Dating Loop likes are match records, not editable chat invitations. The
+    // recipient may accept or decline a pending like, but cannot rewrite the
+    // sender, context, or profile data captured when it was sent.
+    function isSafeDatingLoopInvitationRecipientUpdate(recipientUid) {
+      return !isDatingLoopLikeInvitation(resource.data)
+        || (
+          resource.data.get('status', 'pending') in ['pending', 'PENDING']
+          && resource.data.senderId is string
+          && hasCompatibleDatingLoopProfiles(resource.data.senderId, recipientUid)
+          && request.resource.data.status in ['accepted', 'ACCEPTED', 'declined', 'DECLINED']
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'lastUpdatedAt'])
+          && request.resource.data.lastUpdatedAt is timestamp
+        );
     }
 
     // Social Inbox invites from known product surfaces — not dating-gated.
@@ -993,7 +1044,17 @@ service cloud.firestore {
         'requiresParentalConsent',
         'canAccessDating',
         'businessRegistered'
-      ]);
+      ])
+        // Dating contact information belongs in users/{uid}/dating_private.
+        // Permit a legacy mirror to be removed, but never created or changed
+        // on a user document that every signed-in member may read.
+        && !(
+          ('datingContactPhone' in request.resource.data)
+          && (
+            !('datingContactPhone' in resource.data)
+            || request.resource.data.datingContactPhone != resource.data.datingContactPhone
+          )
+        );
     }
 
     function messageReceiptMap(data, field) {
@@ -1322,7 +1383,7 @@ service cloud.firestore {
         );
     }
 
-    function callParticipantListUnchangedOrSelfAdded(beforeList, afterList) {
+    function callParticipantListUnchangedOrSelfChanged(beforeList, afterList) {
       return beforeList is list
         && afterList is list
         && (
@@ -1333,6 +1394,13 @@ service cloud.firestore {
             // A participant may record only their own response, never add a different user.
             && !(request.auth.uid in beforeList)
             && request.auth.uid in afterList
+          ) ||
+          (
+            beforeList.hasAll(afterList)
+            && afterList.size() == beforeList.size() - 1
+            // Moving between response states may remove only the caller's own id.
+            && request.auth.uid in beforeList
+            && !(request.auth.uid in afterList)
           )
         );
     }
@@ -1351,11 +1419,11 @@ service cloud.firestore {
           'ringingAt'
         ])
         && (!changed.hasAny(['status']) || isValidCallSessionStatusTransition())
-        && callParticipantListUnchangedOrSelfAdded(ringingCallParticipantsFrom(resource.data), ringingCallParticipantsFrom(request.resource.data))
+        && callParticipantListUnchangedOrSelfChanged(ringingCallParticipantsFrom(resource.data), ringingCallParticipantsFrom(request.resource.data))
         && (!changed.hasAny(['ringingAt']) || request.resource.data.ringingAt == request.time)
-        && callParticipantListUnchangedOrSelfAdded(acceptedCallParticipantsFrom(resource.data), acceptedCallParticipantsFrom(request.resource.data))
-        && callParticipantListUnchangedOrSelfAdded(declinedCallParticipantsFrom(resource.data), declinedCallParticipantsFrom(request.resource.data))
-        && callParticipantListUnchangedOrSelfAdded(endedCallParticipantsFrom(resource.data), endedCallParticipantsFrom(request.resource.data))
+        && callParticipantListUnchangedOrSelfChanged(acceptedCallParticipantsFrom(resource.data), acceptedCallParticipantsFrom(request.resource.data))
+        && callParticipantListUnchangedOrSelfChanged(declinedCallParticipantsFrom(resource.data), declinedCallParticipantsFrom(request.resource.data))
+        && callParticipantListUnchangedOrSelfChanged(endedCallParticipantsFrom(resource.data), endedCallParticipantsFrom(request.resource.data))
         && (
           !changed.hasAny(['status']) ||
           request.resource.data.status != 'accepted' ||
@@ -1498,6 +1566,12 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Only the App Check-protected callable may grant or replace a device lease.
+      match /account_security/active_device {
+        allow get: if isOwner(userId);
+        allow list, create, update, delete: if false;
+      }
+
       match /settings/{settingId} {
         allow read, write: if isOwner(userId);
       }
@@ -1520,7 +1594,10 @@ service cloud.firestore {
         allow create: if isSignedIn()
           && isOwner(senderId)
           && isSafeChatInvitationCreate(userId, senderId);
-        allow update, delete: if isSignedIn() && isOwner(userId);
+        allow update: if isSignedIn()
+          && isOwner(userId)
+          && isSafeDatingLoopInvitationRecipientUpdate(userId);
+        allow delete: if isSignedIn() && isOwner(userId);
       }
 
       // Legacy chat invitation path used by older screens.
@@ -1533,7 +1610,10 @@ service cloud.firestore {
         allow create: if isSignedIn()
           && isOwner(senderId)
           && isSafeChatInvitationCreate(userId, senderId);
-        allow update, delete: if isSignedIn() && isOwner(userId);
+        allow update: if isSignedIn()
+          && isOwner(userId)
+          && isSafeDatingLoopInvitationRecipientUpdate(userId);
+        allow delete: if isSignedIn() && isOwner(userId);
       }
 
       match /jokes/{jokeId} {
@@ -1660,6 +1740,7 @@ service cloud.firestore {
           && userCanAccessDating(senderId)
           && exists(/databases/$(database)/documents/dating_profiles/$(senderId))
           && exists(/databases/$(database)/documents/dating_profiles/$(userId))
+          && hasCompatibleDatingLoopProfiles(senderId, userId)
           && !hasUserBlocked(userId, senderId)
           && !hasUserBlocked(senderId, userId)
           && request.resource.data.keys().hasOnly(['senderId', 'senderName', 'senderPhotoUrl', 'text', 'createdAt', 'updatedAt'])
@@ -1743,12 +1824,8 @@ service cloud.firestore {
     match /call_sessions/{sessionId} {
       allow read: if isCallSessionChatParticipant(resource.data)
         && isCallSessionChatAllowed(resource.data);
-      allow create: if isSignedIn()
-        && request.resource.data.callerId == request.auth.uid
-        && canCreateChatCallFor(request.resource.data.chatId, request.resource.data.receiverId)
-        && isValidCallSessionSeed(request.resource.data)
-        && request.resource.data.status == 'ringing'
-        && request.resource.data.callType in ['audio', 'video'];
+      // createCallSession validates the backing chat, blocks, and recipients server-side.
+      allow create: if false;
       // Allow participants to update session state (Agora join/leave signaling).
       allow update: if isCallSessionChatParticipant(resource.data)
         && isCallSessionChatAllowed(resource.data)

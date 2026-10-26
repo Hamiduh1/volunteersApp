@@ -64,6 +64,7 @@ object FunctionsClient {
         // Live Studio callables enforce App Check (parity with Go Live / iOS).
         CallableFunction.GET_AGORA_RTC_TOKEN,
         CallableFunction.CREATE_CALL_SESSION,
+        CallableFunction.CLAIM_ACCOUNT_DEVICE_SESSION,
         CallableFunction.ENSURE_DATING_ELIGIBILITY,
         CallableFunction.CREATE_LIVE_SHARE_ACCESS_LINK,
         CallableFunction.CREATE_LIVE_REPLAY_ACCESS_LINK,

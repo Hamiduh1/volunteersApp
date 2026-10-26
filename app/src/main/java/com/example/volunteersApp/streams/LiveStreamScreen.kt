@@ -249,8 +249,8 @@ fun LiveStreamScreen(
                 // The media-overlay SurfaceView draws above Compose, so it must leave composition when the
                 // stream ends or its last frame keeps "playing" over the ended summary.
                 if (!uiState.sessionEnded) {
-                    VideoRenderer(
-                        engine = viewModel.getEngine(),
+                VideoRenderer(
+                    engine = viewModel.getEngine(),
                         publishLocally = mainIsLocal,
                         remoteUid = mainRemoteUid
                     )
@@ -917,7 +917,7 @@ private fun SessionEndedOverlay(
                         }
                     }
                 }
-                if (session.isArchiveReady) {
+        if (session.isArchiveReady) {
                     if (canWatchReplay) {
                         LiveAccentButton(
                             onClick = onWatchReplay,
@@ -929,7 +929,7 @@ private fun SessionEndedOverlay(
                             Text("Watch replay", fontWeight = FontWeight.SemiBold)
                         }
                     }
-                    if (isHost) {
+            if (isHost) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 onClick = onShareReplay,
@@ -966,8 +966,8 @@ private fun SessionEndedOverlay(
                                 )
                             }
                         }
-                    }
-                } else if (session.isArchiveProcessing) {
+            }
+        } else if (session.isArchiveProcessing) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(
                             color = LiveStudioAccent,
@@ -1478,20 +1478,20 @@ private fun ChatOverlay(
                         modifier = Modifier.padding(vertical = 10.dp),
                     )
                 } else {
-                    LazyColumn(
-                        state = listState,
+        LazyColumn(
+            state = listState,
                         modifier = Modifier.heightIn(max = 184.dp),
                         verticalArrangement = Arrangement.spacedBy(7.dp),
                         reverseLayout = true,
-                    ) {
-                        items(comments.reversed(), key = { it.id }) { comment ->
+        ) {
+            items(comments.reversed(), key = { it.id }) { comment ->
                             LiveChatMessageRow(
                                 comment = comment,
                                 isHostAuthor = !hostId.isNullOrBlank() && comment.authorId == hostId,
-                                onReply = if (chatEnabled) {
-                                    { replyTo = comment }
-                                } else {
-                                    null
+                    onReply = if (chatEnabled) {
+                        { replyTo = comment }
+                    } else {
+                        null
                                 },
                                 onDelete = onDeleteComment?.let { delete -> { delete(comment) } },
                                 onHideUser = onHideUser
@@ -1511,21 +1511,21 @@ private fun ChatOverlay(
             shape = RoundedCornerShape(28.dp),
         ) {
             LiveChatComposer(
-                value = chatInput,
-                onValueChange = { chatInput = it },
-                enabled = chatEnabled,
+            value = chatInput,
+            onValueChange = { chatInput = it },
+            enabled = chatEnabled,
                 disabledPlaceholder = "Host paused chat",
                 replyingTo = replyTo?.authorName?.ifBlank { "Anonymous" },
                 onCancelReply = { replyTo = null },
-                onSend = {
-                    if (chatInput.isNotBlank()) {
-                        onSendMessage(chatInput, replyTo)
-                        chatInput = ""
-                        replyTo = null
-                    }
+            onSend = {
+                if (chatInput.isNotBlank()) {
+                    onSendMessage(chatInput, replyTo)
+                    chatInput = ""
+                    replyTo = null
+                }
                 },
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            )
+        )
         }
     }
 }
@@ -1659,17 +1659,17 @@ private fun LiveEngagementRail(
     onShareClick: () -> Unit,
     modifier: Modifier = Modifier,
     showShare: Boolean = true,
-) {
-    Column(
+    ) {
+        Column(
         modifier = modifier.padding(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
         LiveRailAction(
             icon = if (hasLiked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
             label = if (likesCount > 0L) formatCompactCount(likesCount) else "Like",
             contentDescription = if (hasLiked) "Remove like, $likesCount likes" else "Like stream, $likesCount likes",
-            onClick = onLikeClick,
+                onClick = onLikeClick,
             active = hasLiked,
         )
         LiveRailAction(
@@ -1680,8 +1680,8 @@ private fun LiveEngagementRail(
                 else -> "Chat"
             },
             contentDescription = if (chatEnabled) "Open live chat, $commentsCount messages" else "Live chat paused",
-            onClick = onCommentClick,
-        )
+                onClick = onCommentClick,
+            )
         if (showShare) {
             LiveRailAction(
                 icon = Icons.Default.Share,
@@ -1748,8 +1748,8 @@ private fun LiveCommentsBottomSheet(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
+        ) {
+            Text(
                     text = "Live chat",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
@@ -1777,10 +1777,10 @@ private fun LiveCommentsBottomSheet(
                     Text(
                         text = "The host paused live chat. You can still read the conversation.",
                         color = LiveStudioHighlightInk,
-                        style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                    )
-                }
+                )
+            }
             }
             HorizontalDivider(color = LiveStudioBorder, modifier = Modifier.padding(top = 8.dp))
             Spacer(modifier = Modifier.height(6.dp))
@@ -1804,12 +1804,12 @@ private fun LiveCommentsBottomSheet(
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
-                    LazyColumn(
-                        state = listState,
+                LazyColumn(
+                    state = listState,
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        items(comments, key = { it.id }) { item ->
+                ) {
+                    items(comments, key = { it.id }) { item ->
                             LiveChatMessageRow(
                                 comment = item,
                                 isHostAuthor = !hostId.isNullOrBlank() && item.authorId == hostId,
@@ -1847,14 +1847,14 @@ private fun LiveCommentsBottomSheet(
                 replyingTo = replyTo?.authorName?.ifBlank { "Anonymous" },
                 onCancelReply = { replyTo = null },
                 onSend = {
-                    val message = input.trim()
-                    if (message.isNotEmpty()) {
-                        onSend(message, replyTo)
-                        input = ""
-                        replyTo = null
+                            val message = input.trim()
+                            if (message.isNotEmpty()) {
+                                onSend(message, replyTo)
+                                input = ""
+                                replyTo = null
                         scope.launch {
                             if (comments.isNotEmpty()) listState.animateScrollToItem(comments.lastIndex)
-                        }
+                            }
                     }
                 },
                 modifier = Modifier,
@@ -2148,11 +2148,11 @@ private fun RequestCard(
                 )
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
+                Text(
                         text = request.volunteerName.ifBlank { "Viewer" },
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        maxLines = 1,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = LiveStudioInk,
                     )

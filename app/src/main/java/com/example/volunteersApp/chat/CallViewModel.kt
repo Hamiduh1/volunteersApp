@@ -36,7 +36,6 @@ import com.example.volunteersApp.notifications.IncomingCallNotifications
 import com.example.volunteersApp.notifications.OutgoingCallRingbackHelper
 import com.example.volunteersApp.notifications.CallRingingReceipt
 import com.example.volunteersApp.firebase.FirestoreCollection
-import com.example.volunteersApp.firebase.FirestoreSubcollection
 
 sealed class CallUiEvent {
     data class ShowError(val message: String) : CallUiEvent()
@@ -71,6 +70,7 @@ class CallViewModel(
     private var remoteJoined = false
     private val remoteUids = linkedSetOf<Int>()
     private var activeCallId: String = callId ?: UUID.randomUUID().toString()
+    private var activeAgoraChannelName: String = ""
     private var callStartAtMs: Long = 0L
     private var resolvedOtherUserId: String? = otherUserId
     private var isGroupChat: Boolean = false
@@ -209,7 +209,7 @@ class CallViewModel(
         IncomingCallNotifications.dismiss(context.applicationContext, activeCallId, chatId)
         viewModelScope.launch {
             try {
-                updateCallSessionStatus("declined")
+                CallSessionRepository.declineIncomingSession(activeCallId)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to decline incoming call", e)
             } finally {
@@ -230,13 +230,13 @@ class CallViewModel(
                     step = "acceptCallSession"
                     acceptIncomingCallSessionIfNeeded()
                 }
-                step = "initializeAgora"
-                initializeAgora(context.applicationContext)
                 if (isCaller) {
                     step = "createCallSession"
                     createCallSession()
                     createdSessionThisAttempt = true
                 }
+                step = "initializeAgora"
+                initializeAgora(context.applicationContext)
                 step = "listenSessionMeta"
                 attachCallSessionMetadataListener()
                 step = "joinChannel"
@@ -309,35 +309,8 @@ class CallViewModel(
         }
 
         val participantIds = (snapshot.get("participantIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
-        val isGroupSession = snapshot.getBoolean("isGroup") == true || participantIds.size > 2
-        val callerId = snapshot.getString("callerId").orEmpty()
-        val sessionChatId = snapshot.getString("chatId").orEmpty().ifBlank { chatId }
-
-        val updates = mutableMapOf<String, Any>(
-            "acceptedParticipantIds" to FieldValue.arrayUnion(selfId),
-            "declinedParticipantIds" to FieldValue.arrayRemove(selfId),
-            "endedParticipantIds" to FieldValue.arrayRemove(selfId),
-            "updatedAt" to FieldValue.serverTimestamp()
-        )
-        if (!isGroupSession) {
-            updates["status"] = "accepted"
-        }
-
-        sessionRef.update(updates).await()
-
-        if (isGroupSession && sessionChatId.isNotBlank()) {
-            db.collection(FirestoreCollection.CHATS).document(sessionChatId)
-                .update(
-                    mapOf(
-                        "lastCallType" to callType.name.lowercase(),
-                        "lastCallStatus" to "accepted",
-                        "lastCallTimestamp" to FieldValue.serverTimestamp(),
-                        "lastCallInitiatorId" to callerId,
-                        "lastCallReceiverId" to selfId
-                    )
-                )
-                .await()
-        }
+        if (selfId !in participantIds) return
+        CallSessionRepository.acceptIncomingSession(activeCallId)
     }
 
     private suspend fun prepareCallContext() {
@@ -577,7 +550,7 @@ class CallViewModel(
     private suspend fun joinChannel() {
         // Must stay ≤ 64 chars for getAgoraRtcToken Cloud Function. Using the Firestore call session id
         // (caller's UUID or callee's session.id) keeps a unique channel per ring and matches Accept flow.
-        val channelName = "call_$activeCallId"
+        val channelName = activeAgoraChannelName.ifBlank { "call_$activeCallId" }
         val firebaseUid = currentUser?.uid ?: throw IllegalStateException("You must be logged in.")
         val localUid = stableAgoraUid(firebaseUid)
         val token = getProductionToken(channelName, "publisher", localUid)
@@ -633,7 +606,7 @@ class CallViewModel(
 
     private suspend fun renewAgoraToken() {
         val firebaseUid = currentUser?.uid ?: return
-        val channelName = "call_$activeCallId"
+        val channelName = activeAgoraChannelName.ifBlank { "call_$activeCallId" }
         runCatching {
             getProductionToken(channelName, "publisher", stableAgoraUid(firebaseUid))
         }.onSuccess { token ->
@@ -652,30 +625,24 @@ class CallViewModel(
     }
 
     private suspend fun createCallSession() {
-        val callerId = currentUser?.uid ?: return
         val receiverId = resolvedOtherUserId.orEmpty()
         if (!isGroupChat && receiverId.isBlank()) {
             throw IllegalStateException("A valid recipient is required before placing a call.")
         }
-        val participantIdsForSession = if (isGroupChat) {
-            (listOf(callerId) + sessionParticipants).distinct()
+        val invitedParticipantIds = if (isGroupChat) {
+            sessionParticipants
         } else {
-            listOf(callerId, receiverId).filter { it.isNotBlank() }.distinct()
+            listOf(receiverId)
         }
-        val response = FunctionsClient.callMap(
-            CallableFunction.CREATE_CALL_SESSION,
-            hashMapOf(
-                "chatId" to chatId,
-                "sessionId" to activeCallId,
-                "receiverId" to receiverId,
-                "participantIds" to participantIdsForSession,
-                "callType" to callType.name.lowercase(),
-            )
-        ) ?: throw IllegalStateException("The call service returned no session.")
-        val returnedSessionId = response["sessionId"] as? String
-        if (returnedSessionId != activeCallId) {
-            throw IllegalStateException("The call service returned an unexpected session.")
-        }
+        val created = CallSessionRepository.createOutgoingSession(
+            chatId = chatId,
+            requestedSessionId = activeCallId,
+            receiverId = receiverId,
+            invitedParticipantIds = invitedParticipantIds,
+            callType = callType,
+        )
+        activeCallId = created.sessionId
+        activeAgoraChannelName = created.agoraChannelName
     }
 
     private suspend fun ensureCallFirestoreWritePreflight() {
@@ -693,40 +660,6 @@ class CallViewModel(
                     "debug token for this build in Firebase Console, then restart the app."
             )
         }
-    }
-
-    private suspend fun createCallLog() {
-        val callerId = currentUser?.uid ?: return
-        val receiverId = resolvedOtherUserId.orEmpty()
-        val logRef = db.collection(FirestoreCollection.CHATS).document(chatId)
-            .collection(FirestoreSubcollection.CALL_LOGS).document(activeCallId)
-        callStartAtMs = System.currentTimeMillis()
-
-        val logData = hashMapOf(
-            "chatId" to chatId,
-            "callerId" to callerId,
-            "receiverId" to receiverId,
-            "participantIds" to (listOf(callerId) + sessionParticipants).distinct(),
-            "isGroupCall" to isGroupChat,
-            "groupName" to groupName,
-            "callType" to callType.name.lowercase(),
-            "status" to "ringing",
-            "startedAt" to FieldValue.serverTimestamp()
-        )
-
-        db.runBatch { batch ->
-            batch.set(logRef, logData)
-            batch.update(
-                db.collection(FirestoreCollection.CHATS).document(chatId),
-                mapOf(
-                    "lastCallType" to callType.name.lowercase(),
-                    "lastCallStatus" to "ringing",
-                    "lastCallTimestamp" to FieldValue.serverTimestamp(),
-                    "lastCallInitiatorId" to callerId,
-                    "lastCallReceiverId" to receiverId
-                )
-            )
-        }.await()
     }
 
     fun toggleAudio() {
@@ -757,10 +690,7 @@ class CallViewModel(
         callHasFinished = true
         viewModelScope.launch {
             try {
-                updateCallSessionStatus("ended")
-                if (!(isGroupChat && !isCaller)) {
-                    updateCallLog()
-                }
+                CallSessionRepository.endSession(activeCallId, isGroupChat, isCaller)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to update call log", e)
             } finally {
@@ -768,55 +698,6 @@ class CallViewModel(
                 _events.value = CallUiEvent.EndCall
             }
         }
-    }
-
-    private suspend fun updateCallLog() {
-        val selfId = currentUser?.uid ?: return
-        val callerId = if (isCaller) selfId else (resolvedOtherUserId ?: "")
-        val receiverId = if (isCaller) (resolvedOtherUserId ?: "") else selfId
-        val status = if (remoteJoined) "completed" else "missed"
-        val duration = if (callStartAtMs > 0) (System.currentTimeMillis() - callStartAtMs) / 1000 else 0L
-        val logRef = db.collection(FirestoreCollection.CHATS).document(chatId)
-            .collection(FirestoreSubcollection.CALL_LOGS).document(activeCallId)
-
-        db.runBatch { batch ->
-            batch.update(
-                logRef,
-                mapOf(
-                    "status" to status,
-                    "endedAt" to FieldValue.serverTimestamp(),
-                    "durationSeconds" to duration,
-                    "participantIds" to (listOf(selfId) + sessionParticipants).distinct(),
-                    "isGroupCall" to isGroupChat,
-                    "groupName" to groupName
-                )
-            )
-            batch.update(
-                db.collection(FirestoreCollection.CHATS).document(chatId),
-                mapOf(
-                    "lastCallType" to callType.name.lowercase(),
-                    "lastCallStatus" to status,
-                    "lastCallTimestamp" to FieldValue.serverTimestamp(),
-                    "lastCallInitiatorId" to callerId,
-                    "lastCallReceiverId" to receiverId
-                )
-            )
-        }.await()
-    }
-
-    private suspend fun updateCallSessionStatus(status: String) {
-        val selfId = currentUser?.uid ?: return
-        val updates = mutableMapOf<String, Any>(
-            "updatedAt" to FieldValue.serverTimestamp(),
-            "endedParticipantIds" to FieldValue.arrayUnion(selfId)
-        )
-
-        if (!isGroupChat || isCaller) {
-            updates["status"] = status
-        }
-
-        db.collection(FirestoreCollection.CALL_SESSIONS).document(activeCallId).update(updates).await()
-        // onCallSessionUpdated clears recipient mirrors after the terminal status is committed.
     }
 
     private fun startCallActivityHeartbeat() {
@@ -842,15 +723,7 @@ class CallViewModel(
     private suspend fun closeFailedOutgoingSession(createdSessionThisAttempt: Boolean) {
         if (!createdSessionThisAttempt || activeCallId.isBlank()) return
         runCatching {
-            db.collection(FirestoreCollection.CALL_SESSIONS).document(activeCallId).update(
-                mapOf(
-                    "status" to "ended",
-                    "endedAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp(),
-                    "endedBy" to (currentUser?.uid ?: ""),
-                    "endReason" to "caller_setup_failed",
-                )
-            ).await()
+            CallSessionRepository.endSession(activeCallId, isGroupChat, isCaller)
         }.onFailure { error ->
             Log.w(TAG, "Unable to close failed call session $activeCallId", error)
         }

@@ -101,6 +101,7 @@ object FirestoreCollectionGroup {
 object CallableFunction {
     const val GET_AGORA_RTC_TOKEN = "getAgoraRtcToken"
     const val CREATE_CALL_SESSION = "createCallSession"
+    const val CLAIM_ACCOUNT_DEVICE_SESSION = "claimAccountDeviceSession"
     const val REQUEST_EMAIL_VERIFICATION_CODE = "requestEmailVerificationCode"
     const val VERIFY_EMAIL_VERIFICATION_CODE = "verifyEmailVerificationCode"
     const val BOOTSTRAP_OWNER_SELF = "bootstrapOwnerSelf"
