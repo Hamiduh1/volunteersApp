@@ -2037,8 +2037,9 @@ service cloud.firestore {
         && request.resource.data.status == 'ringing'
         && request.resource.data.callType in ['audio', 'video'];
       // Allow participants to update session state (Agora join/leave signaling).
+      // isCallSessionChatParticipant already requires the chat to exist and not be blocked; repeating
+      // isCallSessionChatAllowed here pushed hang-up/decline updates past the rules evaluation budget.
       allow update: if isCallSessionChatParticipant(resource.data)
-        && isCallSessionChatAllowed(resource.data)
         && isCallSessionStatePatch();
       allow delete: if false;
     }
