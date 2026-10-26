@@ -1231,6 +1231,7 @@ fun AddCardDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
     var isSaving by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val cardFundingSetup = rememberCardFundingSetupFlow(viewModel)
     val scrollState = rememberScrollState()
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1298,11 +1299,13 @@ fun AddCardDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                 )
 
                 isSaving = true
+                val linkWithLegacyToken: () -> Unit = legacy@{
                 val stripe = try {
                     createStripeClient(context)
                 } catch (e: IllegalArgumentException) {
                     Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
-                    return@Button
+                    isSaving = false
+                    return@legacy
                 }
                 stripe.createCardToken(
                     cardParams = params,
@@ -1338,6 +1341,22 @@ fun AddCardDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     }
                     }
                 )
+                }
+                cardFundingSetup.start(
+                    cardParams = params,
+                    cardholderName = name,
+                    onLegacyFallback = linkWithLegacyToken
+                ) { saveResult ->
+                    Toast.makeText(
+                        context,
+                        saveResult.message,
+                        if (saveResult.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                    ).show()
+                    isSaving = false
+                    if (saveResult.success) {
+                        onSaved()
+                    }
+                }
             }) {
                 if (isSaving) {
                     CircularProgressIndicator(

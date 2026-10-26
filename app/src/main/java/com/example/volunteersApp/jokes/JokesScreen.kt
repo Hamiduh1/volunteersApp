@@ -20,6 +20,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -130,6 +131,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -793,10 +795,23 @@ fun PostJokeScreen(
     var text by remember { mutableStateOf("") }
     var mediaUri by remember { mutableStateOf<Uri?>(null) }
     var mediaType by remember { mutableStateOf(JokeType.TEXT) }
+    var attachmentInfo by remember { mutableStateOf<MindLoomAttachmentInfo?>(null) }
+    val context = LocalContext.current
+
+    LaunchedEffect(mediaUri, mediaType) {
+        attachmentInfo = null
+        val selectedUri = mediaUri ?: return@LaunchedEffect
+        attachmentInfo = loadMindLoomAttachmentInfo(context, selectedUri, mediaType)
+    }
+    val attachmentLimitError = if (mediaUri != null) {
+        mindLoomAttachmentLimitError(context, mediaType, attachmentInfo)
+    } else {
+        null
+    }
 
     val uiState by viewModel.uiState.collectAsState()
     val isPosting = uiState.isPosting
-    val canPost = (text.trim().isNotEmpty() || mediaUri != null) && !isPosting
+    val canPost = (text.trim().isNotEmpty() || mediaUri != null) && !isPosting && attachmentLimitError == null
     val config = LocalConfiguration.current
     val isCompact = config.screenWidthDp < 360 || config.screenHeightDp < 640
     val horizontalPad = if (isCompact) 12.dp else 16.dp
@@ -881,8 +896,15 @@ fun PostJokeScreen(
                                 modifier = Modifier.size(22.dp),
                                 strokeWidth = 2.dp,
                             )
+                            if (mediaUri != null) {
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Uploading ${mediaType.mindLoomAttachmentNoun()}…",
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
                         } else {
-                            Text("Share", fontWeight = FontWeight.Bold)
+                            Text("Post", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -941,6 +963,8 @@ fun PostJokeScreen(
                         MindLoomAttachmentPreview(
                             mediaUri = selectedUri,
                             mediaType = mediaType,
+                            info = attachmentInfo,
+                            limitError = attachmentLimitError,
                             maxPreviewHeight = previewMaxHeight,
                             onRemove = {
                                 mediaUri = null
@@ -981,6 +1005,12 @@ fun PostJokeScreen(
                         compact = isCompact,
                     ) { documentPicker.launch("application/pdf") }
                 }
+
+                Text(
+                    text = "Photos up to 15 MB · Videos up to 200 MB · PDFs up to 25 MB",
+                    color = muted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -1028,9 +1058,12 @@ private fun MindLoomComposerAttachmentButton(
 private fun MindLoomAttachmentPreview(
     mediaUri: Uri,
     mediaType: JokeType,
+    info: MindLoomAttachmentInfo? = null,
+    limitError: String? = null,
     maxPreviewHeight: Dp = 180.dp,
     onRemove: () -> Unit
 ) {
+    val context = LocalContext.current
     val title = when (mediaType) {
         JokeType.IMAGE -> "Photo attached"
         JokeType.VIDEO -> "Video attached"
@@ -1050,28 +1083,73 @@ private fun MindLoomAttachmentPreview(
     val ink = Color(0xFF0A0A0A)
     val muted = Color(0xFF737373)
     val accent = Color(0xFF0095F6)
+    val errorTint = Color(0xFFD32F2F)
+    val fileName = info?.displayName
+    val details = mindLoomAttachmentDetails(context, mediaType, info)
+    val videoThumbnail = remember(info?.thumbnail) { info?.thumbnail?.asImageBitmap() }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFFF0F0F0))
-            .border(1.dp, Color(0xFFE0E0E0), RoundedCornerShape(14.dp))
-    ) {
-        if (mediaType == JokeType.IMAGE) {
-            AsyncImage(
-                model = mediaUri,
-                contentDescription = "Selected image",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(maxPreviewHeight),
-                contentScale = ContentScale.Crop
+            .border(
+                1.dp,
+                if (limitError != null) errorTint else Color(0xFFE0E0E0),
+                RoundedCornerShape(14.dp)
             )
-        } else {
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            if (mediaType == JokeType.IMAGE) {
+                AsyncImage(
+                    model = mediaUri,
+                    contentDescription = "Selected photo",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(maxPreviewHeight),
+                    contentScale = ContentScale.Crop
+                )
+            } else if (mediaType == JokeType.VIDEO && videoThumbnail != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(maxPreviewHeight)
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        bitmap = videoThumbnail,
+                        contentDescription = "Selected video",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                    Icon(
+                        Icons.Default.PlayCircle,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.92f),
+                        modifier = Modifier.size(52.dp)
+                    )
+                    info?.durationMs?.let { durationMs ->
+                        Text(
+                            text = mindLoomFormatDuration(durationMs),
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(10.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color.Black.copy(alpha = 0.6f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .background(Color.White)
+                    .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 52.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -1086,20 +1164,31 @@ private fun MindLoomAttachmentPreview(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = title,
+                        text = fileName ?: title,
                         color = ink,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = mediaUri.lastPathSegment ?: "Ready to upload",
+                        text = details,
                         color = muted,
                         style = MaterialTheme.typography.labelSmall,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+            }
+            if (limitError != null) {
+                Text(
+                    text = limitError,
+                    color = errorTint,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White)
+                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+                )
             }
         }
 
@@ -1870,6 +1959,7 @@ fun FullScreenJokeView(
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
+    val postSharer = rememberMindLoomPostSharer()
     val homeUiState by viewModel.uiState.collectAsState()
     val invitationAlreadySent = homeUiState.sentInvitationUserIds.contains(joke.authorId.trim())
     var showComments by remember { mutableStateOf(false) }
@@ -2206,16 +2296,12 @@ fun FullScreenJokeView(
             )
             MindLoomRailAction(
                 icon = Icons.AutoMirrored.Filled.Send,
-                label = "Share",
-                active = false,
+                label = if (postSharer.isPreparing(joke)) "Sharing" else "Share",
+                active = postSharer.isPreparing(joke),
                 activeTint = MindLoomAccent,
                 onClick = {
                     onChromeIdleBump()
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT, "${joke.authorName}: ${joke.text}")
-                    }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share post"))
+                    postSharer.share(joke)
                 }
             )
             if (!isOwner) {

@@ -392,6 +392,7 @@ fun MindLoomFeedPostCard(
 ) {
     val haptics = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
+    val postSharer = rememberMindLoomPostSharer()
     var likeInFlight by remember(joke.mindLoomStableRowId()) { mutableStateOf(false) }
     var isLiked by remember(joke.mindLoomStableRowId()) { mutableStateOf(currentUserId != null && joke.likes.contains(currentUserId)) }
     var likesCount by remember(joke.mindLoomStableRowId()) { mutableStateOf(joke.likesCount) }
@@ -652,23 +653,23 @@ fun MindLoomFeedPostCard(
                     )
                 }
                 IconButton(
-                    onClick = {
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, joke.mindLoomShareText())
-                        }
-                        runCatching {
-                            context.startActivity(Intent.createChooser(send, "Share post"))
-                        }
-                    },
+                    onClick = { postSharer.share(joke) },
                     modifier = Modifier.size(40.dp)
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Share",
-                        tint = MindLoomTextPrimary,
-                        modifier = Modifier.size(26.dp)
-                    )
+                    if (postSharer.isPreparing(joke)) {
+                        CircularProgressIndicator(
+                            color = MindLoomTextPrimary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    } else {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Share",
+                            tint = MindLoomTextPrimary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
                 }
                 if (!isOwner && currentUserId != null) {
                     Text(

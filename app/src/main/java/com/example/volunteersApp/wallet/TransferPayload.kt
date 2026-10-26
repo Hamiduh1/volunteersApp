@@ -19,9 +19,18 @@ data class RecipientBeneficiaryPayload(
     val recipientAddress: String? = null,
     val bankAddress: String? = null,
     val invoiceReference: String? = null,
+    /** Bank rails only: BANK_ACCOUNT or SWIFT_BANK. */
+    val type: String? = null,
+    /** Bank rails only: the provider channel, BANK_ACCOUNT or SWIFT. */
+    val route: String? = null,
 ) {
     fun toMap(): Map<String, Any> = buildMap {
         id?.takeIf { it.isNotBlank() }?.let { put("id", it) }
+        type?.takeIf { it.isNotBlank() }?.let { put("type", it) }
+        route?.takeIf { it.isNotBlank() }?.let { channel ->
+            put("route", channel)
+            put("afriexPayoutRoute", channel)
+        }
         put("name", name)
         put("accountNumber", accountNumber)
         bankCode?.takeIf { it.isNotBlank() }?.let { put("bankCode", it) }
@@ -94,10 +103,13 @@ data class InitiateTransferPayload(
     // Display/audit context only. Functions re-validates the protected quote by quoteId.
     val localQuote: WalletTransferQuote? = null,
     val reuseSavedRecipientVerification: Boolean? = null,
+    /** Idempotency key (^[A-Za-z0-9_-]{16,80}$) reused across retries of the same send. */
+    val clientRequestId: String? = null,
 ) {
     fun toMap(): Map<String, Any> = buildMap {
         put("amount", amount)
         put("fundingSourceType", fundingSourceType)
+        clientRequestId?.trim()?.takeIf { it.isNotBlank() }?.let { put("clientRequestId", it) }
         destinationType?.takeIf { it.isNotBlank() }?.let { put("destinationType", it) }
         destinationRoute?.takeIf { it.isNotBlank() }?.let { put("destinationRoute", it) }
         sendLane?.takeIf { it.isNotBlank() }?.let { put("sendLane", it) }

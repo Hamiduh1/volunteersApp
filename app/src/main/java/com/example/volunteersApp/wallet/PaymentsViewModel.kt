@@ -653,6 +653,56 @@ class PaymentsViewModel : ViewModel() {
             ?: throw IllegalStateException("Bank setup client secret was not returned.")
     }
 
+    suspend fun createCardFundingSetupIntent(): CardFundingSetupIntent {
+        val rawMap = FunctionsClient.callMap(CallableFunction.CREATE_CARD_FUNDING_SETUP_INTENT, emptyMap<String, Any>())
+            ?: throw IllegalStateException("No response from server.")
+        val resultMap = unwrapCallableData(rawMap) ?: rawMap
+        val setupIntentId = readString(resultMap, listOf("setupIntentId"))
+            ?: throw IllegalStateException("Could not initialize card verification.")
+        val clientSecret = readString(resultMap, listOf("clientSecret"))
+            ?: throw IllegalStateException("Could not initialize card verification.")
+        return CardFundingSetupIntent(setupIntentId = setupIntentId, clientSecret = clientSecret)
+    }
+
+    fun cardRelinkCandidateId(last4: String, expMonth: Int, expYear: Int): String? {
+        val existing = findExistingMatchingMethod(
+            mapOf("type" to "CARD", "last4" to last4, "expiryDate" to "$expMonth/$expYear")
+        ) ?: return null
+        return existing.id.takeIf { canReuseExistingMethodForRelink(existing) }
+    }
+
+    suspend fun saveCardFundingMethod(
+        setupIntentId: String,
+        isDefault: Boolean,
+        replacingPaymentMethodId: String?
+    ): PaymentMethodActionResult {
+        val payload = mutableMapOf<String, Any>(
+            "setupIntentId" to setupIntentId,
+            "isDefault" to isDefault
+        )
+        replacingPaymentMethodId?.trim()?.takeIf { it.isNotBlank() }?.let {
+            payload["replacingPaymentMethodId"] = it
+        }
+        return try {
+            val rawMap = FunctionsClient.callMap(CallableFunction.SAVE_CARD_FUNDING_METHOD, payload)
+                ?: throw IllegalStateException("No response from server.")
+            val resultMap = unwrapCallableData(rawMap) ?: rawMap
+            val paymentMethodId = readString(resultMap, listOf("paymentMethodId", "id"))
+                ?: throw IllegalStateException("Verified card could not be saved.")
+            PaymentMethodActionResult(
+                success = true,
+                message = readString(resultMap, listOf("message")) ?: "Card verified and saved.",
+                paymentMethodId = paymentMethodId
+            )
+        } catch (e: Exception) {
+            Log.e("PaymentsVM", "saveCardFundingMethod failed", e)
+            PaymentMethodActionResult(
+                success = false,
+                message = toUserMessage(e, "Verified card could not be saved.")
+            )
+        }
+    }
+
     suspend fun addUsBankAccountFromFinancialConnections(
         stripePaymentMethodId: String,
         label: String,
@@ -1193,6 +1243,11 @@ enum class StripeConnectCommerceService(
     ORGANIZER_EARNINGS("ORGANIZER_EARNINGS", "Organizer earnings"),
     OTHER_IN_APP_COMMERCE("OTHER_IN_APP_COMMERCE", "Other in-app commerce"),
 }
+
+data class CardFundingSetupIntent(
+    val setupIntentId: String,
+    val clientSecret: String
+)
 
 data class PaymentMethodActionResult(
     val success: Boolean,

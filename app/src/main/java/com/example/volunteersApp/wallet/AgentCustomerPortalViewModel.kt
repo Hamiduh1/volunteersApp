@@ -198,7 +198,7 @@ class AgentCustomerPortalViewModel : ViewModel() {
             return
         }
 
-        val amount = current.amountInput.toDoubleOrNull()
+        val amount = WalletAmountParser.parseOrNull(current.amountInput)
         if (amount == null || amount <= 0.0) {
             _uiState.update { reduce(it.copy(error = "Enter a valid withdrawal amount.")) }
             return
@@ -455,7 +455,7 @@ class AgentCustomerPortalViewModel : ViewModel() {
             return
         }
 
-        val amount = current.amountInput.toDoubleOrNull()
+        val amount = WalletAmountParser.parseOrNull(current.amountInput)
         if (amount == null || amount <= 0.0) {
             _uiState.update { reduce(it.copy(error = "Enter a valid deposit amount.")) }
             return
@@ -523,7 +523,7 @@ class AgentCustomerPortalViewModel : ViewModel() {
     }
 
     private fun reduce(state: AgentCustomerPortalUiState): AgentCustomerPortalUiState {
-        val amount = state.amountInput.toDoubleOrNull() ?: 0.0
+        val amount = WalletAmountParser.parse(state.amountInput)
         val localDigits = normalizeLocalPhoneDigits(state.localPhoneInput, state.dialCode)
         val canLookup = state.selectedCountry.isNotBlank() &&
             state.selectedNetwork.isNotBlank() &&
@@ -548,7 +548,8 @@ class AgentCustomerPortalViewModel : ViewModel() {
     }
 
     private fun normalizeAmountInput(rawInput: String): String {
-        val filtered = rawInput.filter { it.isDigit() || it == '.' }
+        // Comma-decimal keyboards type "12,50"; dropping the comma would turn it into 1250.
+        val filtered = rawInput.replace(',', '.').filter { it.isDigit() || it == '.' }
         val firstDot = filtered.indexOf('.')
         if (firstDot < 0) return filtered
         val whole = filtered.substring(0, firstDot)

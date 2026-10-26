@@ -265,7 +265,9 @@ class WalletViewModel : ViewModel() {
             delay(300) // Debounce
 
             val currentState = _uiState.value
-            val amountValue = currentState.calculatorAmount.toDoubleOrNull()
+            val amountValue = currentState.calculatorAmount
+                .takeIf { it.isNotBlank() }
+                ?.let { WalletAmountParser.parse(it) }
             val fromCode = currencyMap[currentState.calculatorFromCountry]
             val toCode = currencyMap[currentState.calculatorToCountry]
 

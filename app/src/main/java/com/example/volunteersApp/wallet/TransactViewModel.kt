@@ -42,6 +42,28 @@ enum class DestinationType {
 // Functions prices and charges Send Money against the USD settlement ledger.
 private const val SEND_MONEY_CHARGE_CURRENCY = "USD"
 
+private const val TRANSFER_OUTCOME_UNKNOWN_MESSAGE =
+    "We couldn't confirm whether this transfer went through. Check Activity for its status before sending again."
+
+private data class PendingTransferRequest(val fingerprint: String, val id: String)
+
+/** A timeout or dropped connection may hide a send that already reached the server. */
+internal fun isTransferOutcomeUnknown(error: Throwable): Boolean {
+    var current: Throwable? = error
+    while (current != null) {
+        if (
+            current is com.google.firebase.functions.FirebaseFunctionsException &&
+            (current.code == com.google.firebase.functions.FirebaseFunctionsException.Code.DEADLINE_EXCEEDED ||
+                current.code == com.google.firebase.functions.FirebaseFunctionsException.Code.UNAVAILABLE)
+        ) {
+            return true
+        }
+        if (current is java.io.IOException) return true
+        current = current.cause
+    }
+    return false
+}
+
 data class TransferCompletion(
     val success: Boolean,
     val message: String,
@@ -193,6 +215,12 @@ class TransactViewModel : ViewModel() {
     // Institution results must match the country and rail currently shown.
     private var mobileInstitutionCatalogRequestVersion = 0L
     private var bankInstitutionCatalogRequestVersion = 0L
+    /**
+     * Idempotency key for the send being attempted. Retries of the same send (same
+     * recipient, typed amount and funding) reuse it so the server returns the original
+     * transfer instead of paying out twice after a lost response.
+     */
+    private var pendingTransferRequest: PendingTransferRequest? = null
 
 
     // --- EXPANDED: Africa Gateway Data ---
@@ -1396,6 +1424,14 @@ class TransactViewModel : ViewModel() {
         return !beneficiary.hasReusableProviderVerificationProof()
     }
 
+    /** Same wording as iOS for a recipient that cannot be quoted or paid yet. */
+    fun unverifiedBeneficiaryMessage(beneficiary: Beneficiary): String =
+        if (afriexBeneficiaryDestinationRoute(beneficiary.type) == "MOBILE_MONEY") {
+            "This mobile money recipient needs verification. Review and verify the number and network before requesting a quote or sending money."
+        } else {
+            "This bank recipient needs verification. Review and verify the account and network before requesting a quote or sending money."
+        }
+
     /**
      * Upgrades an older saved recipient in place through the server (shared with iOS) instead of
      * forcing the sender to add it again. The server returns its stored proof unchanged when it is
@@ -2139,6 +2175,8 @@ class TransactViewModel : ViewModel() {
         destinationType: DestinationType,
         recipientMethod: PaymentMethod?,
         sendLane: String? = null,
+        /** The amount exactly as typed; keeps the idempotency key stable across quote refreshes. */
+        amountText: String? = null,
         onComplete: (TransferCompletion) -> Unit
     ) {
         if (recipient !is User && recipient !is Beneficiary) {
@@ -2176,17 +2214,7 @@ class TransactViewModel : ViewModel() {
             return
         }
         if (recipient is Beneficiary && requiresBeneficiaryReRegistration(recipient)) {
-            val routeLabel = when (afriexBeneficiaryDestinationRoute(recipient.type)) {
-                "BANK" -> "local bank"
-                "SWIFT" -> "SWIFT bank"
-                else -> "mobile money"
-            }
-            onComplete(
-                TransferCompletion(
-                    false,
-                    "This saved $routeLabel recipient needs to be added again with the current verification flow before sending."
-                )
-            )
+            onComplete(TransferCompletion(false, unverifiedBeneficiaryMessage(recipient)))
             return
         }
         if (!amount.isFinite() || amount <= 0) {
@@ -2406,6 +2434,16 @@ class TransactViewModel : ViewModel() {
                 recipientAddress = recipient.recipientAddress?.trim()?.takeIf { it.isNotBlank() },
                 bankAddress = recipient.bankAddress?.trim()?.takeIf { it.isNotBlank() },
                 invoiceReference = recipient.invoiceReference?.trim()?.takeIf { it.isNotBlank() },
+                type = when (afriexBeneficiaryDestinationRoute(recipient.type)) {
+                    "SWIFT" -> "SWIFT_BANK"
+                    "BANK" -> "BANK_ACCOUNT"
+                    else -> null
+                },
+                route = when (afriexBeneficiaryDestinationRoute(recipient.type)) {
+                    "SWIFT" -> "SWIFT"
+                    "BANK" -> "BANK_ACCOUNT"
+                    else -> null
+                },
             )
         } else {
             null
@@ -2423,7 +2461,10 @@ class TransactViewModel : ViewModel() {
         val basePayload = InitiateTransferPayload(
             amount = amount,
             fundingSourceType = fundingSourceType,
-            destinationType = destinationType.name,
+            // Beneficiary sends name the delivery rail (MOBILE_MONEY, BANK or SWIFT), like iOS.
+            destinationType = (recipient as? Beneficiary)
+                ?.let { afriexBeneficiaryDestinationRoute(it.type) }
+                ?: destinationType.name,
             destinationRoute = when {
                 recipient is User -> "APP_USER"
                 recipient is Beneficiary -> afriexBeneficiaryDestinationRoute(recipient.type)
@@ -2431,7 +2472,8 @@ class TransactViewModel : ViewModel() {
                 else -> destinationType.name
             },
             sendLane = resolvedSendLane,
-            recipientId = (recipient as? User)?.uid,
+            recipientId = (recipient as? User)?.uid
+                ?: (recipient as? Beneficiary)?.id?.trim()?.takeIf { it.isNotEmpty() },
             recipientCountry = (recipient as? Beneficiary)?.country
                 ?.takeIf { it.isNotBlank() }
                 ?: _uiState.value.recipientCountry?.takeIf { it.isNotBlank() },
@@ -2542,6 +2584,7 @@ class TransactViewModel : ViewModel() {
         }
 
         viewModelScope.launch {
+            var sendCallStarted = false
             try {
                 if (!ensureFirebaseReady()) {
                     onComplete(TransferCompletion(false, "Authentication is still syncing. Please try again in a moment."))
@@ -2670,15 +2713,29 @@ class TransactViewModel : ViewModel() {
                     return@launch
                 }
 
+                val clientRequestId = transferRequestId(
+                    listOf(
+                        destinationType.name,
+                        (recipient as? User)?.uid?.trim().orEmpty(),
+                        recipientPaymentMethodId.orEmpty(),
+                        (recipient as? Beneficiary)?.id?.trim().orEmpty(),
+                        amountText?.trim()?.takeIf { it.isNotEmpty() } ?: amount.toString(),
+                        SEND_MONEY_CHARGE_CURRENCY,
+                        committedFundingSourceType,
+                        fundingPaymentMethodId.orEmpty(),
+                    ).joinToString("|")
+                )
                 val finalPayload = basePayload.copy(
                     fundingSourceType = committedFundingSourceType,
                     beneficiaryVerificationId = beneficiaryVerificationId,
                     recipientPaymentMethodId = recipientPaymentMethodId,
                     recipientExternalAccountId = recipientExternalAccountId,
                     fundingPaymentMethodId = fundingPaymentMethodId,
-                    prioritizeExternalFunding = if (fundingPaymentMethodId != null) true else null
+                    prioritizeExternalFunding = if (fundingPaymentMethodId != null) true else null,
+                    clientRequestId = clientRequestId,
                 )
 
+                sendCallStarted = true
                 val resultMap = FunctionsClient.callMap(
                     if (recipient is User) {
                         CallableFunction.SEND_TO_APP_USER
@@ -2687,6 +2744,7 @@ class TransactViewModel : ViewModel() {
                     },
                     finalPayload.toMap()
                 )
+                pendingTransferRequest = null
                 val committedBalance = (resultMap?.get("senderNewBalance") as? Number)?.toDouble()
                 if (committedBalance != null) {
                     _uiState.update { it.copy(currentBalance = committedBalance) }
@@ -2712,6 +2770,14 @@ class TransactViewModel : ViewModel() {
                 )
             } catch (e: Exception) {
                 Log.e("TransactVM", "Cloud Function 'initiateTransfer' failed", e)
+                if (sendCallStarted && isTransferOutcomeUnknown(e)) {
+                    // The send may have reached the server and paid out without a response.
+                    // Never invite a blind retry; the kept clientRequestId makes a retry safe.
+                    clearTransferQuote()
+                    refresh()
+                    onComplete(TransferCompletion(false, TRANSFER_OUTCOME_UNKNOWN_MESSAGE))
+                    return@launch
+                }
                 when (val failure = classifyWalletTransferFailure(e)) {
                     is WalletTransferFailure.ProviderBlocked -> {
                         val summary = buildTransferSupportSummary(
@@ -2753,6 +2819,14 @@ class TransactViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    /** Reuses the pending id while the send is unchanged; a different send gets a new UUID. */
+    private fun transferRequestId(fingerprint: String): String {
+        pendingTransferRequest?.takeIf { it.fingerprint == fingerprint }?.let { return it.id }
+        val id = java.util.UUID.randomUUID().toString()
+        pendingTransferRequest = PendingTransferRequest(fingerprint, id)
+        return id
     }
 
     /**
@@ -3677,6 +3751,8 @@ class TransactViewModel : ViewModel() {
 
     fun saveBeneficiaryIfNeeded(
         beneficiary: Beneficiary,
+        /** True when re-verified details replace an existing saved recipient (iOS edit flow). */
+        replaceExisting: Boolean = false,
         onComplete: ((Beneficiary?, String?) -> Unit)? = null,
     ) {
         viewModelScope.launch {
@@ -3705,7 +3781,13 @@ class TransactViewModel : ViewModel() {
                     "accountNumber" to beneficiary.accountNumber,
                     "institutionCode" to beneficiary.institutionCode,
                     "swiftCode" to beneficiary.swiftCode,
-                    "routingCode" to beneficiary.routingCode,
+                    // US local banks use the institution code as the ABA routing code.
+                    "routingCode" to (
+                        beneficiary.routingCode?.takeIf { it.isNotBlank() }
+                            ?: beneficiary.institutionCode?.takeIf {
+                                route == "BANK" && normalizeGlobalCountryIso(beneficiary.country) == "US"
+                            }
+                        ),
                     "recipientEmail" to beneficiary.recipientEmail,
                     "recipientAddress" to beneficiary.recipientAddress,
                     "bankAddress" to beneficiary.bankAddress,
@@ -3723,10 +3805,11 @@ class TransactViewModel : ViewModel() {
                 val result = when {
                     isApprovedMobileRegistration -> FunctionsClient.callMap(
                         CallableFunction.APPLY_APPROVED_BENEFICIARY_VERIFICATION,
-                        mapOf(
-                            "beneficiaryId" to beneficiary.id,
-                            "verificationId" to beneficiary.registrationVerificationId,
-                        ),
+                        buildMap {
+                            put("beneficiaryId", beneficiary.id)
+                            put("verificationId", beneficiary.registrationVerificationId)
+                            if (replaceExisting) put("replaceExisting", true)
+                        },
                     )
                     isBankRecipientRegistration -> {
                         val providerChannel = if (route == "SWIFT") "SWIFT" else "BANK_ACCOUNT"
@@ -3747,11 +3830,12 @@ class TransactViewModel : ViewModel() {
                         }
                         FunctionsClient.callMap(
                             CallableFunction.APPLY_APPROVED_BANK_RECIPIENT_VERIFICATION,
-                            mapOf(
-                                "beneficiaryId" to beneficiary.id,
-                                "verificationId" to verificationId,
-                                "recipientConfirmed" to true,
-                            ),
+                            buildMap {
+                                put("beneficiaryId", beneficiary.id)
+                                put("verificationId", verificationId)
+                                put("recipientConfirmed", true)
+                                if (replaceExisting) put("replaceExisting", true)
+                            },
                         )
                     }
                     else -> FunctionsClient.callMap(

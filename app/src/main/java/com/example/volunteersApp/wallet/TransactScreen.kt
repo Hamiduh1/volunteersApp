@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -111,7 +112,7 @@ fun beneficiaryVerificationPresentation(
     beneficiary: Beneficiary,
 ): BeneficiaryVerificationPresentation {
     if (!beneficiary.hasReusableProviderVerificationProof()) {
-        return BeneficiaryVerificationPresentation("Verification required", false)
+        return BeneficiaryVerificationPresentation("Needs verification", false)
     }
     val status = beneficiary.verificationStatus.orEmpty().uppercase(Locale.US)
     return when (afriexBeneficiaryDestinationRoute(beneficiary.type)) {
@@ -135,7 +136,7 @@ fun beneficiaryVerificationPresentation(
             "Verified bank institution; details confirmed by you",
             true,
         )
-        else -> BeneficiaryVerificationPresentation("Verification required", false)
+        else -> BeneficiaryVerificationPresentation("Needs verification", false)
     }
 }
 
@@ -455,6 +456,8 @@ fun TransactScreen(
     var showSourcePicker by remember { mutableStateOf(false) }
     var showRegistrationSheet by remember { mutableStateOf(false) }
     var pendingReverifyBeneficiary by remember { mutableStateOf<Beneficiary?>(null) }
+    // Saved recipient whose re-entered, server-verified details replace the existing record.
+    var replacingBeneficiaryId by remember { mutableStateOf<String?>(null) }
     var isReverifyingBeneficiary by remember { mutableStateOf(false) }
     var showAddCardSheet by remember { mutableStateOf(false) }
     var showAppUserRecipientSheet by remember { mutableStateOf(false) }
@@ -503,8 +506,8 @@ fun TransactScreen(
     fun clearActiveAmountDraft() {
         updateAmountDraft("")
     }
-    val amountValue = amount.toDoubleOrNull() ?: 0.0
-    val localReferenceAmountValue = localReferenceAmount.toDoubleOrNull() ?: 0.0
+    val amountValue = WalletAmountParser.parse(amount)
+    val localReferenceAmountValue = WalletAmountParser.parse(localReferenceAmount)
     val defaultLocalReferenceCurrency = globalCountryCurrency(uiState.senderCountry)
         .trim()
         .uppercase(Locale.US)
@@ -856,7 +859,18 @@ fun TransactScreen(
         viewModel.autoSelectFundingForBeneficiary(selectedRecipient, amountValue)
     }
 
-    val retryLivePricing: () -> Unit = {
+    // Mobile money funding can deliver only to the member's mobile money route.
+    LaunchedEffect(selectedSource?.id, selectedRecipient, uiState.recipientMethods) {
+        if (selectedSource !is PaymentMethod.MobileMoney || selectedRecipient !is User) return@LaunchedEffect
+        if (uiState.selectedRecipientMethod is PaymentMethod.MobileMoney) return@LaunchedEffect
+        val mobileMoneyRoute = uiState.recipientMethods
+            .filterIsInstance<PaymentMethod.MobileMoney>()
+            .firstOrNull { isAppUserReceiveRouteReady(it) }
+            ?: return@LaunchedEffect
+        viewModel.selectRecipientMethod(mobileMoneyRoute)
+    }
+
+    val retryLivePricing: () -> Unit = retry@{
         when (val recipient = selectedRecipient) {
             is User -> {
                 if (amountValue > 0 && selectedSource != null && uiState.selectedRecipientMethod != null) {
@@ -876,6 +890,12 @@ fun TransactScreen(
                 }
             }
             is Beneficiary -> {
+                if (viewModel.requiresBeneficiaryReRegistration(recipient)) {
+                    viewModel.clearTransferQuote()
+                    flowBanner = FlowBannerState(viewModel.unverifiedBeneficiaryMessage(recipient), FlowBannerTone.Error)
+                    pendingReverifyBeneficiary = recipient
+                    return@retry
+                }
                 val destinationRoute = when {
                     selectedLane == SendMoneyLane.BANK ||
                         recipient.type.orEmpty().contains("BANK", ignoreCase = true) ||
@@ -920,6 +940,12 @@ fun TransactScreen(
             return@LaunchedEffect
         }
         if (selectedRecipient is User && uiState.selectedRecipientMethod == null) {
+            viewModel.clearTransferQuote()
+            return@LaunchedEffect
+        }
+        if (
+            (selectedRecipient as? Beneficiary)?.let { viewModel.requiresBeneficiaryReRegistration(it) } == true
+        ) {
             viewModel.clearTransferQuote()
             return@LaunchedEffect
         }
@@ -1157,7 +1183,7 @@ fun TransactScreen(
                     selectedLane = selectedLane,
                     fundingSource = selectedSource,
                     onLocalAmountChange = { next ->
-                        if (next.matches(Regex("^\\d*\\.?\\d{0,2}$"))) {
+                        if (next.matches(Regex("^\\d*[.,]?\\d{0,2}$"))) {
                             updateLocalReferenceAmountDraft(next)
                         }
                     },
@@ -1271,6 +1297,7 @@ fun TransactScreen(
                         methods = uiState.recipientMethods,
                         selectedMethod = uiState.selectedRecipientMethod,
                         hasPayoutAccount = uiState.recipientHasPayoutAccount,
+                        mobileMoneyFundingOnly = selectedSource is PaymentMethod.MobileMoney,
                         onSelected = { method ->
                             viewModel.selectRecipientMethod(method)
                             if (method != null) {
@@ -1309,9 +1336,9 @@ fun TransactScreen(
                         selectedSource = selectedSource,
                         onRetryPricing = retryLivePricing,
                         onAmountChange = { next ->
-                            if (next.matches(Regex("^\\d*\\.?\\d{0,2}$"))) {
+                            if (next.matches(Regex("^\\d*[.,]?\\d{0,2}$"))) {
                                 updateUsdAmountManually(next)
-                                val nextAmount = next.toDoubleOrNull() ?: 0.0
+                                val nextAmount = WalletAmountParser.parse(next)
                                 viewModel.autoSelectFundingForBeneficiary(selectedRecipient, nextAmount)
                                 if (nextAmount > 0 && uiState.conversionRate == null && !uiState.isRateLoading) {
                                     (selectedRecipient as? Beneficiary)?.let { viewModel.onBeneficiarySelected(it) }
@@ -1333,9 +1360,9 @@ fun TransactScreen(
                         selectedSource = selectedSource,
                         onRetryPricing = retryLivePricing,
                         onAmountChange = { next ->
-                            if (next.matches(Regex("^\\d*\\.?\\d{0,2}$"))) {
+                            if (next.matches(Regex("^\\d*[.,]?\\d{0,2}$"))) {
                                 updateUsdAmountManually(next)
-                                val nextAmount = next.toDoubleOrNull() ?: 0.0
+                                val nextAmount = WalletAmountParser.parse(next)
                                 viewModel.autoSelectFundingForBeneficiary(selectedRecipient, nextAmount)
                                 if (nextAmount > 0 && uiState.conversionRate == null && !uiState.isRateLoading) {
                                     (selectedRecipient as? Beneficiary)?.let { viewModel.onBeneficiarySelected(it) }
@@ -1358,9 +1385,9 @@ fun TransactScreen(
                         selectedSource = selectedSource,
                         onRetryPricing = retryLivePricing,
                         onAmountChange = { next ->
-                            if (next.matches(Regex("^\\d*\\.?\\d{0,2}$"))) {
+                            if (next.matches(Regex("^\\d*[.,]?\\d{0,2}$"))) {
                                 updateUsdAmountManually(next)
-                                val nextAmount = next.toDoubleOrNull() ?: 0.0
+                                val nextAmount = WalletAmountParser.parse(next)
                                 viewModel.autoSelectFundingForBeneficiary(selectedRecipient, nextAmount)
                                 if (nextAmount > 0 && uiState.conversionRate == null && !uiState.isRateLoading) {
                                     (selectedRecipient as? User)?.let { viewModel.onRecipientSelected(it) }
@@ -1372,9 +1399,9 @@ fun TransactScreen(
                 OutlinedTextField(
                     value = amount,
                     onValueChange = {
-                        if (it.matches(Regex("^\\d*\\.?\\d{0,2}$"))) {
+                        if (it.matches(Regex("^\\d*[.,]?\\d{0,2}$"))) {
                             updateUsdAmountManually(it)
-                            val nextAmount = it.toDoubleOrNull() ?: 0.0
+                            val nextAmount = WalletAmountParser.parse(it)
                             viewModel.autoSelectFundingForBeneficiary(selectedRecipient, nextAmount)
                             if (nextAmount > 0 && uiState.conversionRate == null && !uiState.isRateLoading) {
                                 when (val recipient = selectedRecipient) {
@@ -1520,6 +1547,7 @@ fun TransactScreen(
                         if (recipient is User) DestinationType.BANK else uiState.selectedDestinationType,
                         uiState.selectedRecipientMethod,
                         sendLane = selectedLane?.name,
+                        amountText = amount,
                     ) { result ->
                         flowBanner = FlowBannerState(
                             message = sanitizeCustomerFacingProviderText(result.message),
@@ -1589,6 +1617,7 @@ fun TransactScreen(
                                 selectedRecipient = refreshed
                                 flowBanner = FlowBannerState("Recipient verified.", FlowBannerTone.Success)
                             } else {
+                                replacingBeneficiaryId = beneficiary.id.takeIf { it.isNotBlank() }
                                 showRegistrationSheet = true
                                 flowBanner = FlowBannerState(
                                     error ?: "This saved recipient needs to be added again with the current details.",
@@ -1603,12 +1632,17 @@ fun TransactScreen(
                 TextButton(
                     enabled = !isReverifyingBeneficiary,
                     onClick = {
+                        replacingBeneficiaryId = beneficiary.id.takeIf { it.isNotBlank() }
                         pendingReverifyBeneficiary = null
                         showRegistrationSheet = true
                     },
-                ) { Text("Add again") }
+                ) { Text("Edit details") }
             },
         )
+    }
+
+    LaunchedEffect(showRegistrationSheet) {
+        if (!showRegistrationSheet) replacingBeneficiaryId = null
     }
 
     if (showRegistrationSheet) {
@@ -1626,9 +1660,14 @@ fun TransactScreen(
                 onProceed = { newBeneficiary ->
                     if (!isSavingBeneficiary) {
                         isSavingBeneficiary = true
-                        viewModel.saveBeneficiaryIfNeeded(newBeneficiary) { savedBeneficiary, error ->
+                        val replaceId = replacingBeneficiaryId
+                        viewModel.saveBeneficiaryIfNeeded(
+                            beneficiary = replaceId?.let { newBeneficiary.copy(id = it) } ?: newBeneficiary,
+                            replaceExisting = replaceId != null,
+                        ) { savedBeneficiary, error ->
                             isSavingBeneficiary = false
                             if (savedBeneficiary != null) {
+                                replacingBeneficiaryId = null
                                 showRegistrationSheet = false
                                 selectBeneficiary(savedBeneficiary)
                                 flowBanner = FlowBannerState(
@@ -1903,6 +1942,7 @@ fun AddCreditCardSheet(
     var isSaving by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val cardFundingSetup = rememberCardFundingSetupFlow(viewModel)
 
     Column(
         modifier = Modifier
@@ -1972,12 +2012,13 @@ fun AddCreditCardSheet(
                 )
 
                 isSaving = true
+                val linkWithLegacyToken: () -> Unit = legacy@{
                 val stripe = try {
                     createStripeClient(context)
                 } catch (e: IllegalArgumentException) {
                     onError(e.message ?: "Stripe is not configured for card payments yet.")
                     isSaving = false
-                    return@Button
+                    return@legacy
                 }
                 stripe.createCardToken(
                     cardParams = params,
@@ -2019,6 +2060,22 @@ fun AddCreditCardSheet(
                         }
                     }
                 )
+                }
+                cardFundingSetup.start(
+                    cardParams = params,
+                    cardholderName = cardholderName,
+                    onLegacyFallback = linkWithLegacyToken
+                ) { saveResult ->
+                    Toast.makeText(
+                        context,
+                        saveResult.message,
+                        if (saveResult.success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                    ).show()
+                    isSaving = false
+                    if (saveResult.success) {
+                        onDismiss()
+                    }
+                }
             }
 
         )
@@ -4294,6 +4351,7 @@ fun BeneficiaryRegistrationSheet(
                             isResolvingMobileRecipient = false
                             if (
                                 resolved != null &&
+                                recipientName == name.trim() &&
                                 requestedPhone == fullPhone &&
                                 requestedCountry.equals(country.trim(), ignoreCase = true) &&
                                 requestedProviderCode == mmInstitutionCode.trim().ifBlank {
@@ -5968,6 +6026,8 @@ private fun AppUserDeliveryStep(
     methods: List<PaymentMethod>,
     selectedMethod: PaymentMethod?,
     hasPayoutAccount: Boolean,
+    /** EXTERNAL_MOBILE_MONEY funding can deliver only to the member's mobile money route. */
+    mobileMoneyFundingOnly: Boolean = false,
     onSelected: (PaymentMethod?) -> Unit,
 ) {
     val readyMethods = methods.filter { isAppUserReceiveRouteReady(it) }
@@ -5993,7 +6053,11 @@ private fun AppUserDeliveryStep(
                 )
             }
             Text(
-                "Money is delivered through this member's verified bank, SWIFT, or mobile money route. Selecting a SWIFT bank automatically uses the USD SWIFT rail.",
+                if (mobileMoneyFundingOnly) {
+                    "Mobile money funding can deliver only to this member's verified mobile money route. Cards and verified US ACH can deliver to any verified route."
+                } else {
+                    "Money is delivered through this member's verified bank, SWIFT, or mobile money route. Selecting a SWIFT bank automatically uses the USD SWIFT rail."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = SendMoneyTextSecondary
             )
@@ -6021,6 +6085,7 @@ private fun AppUserDeliveryStep(
     }
     readyMethods.forEach { method ->
         val selected = selectedMethod?.id == method.id
+        val routeEnabled = !mobileMoneyFundingOnly || method is PaymentMethod.MobileMoney
         val deliveryRoute = when (method) {
             is PaymentMethod.MobileMoney -> "MOBILE_MONEY"
             is PaymentMethod.BankAccount -> method.deliveryRoute?.uppercase()
@@ -6045,7 +6110,8 @@ private fun AppUserDeliveryStep(
         OutlinedCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onSelected(method) },
+                .alpha(if (routeEnabled) 1f else 0.5f)
+                .clickable(enabled = routeEnabled) { onSelected(method) },
             colors = CardDefaults.outlinedCardColors(
                 containerColor = if (selected) SendMoneyAccentContainer else SendMoneySurface
             ),
@@ -6069,11 +6135,21 @@ private fun AppUserDeliveryStep(
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(Modifier.width(10.dp))
-                    Text(label, fontWeight = FontWeight.SemiBold, color = SendMoneyTextPrimary)
+                    Column {
+                        Text(label, fontWeight = FontWeight.SemiBold, color = SendMoneyTextPrimary)
+                        if (!routeEnabled) {
+                            Text(
+                                "Mobile money funding can deliver only to this member's verified mobile money route.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SendMoneyTextSecondary,
+                            )
+                        }
+                    }
                 }
                 RadioButton(
                     selected = selected,
                     onClick = null,
+                    enabled = routeEnabled,
                     colors = RadioButtonDefaults.colors(selectedColor = SendMoneyAccent, unselectedColor = SendMoneyTextSecondary)
                 )
             }
@@ -6390,7 +6466,7 @@ private fun LocalSpendReferenceEntry(
     val isUsdReference = normalizedCurrency == SEND_MONEY_CHARGE_CURRENCY
     var currencyMenuExpanded by remember { mutableStateOf(false) }
 
-    val localAmountValue = localAmount.toDoubleOrNull() ?: 0.0
+    val localAmountValue = WalletAmountParser.parse(localAmount)
     val activeReference = reference?.takeIf {
         it.matches(localAmountValue, normalizedCurrency, selectedLane?.name)
     }

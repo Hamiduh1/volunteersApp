@@ -271,7 +271,7 @@ fun WalletScreen(
     if (!transactionOnly && showAgentWithdrawalDialog) {
         var amount by remember { mutableStateOf("") }
         var inProgress by remember { mutableStateOf(false) }
-        val amountValue = amount.toDoubleOrNull() ?: 0.0
+        val amountValue = WalletAmountParser.parse(amount)
         val feeInfo = if (amountValue > 0) viewModel.calculateAgentCashOutFee(amountValue) else null
 
         AlertDialog(
@@ -282,7 +282,7 @@ fun WalletScreen(
                     Text("Enter the amount you wish to withdraw via an agent. A secure, one-time code will be generated for you to present to them.")
                     OutlinedTextField(
                         value = amount,
-                        onValueChange = { amount = it.filter { c -> c.isDigit() || c == '.' } },
+                        onValueChange = { amount = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
                         label = { Text("Amount to Withdraw") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth()
@@ -304,7 +304,7 @@ fun WalletScreen(
                 Button(
                     onClick = {
                         inProgress = true
-                        val amt = amount.toDoubleOrNull() ?: 0.0
+                        val amt = WalletAmountParser.parse(amount)
                         viewModel.generateWithdrawalCode(amt) { code, error ->
                             if (code != null) {
                                 generatedCode = code
@@ -315,7 +315,7 @@ fun WalletScreen(
                             inProgress = false
                         }
                     },
-                    enabled = !inProgress && (amount.toDoubleOrNull() ?: 0.0) > 0
+                    enabled = !inProgress && (WalletAmountParser.parse(amount)) > 0
                 ) {
                     if (inProgress) CircularProgressIndicator(Modifier.size(24.dp)) else Text("Generate Code")
                 }
@@ -437,7 +437,7 @@ fun WalletScreen(
         LaunchedEffect(selectedMethod, amount) {
             val targetCurrency = selectedMethod?.currency ?: return@LaunchedEffect
             val sourceCurrency = "USD"
-            val amountValue = amount.toDoubleOrNull() ?: 0.0
+            val amountValue = WalletAmountParser.parse(amount)
             if (amountValue <= 0 || targetCurrency == sourceCurrency) {
                 localAmount = if (amountValue > 0) amountValue else null
                 return@LaunchedEffect
@@ -462,7 +462,7 @@ fun WalletScreen(
                 ) {
                     OutlinedTextField(
                         value = amount,
-                        onValueChange = { if (it.isEmpty() || it.matches(Regex("^\\d*\\.?\\d*$"))) amount = it },
+                        onValueChange = { if (it.isEmpty() || it.matches(Regex("^\\d*[.,]?\\d*$"))) amount = it },
                         label = { Text("Amount") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                     )
@@ -540,7 +540,7 @@ fun WalletScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            "Estimated wallet movement: ${String.format("%.2f", amount.toDoubleOrNull() ?: 0.0)} USD",
+                            "Estimated wallet movement: ${String.format("%.2f", WalletAmountParser.parse(amount))} USD",
                             style = MaterialTheme.typography.bodySmall,
                             color = WalletTextSecondary,
                             fontWeight = FontWeight.SemiBold
@@ -551,7 +551,7 @@ fun WalletScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val amt = amount.toDoubleOrNull() ?: 0.0
+                        val amt = WalletAmountParser.parse(amount)
                         val method = selectedMethod
                         if (method == null) {
                             showStatus("Select a mobile money account.", true)
@@ -756,7 +756,7 @@ fun WalletOperationsScreen(
             localAmount = null
             return@LaunchedEffect
         }
-        val amount = amountInput.toDoubleOrNull() ?: 0.0
+        val amount = WalletAmountParser.parse(amountInput)
         if (amount <= 0) {
             localAmount = null
             return@LaunchedEffect
@@ -772,7 +772,7 @@ fun WalletOperationsScreen(
         isRateLoading = false
     }
 
-    val amountValue = amountInput.toDoubleOrNull() ?: 0.0
+    val amountValue = WalletAmountParser.parse(amountInput)
     val hasMethod = selectedMethod != null
     val hasPositiveAmount = amountValue > 0
     val hasBalanceForCashOut = amountValue <= uiState.balance
@@ -865,7 +865,7 @@ fun WalletOperationsScreen(
             OutlinedTextField(
                 value = amountInput,
                 onValueChange = { input ->
-                    if (input.isBlank() || input.matches(Regex("^\\d*\\.?\\d*$"))) {
+                    if (input.isBlank() || input.matches(Regex("^\\d*[.,]?\\d*$"))) {
                         amountInput = input
                     }
                 },
@@ -1029,7 +1029,7 @@ fun WalletOperationsScreen(
                     Button(
                         onClick = {
                             val method = selectedMethod ?: return@Button
-                            val safeAmount = amountInput.toDoubleOrNull() ?: 0.0
+                            val safeAmount = WalletAmountParser.parse(amountInput)
                             inProgress = true
                             if (flow == MobileMoneyFlow.CASH_IN) {
                                 walletViewModel.depositWithMobileMoney(
@@ -1310,7 +1310,7 @@ private fun AgentCashInContent(viewModel: WalletViewModel) {
 
         OutlinedTextField(
             value = amount,
-            onValueChange = { if (it.isEmpty() || it.matches(Regex("^\\d*\\.?\\d*$"))) amount = it },
+            onValueChange = { if (it.isEmpty() || it.matches(Regex("^\\d*[.,]?\\d*$"))) amount = it },
             label = { Text("Amount to Deposit") },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1321,7 +1321,7 @@ private fun AgentCashInContent(viewModel: WalletViewModel) {
         Button(
             onClick = {
                 selectedUser?.let { user ->
-                    val amt = amount.toDoubleOrNull() ?: 0.0
+                    val amt = WalletAmountParser.parse(amount)
                     viewModel.agentDeposit(user, amt) { success, msg ->
                         Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         if (success) {
@@ -3199,7 +3199,7 @@ fun FundingDialog(
         isEquivalentLoading = false
 
         val rateProvider = exchangeRateProvider ?: return@LaunchedEffect
-        val amountValue = amount.toDoubleOrNull() ?: return@LaunchedEffect
+        val amountValue = WalletAmountParser.parseOrNull(amount) ?: return@LaunchedEffect
         if (amountValue <= 0) return@LaunchedEffect
         val selectedMethod = methods.firstOrNull { method ->
             when (method) {
@@ -3245,7 +3245,7 @@ fun FundingDialog(
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(
                     value = amount,
-                    onValueChange = { if (it.isEmpty() || it.toDoubleOrNull() != null) amount = it },
+                    onValueChange = { if (it.isEmpty() || it.matches(Regex("^\\d*[.,]?\\d*$"))) amount = it },
                     label = { Text("Amount") },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
@@ -3293,7 +3293,7 @@ fun FundingDialog(
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
-                        (amount.toDoubleOrNull() ?: 0.0) > 0 -> {
+                        (WalletAmountParser.parse(amount)) > 0 -> {
                             Text(
                                 "Equivalent unavailable right now.",
                                 style = MaterialTheme.typography.bodySmall,
@@ -3307,7 +3307,7 @@ fun FundingDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(amount.toDoubleOrNull() ?: 0.0, selectedId) },
+                onClick = { onConfirm(WalletAmountParser.parse(amount), selectedId) },
                 enabled = amount.isNotEmpty() && selectedId.isNotEmpty()
             ) { Text("Confirm") }
         },
