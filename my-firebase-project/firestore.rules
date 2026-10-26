@@ -258,6 +258,34 @@ service cloud.firestore {
       ];
     }
 
+    function beneficiaryRouteIdentityFields() {
+      return [
+        'name',
+        'country',
+        'network',
+        'phone',
+        'phoneNumber',
+        'recipientPhone',
+        'accountNumber',
+        'accountNumberRaw',
+        'bankAccountNumber',
+        'bankName',
+        'institutionName',
+        'providerInstitutionName',
+        'institutionCode',
+        'providerInstitutionCode',
+        'afriexInstitutionCode',
+        'providerChannel',
+        'afriexProviderChannel',
+        'swiftBic',
+        'recipientAddress',
+        'institutionAddress',
+        'route',
+        'afriexPayoutRoute',
+        'type'
+      ];
+    }
+
     function beneficiaryRouteFrom(data) {
       return ('type' in data) ? data.type :
         (('route' in data) ? data.route :
@@ -367,9 +395,9 @@ service cloud.firestore {
 
     function isSafeBeneficiaryUpdate() {
       let route = beneficiaryRouteFrom(request.resource.data);
-      return request.writeFields.hasOnly(beneficiaryClientUpdateFields())
-        && (!request.writeFields.hasAny(['name']) || request.resource.data.name is string)
-        && (!request.writeFields.hasAny(['country']) || request.resource.data.country is string)
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(beneficiaryClientUpdateFields())
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['name']) || request.resource.data.name is string)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['country']) || request.resource.data.country is string)
         && isSupportedBeneficiaryRoute(route)
         && beneficiaryRouteFieldsMatch(request.resource.data, route)
         && beneficiaryOptionalStringFieldsAreSafe(request.resource.data)
@@ -378,10 +406,13 @@ service cloud.firestore {
         && beneficiaryHasRequiredDestinationForRoute(request.resource.data, route)
         // The client can only clear stale verification after editing recipient
         // details. Provider-confirmed statuses are server-owned.
-        && (!request.writeFields.hasAny(['verificationStatus']) ||
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['verificationStatus']) ||
           request.resource.data.verificationStatus == 'UNVERIFIED')
-        && (!request.writeFields.hasAny(['isAppUser']) || request.resource.data.isAppUser is bool)
-        && (!request.writeFields.hasAny(['lastTransferAtMs']) || request.resource.data.lastTransferAtMs is int);
+        // Changing where money is delivered invalidates the earlier provider check.
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(beneficiaryRouteIdentityFields()) ||
+          request.resource.data.get('verificationStatus', '') == 'UNVERIFIED')
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAppUser']) || request.resource.data.isAppUser is bool)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastTransferAtMs']) || request.resource.data.lastTransferAtMs is int);
     }
 
     function isOpenJobStatus(status) {
@@ -461,18 +492,26 @@ service cloud.firestore {
       );
     }
 
+    // Status, match, hold and payment fields are server-only; clients edit presentation fields.
     function isSafeBlindDateProfileClientPatch() {
-      return !request.writeFields.hasAny([
-        'status',
-        'userId',
-        'createdAt',
-        'formerMatchedPartnerId',
-        'matchedPartnerId',
-        'matchedChatId',
-        'matchReleasedAt',
-        'matchHoldExpiredAt',
-        'partnerRejoinedAt'
-      ]);
+      let next = request.resource.data;
+      return next.diff(resource.data).affectedKeys()
+          .hasOnly(['bio', 'gender', 'lookingFor', 'media', 'profilePictureUrl', 'name', 'updatedAt'])
+        && (!next.diff(resource.data).affectedKeys().hasAny(['lookingFor'])
+          || next.lookingFor in ['MEN', 'WOMEN', 'EVERYONE'])
+        && (!('bio' in next) || (next.bio is string && next.bio.size() <= 1000))
+        && (!('name' in next) || (next.name is string && next.name.size() <= 80))
+        && (!('gender' in next) || (next.gender is string && next.gender.size() <= 40))
+        && (!('media' in next) || (next.media is list && next.media.size() <= 12))
+        && (!('profilePictureUrl' in next) || (next.profilePictureUrl is string && next.profilePictureUrl.size() <= 2048));
+    }
+
+    // 18 x 365 days: never rejects a real 18-year-old over leap days; ensureDatingEligibility
+    // re-checks the exact calendar age server-side.
+    function birthDateIsAdult(data) {
+      return ('birthDate' in data)
+        && data.birthDate is timestamp
+        && data.birthDate <= request.time - duration.value(6570, 'd');
     }
 
     function userCanAccessDating(uid) {
@@ -480,6 +519,7 @@ service cloud.firestore {
       let userData = exists(userPath) ? get(userPath).data : {};
       return exists(userPath)
         && ('birthDate' in userData)
+        && (!(userData.birthDate is timestamp) || birthDateIsAdult(userData))
         && userData.get('canAccessDating', true) != false
         && userData.get('isMinor', false) != true
         && userData.get('requiresParentalConsent', false) != true;
@@ -519,9 +559,21 @@ service cloud.firestore {
     }
 
     // Birthdate stays in users/{uid}/dating_private; only the derived age is public.
-    function isSafeDatingProfilePayload() {
+    function isSafeDatingProfilePayload(userId) {
       let data = request.resource.data;
+      let previousCreatedAt = resource == null ? null : resource.data.get('createdAt', null);
       return !data.keys().hasAny(['phone', 'birthDate'])
+        // Likes are addressed by uid and feeds sort by createdAt: neither may be spoofed.
+        && (!('uid' in data) || data.uid == userId)
+        && (
+          !('createdAt' in data)
+          || data.createdAt == previousCreatedAt
+          || (previousCreatedAt == null && data.createdAt == request.time)
+        )
+        && (!('name' in data) || (data.name is string && data.name.size() <= 80))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000))
+        && (!('country' in data) || (data.country is string && data.country.size() <= 80))
+        && (!('imageUrls' in data) || (data.imageUrls is list && data.imageUrls.size() <= 12))
         && (!('age' in data) || (data.age is int && data.age >= 18 && data.age <= 120))
         && (!('interests' in data) || (data.interests is list && data.interests.size() <= 10))
         && (!('prompts' in data) || (data.prompts is list && data.prompts.size() <= 5))
@@ -544,8 +596,8 @@ service cloud.firestore {
         && blindDateProfileIsActive(senderUid)
         && blindDateProfileIsActive(recipientUid)
         && blindDateSenderCanInvite(senderUid)
-        && !hasUserBlocked(recipientUid, senderUid)
-        && !hasUserBlocked(senderUid, recipientUid);
+        && !hasAnyUserBlock(recipientUid, senderUid)
+        && !hasAnyUserBlock(senderUid, recipientUid);
     }
 
     // Chats: treat users in exitedParticipantIds as no longer authorized (prevents modified clients
@@ -597,6 +649,19 @@ service cloud.firestore {
         );
     }
 
+    // Android blocks live in settings/chat_privacy.blockedUserIds; iOS writes the blocked_users subcollections.
+    // Scoped to chats, invitations and dating so live/marketplace access-call budgets are unchanged.
+    function hasAnyUserBlock(blockerUid, blockedUid) {
+      return hasUserBlocked(blockerUid, blockedUid) || (
+        blockerUid is string
+        && blockedUid is string
+        && blockerUid.size() > 0
+        && exists(/databases/$(database)/documents/users/$(blockerUid)/settings/chat_privacy)
+        && get(/databases/$(database)/documents/users/$(blockerUid)/settings/chat_privacy).data.get('blockedUserIds', []) is list
+        && blockedUid in get(/databases/$(database)/documents/users/$(blockerUid)/settings/chat_privacy).data.get('blockedUserIds', [])
+      );
+    }
+
     // Android / legacy clients sometimes omit `chatType` or use different casing.
     // Treat explicit `group` as group; otherwise two-participant chats behave as direct for exit + block rules.
     function isExplicitGroupChatType(data) {
@@ -628,8 +693,8 @@ service cloud.firestore {
       return inferredDirectChat(data)
         && participants.size() == 2
         && (
-          hasUserBlocked(firstUid, secondUid) ||
-          hasUserBlocked(secondUid, firstUid)
+          hasAnyUserBlock(firstUid, secondUid) ||
+          hasAnyUserBlock(secondUid, firstUid)
         );
     }
 
@@ -693,10 +758,31 @@ service cloud.firestore {
         && (!('timestamp' in request.resource.data) || request.resource.data.timestamp is timestamp)
         && (!('context' in request.resource.data) || request.resource.data.context is string)
         && (userCanAccessDating(request.auth.uid) || chatInvitationSkipsDatingGate())
-        && (!isDatingLoopLikeInvitation(request.resource.data) ||
-          hasCompatibleDatingLoopProfiles(senderUid, recipientUid))
-        && !hasUserBlocked(recipientUid, senderUid)
-        && !hasUserBlocked(senderUid, recipientUid);
+        && (
+          !(isDatingLoopLikeInvitation(request.resource.data) || isDatingLoopInvitationContext()) ||
+          hasCompatibleDatingLoopProfiles(senderUid, recipientUid)
+        )
+        && !hasAnyUserBlock(recipientUid, senderUid)
+        && !hasAnyUserBlock(senderUid, recipientUid);
+    }
+
+    function isChatInvitationResponse() {
+      let next = request.resource.data;
+      return next.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'lastUpdatedAt', 'updatedAt', 'respondedAt', 'matchedChatId'])
+        && (!('matchedChatId' in next) || (next.matchedChatId is string && next.matchedChatId.size() <= 128))
+        && (
+          (resource.data.status in ['pending', 'PENDING', 'new', 'NEW']
+            && next.status in ['accepted', 'declined'])
+          || (resource.data.status in ['accepted', 'ACCEPTED'] && next.status == resource.data.status)
+        );
+    }
+
+    // Dating Loop likes may only target someone who has a Dating Loop profile and can use dating.
+    function isDatingLoopInvitationContext() {
+      return ('context' in request.resource.data)
+        && request.resource.data.context is string
+        && request.resource.data.context.lower().matches('.*dating loop.*');
     }
 
     // Dating Loop likes are match records, not editable chat invitations. The
@@ -756,19 +842,22 @@ service cloud.firestore {
         && firstUid is string
         && secondUid is string
         && firstUid != secondUid
-        && !hasUserBlocked(firstUid, secondUid)
-        && !hasUserBlocked(secondUid, firstUid)
+        && !hasAnyUserBlock(firstUid, secondUid)
+        && !hasAnyUserBlock(secondUid, firstUid)
         && (
           (request.auth.uid == firstUid && hasPendingChatInvitation(secondUid, firstUid)) ||
           (request.auth.uid == secondUid && hasPendingChatInvitation(firstUid, secondUid))
         );
     }
 
+    // Two-person chats must come from an accepted invitation (and respect blocks / paid Blind Date),
+    // so a "group" needs at least three people.
     function canCreateGroupChat() {
       return request.resource.data.chatType == 'group'
         && request.resource.data.groupCreatorId == request.auth.uid
         && request.resource.data.participants is list
-        && request.resource.data.participants.size() >= 2
+        && request.resource.data.participants.size() >= 3
+        && request.resource.data.participants.size() <= 100
         && request.auth.uid in request.resource.data.participants
         && (
           !('exitedParticipantIds' in request.resource.data) ||
@@ -938,8 +1027,20 @@ service cloud.firestore {
       return !request.resource.data.keys().hasAny([
         'fcmToken',
         'fcmTokenUpdatedAt',
+        'fcmTokens',
+        'deviceTokens',
+        'messagingToken',
+        'pushToken',
+        'pushPlatform',
         'apnsVoipToken',
         'apnsVoipTokenUpdatedAt',
+        'apnsVoipUsesSandbox',
+        'activeDeviceId',
+        'activeDevicePlatform',
+        'activeDeviceClaimedAt',
+        'activeDeviceUpdatedAt',
+        'activeDeviceFcmToken',
+        'activeDeviceApnsVoipToken',
         'paymentCustomerId',
         'payoutAccountId',
         'stripeAccountId',
@@ -986,10 +1087,13 @@ service cloud.firestore {
         && (!('organizationName' in data) || data.organizationName is string)
         && (!('companyName' in data) || data.companyName is string)
         && (!('businessRegistered' in data) || data.businessRegistered == false)
-        && (!('birthDate' in data) || data.birthDate is timestamp)
+        && (!('birthDate' in data) || (data.birthDate is timestamp && data.birthDate < request.time))
         && (!('isMinor' in data) || data.isMinor is bool)
         && (!('requiresParentalConsent' in data) || data.requiresParentalConsent is bool)
         && (!('canAccessDating' in data) || data.canAccessDating is bool)
+        // Adult flags must agree with the birthdate; a minor can't self-declare dating access.
+        && (data.get('canAccessDating', false) != true || birthDateIsAdult(data))
+        && (data.get('isMinor', true) != false || birthDateIsAdult(data))
         && hasSafeInitialUserWallet()
         && hasSafeInitialVerificationFields()
         && hasNoPrivilegedUserBootstrapFields();
@@ -1028,6 +1132,20 @@ service cloud.firestore {
         'payoutAccountId',
         'stripeAccountId',
         'chargeCustomerId',
+        'afriexBusinessCustomerId',
+        'afriexBusinessCustomerCountry',
+        'afriexBusinessCustomerReference',
+        'afriexBusinessCustomerUpdatedAt',
+        'providerCustomerId',
+        'walletProvider',
+        'walletMigration',
+        'walletCurrency',
+        'defaultCurrency',
+        'stripeConnectCommerceServices',
+        'stripeConnectPurpose',
+        'chargesEnabled',
+        'payoutsEnabled',
+        'detailsSubmitted',
         'lastFundingSource',
         'supportAccess',
         'isStaff',
@@ -1040,6 +1158,7 @@ service cloud.firestore {
         'supportGrantedBy',
         'supportNote',
         'birthDate',
+        'dateOfBirth',
         'isMinor',
         'requiresParentalConsent',
         'canAccessDating',
@@ -1408,6 +1527,7 @@ service cloud.firestore {
     function isCallSessionStatePatch() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return changed.hasOnly([
+          'callType',
           'status',
           'acceptedParticipantIds',
           'declinedParticipantIds',
@@ -1418,6 +1538,13 @@ service cloud.firestore {
           'ringingParticipantIds',
           'ringingAt'
         ])
+        && (
+          !changed.hasAny(['callType']) || (
+            callSessionStatus(resource.data) == 'accepted'
+            && callSessionStatus(request.resource.data) == 'accepted'
+            && request.resource.data.callType in ['audio', 'video']
+          )
+        )
         && (!changed.hasAny(['status']) || isValidCallSessionStatusTransition())
         && callParticipantListUnchangedOrSelfChanged(ringingCallParticipantsFrom(resource.data), ringingCallParticipantsFrom(request.resource.data))
         && (!changed.hasAny(['ringingAt']) || request.resource.data.ringingAt == request.time)
@@ -1499,8 +1626,8 @@ service cloud.firestore {
           && blindDateProfileIsActive(request.auth.uid)
           && blindDateProfileIsActive(userId)
           && blindDateSenderCanInvite(request.auth.uid)
-          && !hasUserBlocked(userId, invitationId)
-          && !hasUserBlocked(invitationId, userId);
+          && !hasAnyUserBlock(userId, invitationId)
+          && !hasAnyUserBlock(invitationId, userId);
         allow read: if request.auth.uid == userId;
         // Accept/decline must go through Cloud Functions (Admin SDK). Sender may re-send after decline.
         allow update: if request.auth.uid == invitationId
@@ -1519,9 +1646,11 @@ service cloud.firestore {
           && blindDateProfileIsActive(request.auth.uid)
           && blindDateProfileIsActive(recipientId)
           && blindDateSenderCanInvite(request.auth.uid)
-          && !hasUserBlocked(recipientId, request.auth.uid)
-          && !hasUserBlocked(request.auth.uid, recipientId);
-        allow update, delete: if false;
+          && !hasAnyUserBlock(recipientId, request.auth.uid)
+          && !hasAnyUserBlock(request.auth.uid, recipientId);
+        // Mirrors the incoming invite: the sender may re-send only after a decline.
+        allow update: if isOwner(userId) && isSafeBlindDateInvitationResend(userId, recipientId);
+        allow delete: if false;
       }
 
       // Incoming call signaling mirror maintained by Cloud Functions; Android CallSessionViewModel listens here.
@@ -1560,7 +1689,7 @@ service cloud.firestore {
         // isDefault: user preference. last4: legacy client self-heal from masked PAN; prefer server-side writes later.
         allow update: if request.auth != null
           && request.auth.uid == userId
-          && request.writeFields.hasOnly(['isDefault', 'last4']);
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isDefault', 'last4']);
         // Deletion goes through the callable so its private bank-number mirror and
         // provider-side Stripe links are cleaned up together.
         allow delete: if false;
@@ -1594,9 +1723,9 @@ service cloud.firestore {
         allow create: if isSignedIn()
           && isOwner(senderId)
           && isSafeChatInvitationCreate(userId, senderId);
-        allow update: if isSignedIn()
-          && isOwner(userId)
-          && isSafeDatingLoopInvitationRecipientUpdate(userId);
+        // The recipient may only answer: never rewrite context/sender (that would turn a Dating Loop
+        // like into a free chat invite) or move an answered invite back to pending (push spam).
+        allow update: if isSignedIn() && isOwner(userId) && isChatInvitationResponse();
         allow delete: if isSignedIn() && isOwner(userId);
       }
 
@@ -1610,9 +1739,7 @@ service cloud.firestore {
         allow create: if isSignedIn()
           && isOwner(senderId)
           && isSafeChatInvitationCreate(userId, senderId);
-        allow update: if isSignedIn()
-          && isOwner(userId)
-          && isSafeDatingLoopInvitationRecipientUpdate(userId);
+        allow update: if isSignedIn() && isOwner(userId) && isChatInvitationResponse();
         allow delete: if isSignedIn() && isOwner(userId);
       }
 
@@ -1710,7 +1837,7 @@ service cloud.firestore {
 
       match /notifications/{notificationId} {
         allow read, list: if isOwner(userId);
-        allow update: if isOwner(userId) && request.writeFields.hasOnly(['read']);
+        allow update: if isOwner(userId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
         allow create, delete: if false;
       }
 
@@ -1734,15 +1861,21 @@ service cloud.firestore {
       match /dating_comments/{senderId} {
         allow get: if isSignedIn() && (request.auth.uid == userId || request.auth.uid == senderId);
         allow list: if isOwner(userId);
+        // One edit per day, and no sender delete+recreate, so comments can't become a free chat.
         allow create, update: if isSignedIn()
           && request.auth.uid == senderId
           && senderId != userId
+          && (
+            resource == null
+            || !(resource.data.get('updatedAt', null) is timestamp)
+            || request.time >= resource.data.updatedAt + duration.value(1, 'd')
+          )
           && userCanAccessDating(senderId)
           && exists(/databases/$(database)/documents/dating_profiles/$(senderId))
           && exists(/databases/$(database)/documents/dating_profiles/$(userId))
           && hasCompatibleDatingLoopProfiles(senderId, userId)
-          && !hasUserBlocked(userId, senderId)
-          && !hasUserBlocked(senderId, userId)
+          && !hasAnyUserBlock(userId, senderId)
+          && !hasAnyUserBlock(senderId, userId)
           && request.resource.data.keys().hasOnly(['senderId', 'senderName', 'senderPhotoUrl', 'text', 'createdAt', 'updatedAt'])
           && request.resource.data.senderId == senderId
           && request.resource.data.text is string
@@ -1754,7 +1887,7 @@ service cloud.firestore {
           && request.resource.data.senderPhotoUrl.size() <= 2048
           && request.resource.data.createdAt == request.time
           && request.resource.data.updatedAt == request.time;
-        allow delete: if isSignedIn() && (request.auth.uid == userId || request.auth.uid == senderId);
+        allow delete: if isSignedIn() && request.auth.uid == userId;
       }
     }
 
@@ -2804,7 +2937,8 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         (docId != 'platform_revenue' &&
           docId != 'afriex_business_wallet' &&
-          docId != 'stripe_platform_settlement_mirror') || isPlatformAdmin()
+          docId != 'stripe_platform_settlement_mirror' &&
+          docId != 'stripe_platform_income_mirror') || isPlatformAdmin()
       );
       allow write: if false;
 
@@ -3081,7 +3215,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && userCanAccessDating(request.auth.uid);
       allow create, update: if isOwner(userId)
         && userCanAccessDating(userId)
-        && isSafeDatingProfilePayload();
+        && isSafeDatingProfilePayload(userId);
       allow delete: if isOwner(userId) && userCanAccessDating(userId);
     }
 

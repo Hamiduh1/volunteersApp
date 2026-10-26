@@ -4,13 +4,20 @@
 //  IMPORTS & INITIALIZATION
 // =============================================================================
 import axios from "axios";
-import {createHash, createPublicKey, createVerify, randomInt} from "crypto";
+import {createHash, createPublicKey, createVerify, randomInt, timingSafeEqual} from "crypto";
+import * as http2 from "http2";
 import * as admin from "firebase-admin";
 import {DataSnapshot} from "firebase-admin/database";
 import * as functions from "firebase-functions/v1";
 import {database, EventContext} from "firebase-functions/v1";
+import {defineSecret} from "firebase-functions/params";
+import jwt from "jsonwebtoken";
 import Stripe from "stripe";
 import {reconcileStaleLiveSessions} from "./liveSessions.js";
+import {
+  ensureAfriexSwiftTransferInvoiceUrl,
+  sendSwiftTransferInvoiceEmailOnce,
+} from "./legacyDeployedFunctions/index.js";
 // These names preserve deployed v1 function identities recovered after the
 // accidental source deletion. Keep the exports explicit so retired functions
 // are not recreated by a future deployment.
@@ -87,6 +94,10 @@ if (!admin.apps.length) {
   admin.initializeApp();
 }
 const db = admin.firestore();
+
+// Bound only to the call triggers. The key remains in Secret Manager and is
+// never sent to either mobile client.
+const secretApnsP8 = defineSecret("APNS_P8");
 
 let runtimeConfigCache: Record<string, unknown> | null = null;
 const getRuntimeConfig = (): Record<string, unknown> => {
@@ -354,13 +365,19 @@ const acquireAppUserTransferLock = async (params: {
 const releaseAppUserTransferLock = async (params: {
   senderId: string;
   payoutRequestId: string;
+  // Mobile-money-funded sends lock on the collection request; delivery runs under a new payout id.
+  collectionRequestId?: string | null;
   outcome: "FUNDING_FAILED" | "DELIVERED";
 }): Promise<void> => {
   const lockRef = appUserTransferLockRef(params.senderId);
   await db.runTransaction(async (transaction) => {
     const lockSnap = await transaction.get(lockRef);
     if (!lockSnap.exists || lockSnap.get("active") !== true) return;
-    if (asNonEmptyString(lockSnap.get("payoutRequestId")) !== params.payoutRequestId) return;
+    const lockedPayoutRequestId = asNonEmptyString(lockSnap.get("payoutRequestId"));
+    if (
+      lockedPayoutRequestId !== params.payoutRequestId &&
+      (!params.collectionRequestId || lockedPayoutRequestId !== params.collectionRequestId)
+    ) return;
 
     transaction.set(lockRef, {
       active: false,
@@ -762,6 +779,12 @@ export const createCallSession = functions.runWith({enforceAppCheck: true})
         .filter((value) => value.length > 0 && value !== callerId)
         .filter((value, index, values) => values.indexOf(value) === index) :
       [];
+    if (requestedRecipientIds.length > 49) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Group calls can include up to 50 people."
+      );
+    }
     const blockCheckRecipientIds = [...new Set([receiverId, ...requestedRecipientIds])]
       .filter((value) => value.length > 0 && value !== callerId);
     const blockLists = await Promise.all([
@@ -853,6 +876,24 @@ export const createCallSession = functions.runWith({enforceAppCheck: true})
         };
       }
 
+      // Every new session updates the chat document in this same transaction.
+      // That gives each chat one atomic active-call lock, so two members cannot
+      // race into separate group calls from different devices.
+      const activeCallSessionId = asNonEmptyString(chat["activeCallSessionId"]);
+      if (activeCallSessionId) {
+        const activeSession = await transaction.get(
+          db.collection("call_sessions").doc(activeCallSessionId)
+        );
+        const activeStatus = activeSession.exists ?
+          String((activeSession.data() || {}).status || "").trim().toLowerCase() : "";
+        if (activeStatus === "ringing" || activeStatus === "accepted") {
+          throw new functions.https.HttpsError(
+            "already-exists",
+            "A call is already in progress for this chat."
+          );
+        }
+      }
+
       const now = admin.firestore.FieldValue.serverTimestamp();
       const groupName = isGroup ? asNonEmptyString(chat["groupName"]) || "Group call" : "";
       const session = {
@@ -886,6 +927,7 @@ export const createCallSession = functions.runWith({enforceAppCheck: true})
         startedAt: now,
       });
       transaction.update(chatRef, {
+        activeCallSessionId: sessionId,
         lastCallType: callType,
         lastCallStatus: "ringing",
         lastCallTimestamp: now,
@@ -1051,11 +1093,21 @@ export const getConversationCallAvailability = functions.runWith({enforceAppChec
     }
 
     const receiverData = (await db.collection("users").doc(receiverId).get()).data() || {};
+    const activeDeviceId = typeof receiverData.activeDeviceId === "string" ?
+      receiverData.activeDeviceId.trim() : "";
+    const activeFcmToken = typeof receiverData.activeDeviceFcmToken === "string" ?
+      receiverData.activeDeviceFcmToken.trim() : "";
+    const activeVoipToken = typeof receiverData.activeDeviceApnsVoipToken === "string" ?
+      receiverData.activeDeviceApnsVoipToken.trim() : "";
     const fcmTokens = Array.isArray(receiverData.fcmTokens) ? receiverData.fcmTokens : [];
-    const hasFcmToken = typeof receiverData.fcmToken === "string" && receiverData.fcmToken.trim().length > 0 ||
+    // Established one-phone accounts must not appear reachable through a former phone's token.
+    const hasFcmToken = activeDeviceId.length > 0 ? activeFcmToken.length > 0 :
+      activeFcmToken.length > 0 ||
+      typeof receiverData.fcmToken === "string" && receiverData.fcmToken.trim().length > 0 ||
       fcmTokens.some((value) => typeof value === "string" && value.trim().length > 0);
-    const hasApnsVoipToken = typeof receiverData.apnsVoipToken === "string" &&
-      receiverData.apnsVoipToken.trim().length >= 32;
+    const hasApnsVoipToken = activeDeviceId.length > 0 ? activeVoipToken.length >= 32 :
+      activeVoipToken.length >= 32 ||
+      typeof receiverData.apnsVoipToken === "string" && receiverData.apnsVoipToken.trim().length >= 32;
     return {
       available: true,
       reason: "READY",
@@ -1063,42 +1115,184 @@ export const getConversationCallAvailability = functions.runWith({enforceAppChec
     };
   });
 
-/**
- * Shared Android/iOS push registration. A user can be signed in on more than one device, so
- * retain every active registration token rather than letting the most recent platform overwrite
- * the other platform's token.
- */
+const normalizedDeviceSessionId = (value: unknown): string => {
+  if (typeof value !== "string") return "";
+  const clean = value.trim();
+  return /^[A-Za-z0-9_-]{16,160}$/.test(clean) ? clean : "";
+};
+
+const normalizedDevicePlatform = (value: unknown): "ios" | "android" | "" => {
+  if (typeof value !== "string") return "";
+  const clean = value.trim().toLowerCase();
+  return clean === "ios" || clean === "android" ? clean : "";
+};
+
+/** Claims the one active phone for an account without exposing the other device's identity. */
+export const claimActiveDeviceSession = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+
+    const deviceId = normalizedDeviceSessionId(data?.deviceId);
+    const platform = normalizedDevicePlatform(data?.platform);
+    const replaceExisting = data?.replaceExisting === true;
+    if (!deviceId || !platform) {
+      throw new functions.https.HttpsError("invalid-argument", "A valid phone session is required.");
+    }
+
+    const ref = db.collection("users").doc(context.auth.uid);
+    return await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      const current = snapshot.exists ? snapshot.data() || {} : {};
+      const activeDeviceId = normalizedDeviceSessionId(current.activeDeviceId);
+
+      if (activeDeviceId && activeDeviceId !== deviceId && !replaceExisting) {
+        return {
+          claimed: false,
+          requiresConfirmation: true,
+          activePlatform: normalizedDevicePlatform(current.activeDevicePlatform) || "another phone",
+        };
+      }
+
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const patch: Record<string, unknown> = {
+        activeDeviceId: deviceId,
+        activeDevicePlatform: platform,
+        activeDeviceClaimedAt: now,
+        activeDeviceUpdatedAt: now,
+        updatedAt: now,
+      };
+
+      // A confirmed takeover must stop the previous phone receiving private
+      // messages and incoming calls before the new device publishes its tokens.
+      if (activeDeviceId && activeDeviceId !== deviceId) {
+        patch.fcmToken = admin.firestore.FieldValue.delete();
+        patch.apnsVoipToken = admin.firestore.FieldValue.delete();
+        patch.activeDeviceFcmToken = admin.firestore.FieldValue.delete();
+        patch.activeDeviceApnsVoipToken = admin.firestore.FieldValue.delete();
+        patch.fcmTokens = [];
+        patch.deviceTokens = [];
+      }
+
+      transaction.set(ref, patch, {merge: true});
+      return {claimed: true, requiresConfirmation: false};
+    });
+  });
+
+/** Releases the current phone only. It cannot sign out or clear another phone's session. */
+export const releaseActiveDeviceSession = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+    const deviceId = normalizedDeviceSessionId(data?.deviceId);
+    if (!deviceId) {
+      throw new functions.https.HttpsError("invalid-argument", "A valid phone session is required.");
+    }
+
+    const ref = db.collection("users").doc(context.auth.uid);
+    return await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      const current = snapshot.exists ? snapshot.data() || {} : {};
+      if (normalizedDeviceSessionId(current.activeDeviceId) !== deviceId) {
+        return {released: false};
+      }
+      transaction.set(ref, {
+        activeDeviceId: admin.firestore.FieldValue.delete(),
+        activeDevicePlatform: admin.firestore.FieldValue.delete(),
+        activeDeviceFcmToken: admin.firestore.FieldValue.delete(),
+        activeDeviceApnsVoipToken: admin.firestore.FieldValue.delete(),
+        fcmToken: admin.firestore.FieldValue.delete(),
+        apnsVoipToken: admin.firestore.FieldValue.delete(),
+        fcmTokens: [],
+        deviceTokens: [],
+        activeDeviceUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+      return {released: true};
+    });
+  });
+
+/** Registers FCM and/or VoIP routing only for the account's active phone. */
 export const registerUserPushTokens = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
     const uid = context.auth.uid;
-    const fcmToken = typeof data?.fcmToken === "string" ? data.fcmToken.trim() : "";
-    if (!fcmToken) {
+    const hasFcmToken = typeof data?.fcmToken === "string";
+    const hasVoipToken = typeof data?.apnsVoipToken === "string";
+    if (!hasFcmToken && !hasVoipToken) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "fcmToken is required (Firebase Messaging registration token for Android or iOS)."
+        "An FCM or VoIP registration token is required."
       );
     }
-    const platformRaw = typeof data?.platform === "string" ? data.platform.trim().toLowerCase() : "";
-    const platform = platformRaw === "ios" || platformRaw === "android" ? platformRaw : "";
-
-    const payload: Record<string, unknown> = {
-      // fcmToken remains for older clients. New delivery reads fcmTokens so an iOS sign-in cannot
-      // stop Android from receiving an incoming call, or vice versa.
-      fcmToken,
-      fcmTokens: admin.firestore.FieldValue.arrayUnion(fcmToken),
-      fcmTokenUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    };
-    if (platform) {
-      payload.pushPlatform = platform;
+    const fcmToken = hasFcmToken ? String(data.fcmToken).trim() : "";
+    const apnsVoipToken = hasVoipToken ? String(data.apnsVoipToken).trim() : "";
+    const deviceId = normalizedDeviceSessionId(data?.deviceId);
+    const platform = normalizedDevicePlatform(data?.platform);
+    // Android builds without phone sessions send only fcmToken + platform. Rules block their
+    // Firestore fallback, so rejecting them here would stop all their push notifications.
+    if (!deviceId && typeof data?.deviceId === "undefined" && fcmToken) {
+      const legacyPayload: Record<string, unknown> = {
+        fcmToken,
+        fcmTokens: admin.firestore.FieldValue.arrayUnion(fcmToken),
+        fcmTokenUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (platform) {
+        legacyPayload.pushPlatform = platform;
+      }
+      await db.collection("users").doc(uid).set(legacyPayload, {merge: true});
+      return {ok: true, legacyRegistration: true};
+    }
+    if (!deviceId || !platform) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A valid phone session and platform are required to register push notifications."
+      );
     }
 
-    await db.collection("users").doc(uid).set(payload, {merge: true});
-    functions.logger.info("Registered push token", {uid, platform: platform || "unknown"});
-    return {ok: true};
+    const ref = db.collection("users").doc(uid);
+    return await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      const current = snapshot.exists ? snapshot.data() || {} : {};
+      const activeDeviceId = normalizedDeviceSessionId(current.activeDeviceId);
+      if (activeDeviceId && activeDeviceId !== deviceId) {
+        return {ok: false, activeOnAnotherPhone: true};
+      }
+
+      const payload: Record<string, unknown> = {
+        pushPlatform: platform,
+        activeDeviceUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      // Smoothly migrate a phone that was already signed in before the
+      // one-device policy shipped. The first refreshed registration wins;
+      // any later phone receives activeOnAnotherPhone instead of overwriting it.
+      if (!activeDeviceId) {
+        payload.activeDeviceId = deviceId;
+        payload.activeDevicePlatform = platform;
+        payload.activeDeviceClaimedAt = admin.firestore.FieldValue.serverTimestamp();
+      }
+      if (hasFcmToken) {
+        payload.fcmToken = fcmToken || admin.firestore.FieldValue.delete();
+        payload.activeDeviceFcmToken = fcmToken || admin.firestore.FieldValue.delete();
+        payload.fcmTokens = fcmToken ? [fcmToken] : [];
+        payload.deviceTokens = fcmToken ? [fcmToken] : [];
+        payload.fcmTokenUpdatedAt = admin.firestore.FieldValue.serverTimestamp();
+      }
+      if (hasVoipToken) {
+        payload.apnsVoipToken = apnsVoipToken || admin.firestore.FieldValue.delete();
+        payload.activeDeviceApnsVoipToken = apnsVoipToken || admin.firestore.FieldValue.delete();
+        payload.apnsVoipUsesSandbox = data?.apnsVoipUsesSandbox === true || data?.apnsVoipUsesSandbox === "true";
+        payload.apnsVoipTokenUpdatedAt = admin.firestore.FieldValue.serverTimestamp();
+      }
+      transaction.set(ref, payload, {merge: true});
+      return {ok: true};
+    });
   });
 
 export const seedLegalDocuments = functions.region("us-central1").https.onRequest(async (req, res) => {
@@ -1252,9 +1446,21 @@ const isStaffFeeExempt = (
 const normalizeProfileStatus = (value: unknown): string =>
   String(value || "").trim().toLowerCase();
 
+const isAdultFromBirthDate = (userData: Record<string, unknown>): boolean | null => {
+  const birthDate = userData.birthDate ?? userData.dateOfBirth;
+  if (!(birthDate instanceof admin.firestore.Timestamp)) return null;
+  const adultCutoff = new Date();
+  adultCutoff.setFullYear(adultCutoff.getFullYear() - 18);
+  return birthDate.toDate().getTime() <= adultCutoff.getTime();
+};
+
+// The birthdate is authoritative; the stored flags were client-written at signup.
 const resolveDatingAccessForUserData = (
   userData: Record<string, unknown>
 ): boolean | null => {
+  const adultByBirthDate = isAdultFromBirthDate(userData);
+  if (adultByBirthDate !== null) return adultByBirthDate;
+
   const canAccessDating = userData.canAccessDating;
   if (typeof canAccessDating === "boolean") return canAccessDating;
 
@@ -1303,36 +1509,29 @@ export const ensureDatingEligibility = functions.runWith({enforceAppCheck: true}
       );
     }
 
-    const existingAccess = resolveDatingAccessForUserData(userData);
-    if (existingAccess === true) {
-      return {canAccessDating: true, migratedLegacyAccount: false};
-    }
-    if (existingAccess === false) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Dating features are available only to adults aged 18 or older."
-      );
-    }
-
-    const birthDate = userData.birthDate ?? userData.dateOfBirth;
-    if (!(birthDate instanceof admin.firestore.Timestamp)) {
+    const isAdult = isAdultFromBirthDate(userData);
+    if (isAdult === null) {
       throw new functions.https.HttpsError(
         "failed-precondition",
         "Add your date of birth during account setup before using dating features."
       );
     }
 
-    const adultCutoff = new Date();
-    adultCutoff.setFullYear(adultCutoff.getFullYear() - 18);
-    const isAdult = birthDate.toDate().getTime() <= adultCutoff.getTime();
-    const now = admin.firestore.Timestamp.now();
-    await userRef.set({
-      canAccessDating: isAdult,
-      isMinor: !isAdult,
-      requiresParentalConsent: !isAdult,
-      datingEligibilityVerifiedAt: now,
-      updatedAt: now,
-    }, {merge: true});
+    // Re-derive the flags from the birthdate so forged signup flags are corrected and
+    // users who have turned 18 since signup are unlocked.
+    const flagsAlreadyMatch = userData.canAccessDating === isAdult &&
+      userData.isMinor === !isAdult &&
+      userData.requiresParentalConsent === !isAdult;
+    if (!flagsAlreadyMatch) {
+      const now = admin.firestore.Timestamp.now();
+      await userRef.set({
+        canAccessDating: isAdult,
+        isMinor: !isAdult,
+        requiresParentalConsent: !isAdult,
+        datingEligibilityVerifiedAt: now,
+        updatedAt: now,
+      }, {merge: true});
+    }
 
     if (!isAdult) {
       throw new functions.https.HttpsError(
@@ -1341,7 +1540,7 @@ export const ensureDatingEligibility = functions.runWith({enforceAppCheck: true}
       );
     }
 
-    return {canAccessDating: true, migratedLegacyAccount: true};
+    return {canAccessDating: true, migratedLegacyAccount: !flagsAlreadyMatch};
   });
 
 type PlatformRevenueSource =
@@ -2127,6 +2326,228 @@ const collectUserFcmTokens = (
   return [...tokens];
 };
 
+const invalidFcmTokenErrorCodes = new Set([
+  "messaging/invalid-registration-token",
+  "messaging/registration-token-not-registered",
+]);
+
+const isInvalidFcmTokenError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const code = typeof (error as {code?: unknown}).code === "string" ?
+    (error as {code: string}).code : "";
+  return invalidFcmTokenErrorCodes.has(code);
+};
+
+/**
+ * Removes only tokens Firebase has confirmed are no longer valid.
+ * @param {Map<string, Set<string>>} tokensByUser Invalid tokens grouped by user id.
+ */
+const pruneInvalidFcmTokens = async (tokensByUser: Map<string, Set<string>>): Promise<void> => {
+  await Promise.all([...tokensByUser.entries()].map(async ([uid, staleTokens]) => {
+    if (!uid || staleTokens.size === 0) return;
+    const ref = db.collection("users").doc(uid);
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) return;
+      const data = snapshot.data() || {};
+      const update: Record<string, unknown> = {};
+
+      ["fcmTokens", "deviceTokens"].forEach((field) => {
+        const current: unknown[] = Array.isArray(data[field]) ? data[field] : [];
+        const retained = current.filter((value) =>
+          typeof value !== "string" || !staleTokens.has(value.trim())
+        );
+        if (retained.length !== current.length) {
+          update[field] = retained;
+        }
+      });
+
+      ["fcmToken", "messagingToken", "pushToken"].forEach((field) => {
+        const current = typeof data[field] === "string" ? data[field].trim() : "";
+        if (current && staleTokens.has(current)) {
+          update[field] = admin.firestore.FieldValue.delete();
+        }
+      });
+      const activeFcmToken = typeof data.activeDeviceFcmToken === "string" ?
+        data.activeDeviceFcmToken.trim() : "";
+      if (activeFcmToken && staleTokens.has(activeFcmToken)) {
+        update.activeDeviceFcmToken = admin.firestore.FieldValue.delete();
+      }
+
+      if (Object.keys(update).length > 0) {
+        update.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+        transaction.set(ref, update, {merge: true});
+      }
+    });
+  }));
+};
+
+/**
+ * Call delivery is intentionally single-device. Older accounts fall back to legacy token fields.
+ * @param {FirebaseFirestore.DocumentData | undefined} data The user document.
+ * @return {string} The active device session id, or an empty string.
+ */
+const activeCallDeviceSessionId = (data: FirebaseFirestore.DocumentData | undefined): string =>
+  normalizedDeviceSessionId(data?.activeDeviceId);
+
+const collectActiveCallFcmTokens = (
+  data: FirebaseFirestore.DocumentData | undefined,
+): string[] => {
+  const active = typeof data?.activeDeviceFcmToken === "string" ?
+    data.activeDeviceFcmToken.trim() : "";
+  // Once an account has an active phone, never fall back to an old device's
+  // legacy token while the new phone is still registering its own token.
+  if (activeCallDeviceSessionId(data)) return active ? [active] : [];
+  return active ? [active] : collectUserFcmTokens(data);
+};
+
+const activeCallVoipToken = (data: FirebaseFirestore.DocumentData | undefined): string => {
+  const active = typeof data?.activeDeviceApnsVoipToken === "string" ?
+    data.activeDeviceApnsVoipToken.trim() : "";
+  if (active) return active;
+  if (activeCallDeviceSessionId(data)) return "";
+  return typeof data?.apnsVoipToken === "string" ? data.apnsVoipToken.trim() : "";
+};
+
+const apnsVoipCredentialsReady = (): boolean => {
+  const team = String(process.env.APNS_VOIP_TEAM_ID || process.env.APNS_TEAM_ID || "").trim();
+  const key = String(process.env.APNS_VOIP_KEY_ID || process.env.APNS_KEY_ID || "").trim();
+  const p8 = String(process.env.APNS_VOIP_P8 || process.env.APNS_P8 || "").trim();
+  const bundle = String(process.env.IOS_APP_BUNDLE_ID || "").trim();
+  return !!(team && key && p8 && bundle);
+};
+
+const signApnsVoipJwt = (): string | null => {
+  const teamId = String(process.env.APNS_VOIP_TEAM_ID || process.env.APNS_TEAM_ID || "").trim();
+  const keyId = String(process.env.APNS_VOIP_KEY_ID || process.env.APNS_KEY_ID || "").trim();
+  const p8 = String(process.env.APNS_VOIP_P8 || process.env.APNS_P8 || "").replace(/\\n/g, "\n").trim();
+  if (!teamId || !keyId || !p8) return null;
+  return jwt.sign(
+    {iss: teamId, iat: Math.floor(Date.now() / 1000)},
+    p8,
+    {algorithm: "ES256", header: {alg: "ES256", kid: keyId, typ: "JWT"}}
+  );
+};
+
+/**
+ * Sends the APNs VoIP payload that wakes iOS and lets CallKit own the native ringtone.
+ * @param {Object} params Device token, payload, collapse id and optional expiry.
+ */
+const sendApnsVoipCallPush = async (params: {
+  deviceTokenHex: string;
+  data: Record<string, string>;
+  collapseId: string;
+  expirationSeconds?: number;
+  useSandbox: boolean;
+}): Promise<boolean> => {
+  const bundleId = String(process.env.IOS_APP_BUNDLE_ID || "").trim();
+  const auth = signApnsVoipJwt();
+  const hex = params.deviceTokenHex.trim().toLowerCase().replace(/\s+/g, "");
+  if (!bundleId || !auth || !/^[0-9a-f]+$/i.test(hex) || hex.length < 32 || hex.length % 2 !== 0) {
+    return false;
+  }
+
+  const host = params.useSandbox ? "api.sandbox.push.apple.com" : "api.push.apple.com";
+  return await new Promise((resolve) => {
+    let complete = false;
+    const finish = (ok: boolean) => {
+      if (complete) return;
+      complete = true;
+      resolve(ok);
+    };
+    let client: http2.ClientHttp2Session;
+    try {
+      client = http2.connect(`https://${host}`);
+    } catch (error) {
+      functions.logger.warn("APNs VoIP connection failed", {error: String(error)});
+      finish(false);
+      return;
+    }
+    const close = () => {
+      try {
+        client.close();
+      } catch {
+        // The connection may already have been closed after an APNs error.
+      }
+    };
+    client.on("error", (error) => {
+      functions.logger.warn("APNs VoIP connection error", {error: String(error)});
+      close();
+      finish(false);
+    });
+
+    const request = client.request({
+      ":method": "POST",
+      ":path": `/3/device/${hex}`,
+      ":scheme": "https",
+      "apns-topic": `${bundleId}.voip`,
+      "apns-push-type": "voip",
+      "apns-priority": "10",
+      "apns-expiration": String(Math.floor(Date.now() / 1000) + Math.max(30, params.expirationSeconds ?? 90)),
+      "apns-collapse-id": params.collapseId.slice(0, 64),
+      "authorization": `bearer ${auth}`,
+      "content-type": "application/json; charset=utf-8",
+    });
+    let status = 0;
+    let response = "";
+    request.setTimeout(15_000, () => {
+      try {
+        request.close();
+      } catch {
+        // no-op
+      }
+      close();
+      finish(false);
+    });
+    request.on("response", (headers) => {
+      status = Number(headers[":status"] || 0);
+    });
+    request.on("data", (chunk: Buffer | string) => {
+      response = `${response}${chunk.toString()}`.slice(0, 512);
+    });
+    request.on("end", () => {
+      if (status !== 200) {
+        functions.logger.warn("APNs VoIP push rejected", {status, reason: response || "unknown"});
+      }
+      close();
+      finish(status === 200);
+    });
+    request.on("error", (error) => {
+      functions.logger.warn("APNs VoIP request error", {error: String(error)});
+      close();
+      finish(false);
+    });
+    request.end(JSON.stringify({aps: {"content-available": 1}, ...params.data}));
+  });
+};
+
+const sendVoipCallPayload = async (
+  userData: FirebaseFirestore.DocumentData | undefined,
+  data: Record<string, string>,
+  collapseId: string,
+): Promise<boolean> => {
+  const token = activeCallVoipToken(userData);
+  if (token.length < 32 || !apnsVoipCredentialsReady()) return false;
+  const preferredSandbox = userData?.apnsVoipUsesSandbox === true ||
+    userData?.apnsVoipUsesSandbox === "true" ||
+    process.env.APNS_USE_SANDBOX === "1" || process.env.APNS_USE_SANDBOX === "true";
+  let delivered = await sendApnsVoipCallPush({
+    deviceTokenHex: token,
+    data,
+    collapseId,
+    useSandbox: preferredSandbox,
+  });
+  if (!delivered) {
+    delivered = await sendApnsVoipCallPush({
+      deviceTokenHex: token,
+      data,
+      collapseId,
+      useSandbox: !preferredSandbox,
+    });
+  }
+  return delivered;
+};
+
 const notifyFollowers = async (params: {
   actorId: string;
   title: string;
@@ -2202,66 +2623,73 @@ const notifyIncomingCallRecipients = async (params: {
     (callType === "video" ? "Incoming group video call" : "Incoming group voice call") :
     (callType === "video" ? "Incoming video call" : "Incoming voice call");
   const body = callerName || "Incoming call";
+  const callPayload: Record<string, string> = {
+    type: "incoming_call",
+    receiverId: "",
+    callerId,
+    chatId,
+    callId,
+    sessionId: callId,
+    callerName: body,
+    callType,
+    isGroup: isGroup ? "true" : "false",
+    title,
+    body,
+  };
 
   const receiverDocs = await Promise.all(
     uniqueReceiverIds.map((receiverId) => db.collection("users").doc(receiverId).get())
   );
 
-  const sendTasks: Array<Promise<string>> = [];
+  const sendTasks: Array<{receiverId: string; token: string; task: Promise<string>}> = [];
+  const voipTasks: Array<Promise<boolean>> = [];
   const missingTokenUids: string[] = [];
 
   receiverDocs.forEach((userDoc, index) => {
     const receiverId = uniqueReceiverIds[index];
-    const tokens = collectUserFcmTokens(userDoc.data());
-    if (tokens.length === 0) {
+    const userData = userDoc.data();
+    const tokens = collectActiveCallFcmTokens(userData);
+    const voipToken = activeCallVoipToken(userData);
+    const targetDeviceId = activeCallDeviceSessionId(userData);
+    if (tokens.length === 0 && voipToken.length < 32) {
       missingTokenUids.push(receiverId);
       return;
     }
 
+    const recipientPayload = targetDeviceId ?
+      {...callPayload, receiverId, targetDeviceId} :
+      {...callPayload, receiverId};
+    if (voipToken.length >= 32) {
+      voipTasks.push(sendVoipCallPayload(userData, recipientPayload, `call-${callId}`));
+    }
+
     tokens.forEach((token) => {
-      sendTasks.push(
-        admin.messaging().send({
+      sendTasks.push({
+        receiverId,
+        token,
+        task: admin.messaging().send({
           token,
-          // No top-level `notification` so Android still receives data in onMessageReceived.
-          // APNs alert below wakes / alerts iOS when CallKit/PushKit is not available.
-          data: {
-            type: "incoming_call",
-            receiverId,
-            callerId,
-            chatId,
-            callId,
-            sessionId: callId,
-            callerName: body,
-            callType,
-            isGroup: isGroup ? "true" : "false",
-            title,
-            body,
-          },
+          // Android consumes this high-priority data message. iOS uses the
+          // VoIP message above so CallKit owns the one native ringtone.
+          data: recipientPayload,
           android: {
             priority: "high",
             ttl: 60 * 1000,
           },
           apns: {
             headers: {
-              "apns-priority": "10",
-              "apns-push-type": "alert",
+              "apns-priority": "5",
+              "apns-push-type": "background",
               "apns-expiration": String(Math.floor(Date.now() / 1000) + 60),
             },
             payload: {
               aps: {
-                "alert": {
-                  title,
-                  body,
-                },
-                "sound": "default",
                 "content-available": 1,
-                "mutable-content": 1,
-                "category": "INCOMING_CALL",
               },
             },
           },
         }),
-      );
+      });
     });
   });
 
@@ -2275,14 +2703,31 @@ const notifyIncomingCallRecipients = async (params: {
   }
 
   if (sendTasks.length > 0) {
-    const results = await Promise.allSettled(sendTasks);
+    const results = await Promise.allSettled(sendTasks.map(({task}) => task));
     const failures = results.filter((result) => result.status === "rejected");
+    const invalidTokensByUser = new Map<string, Set<string>>();
+    results.forEach((result, index) => {
+      if (result.status !== "rejected" || !isInvalidFcmTokenError(result.reason)) return;
+      const {receiverId, token} = sendTasks[index];
+      const tokens = invalidTokensByUser.get(receiverId) || new Set<string>();
+      tokens.add(token);
+      invalidTokensByUser.set(receiverId, tokens);
+    });
+    await pruneInvalidFcmTokens(invalidTokensByUser);
     if (failures.length > 0) {
       functions.logger.warn("Some incoming call FCM sends failed", {
         callId,
         failed: failures.length,
         total: results.length,
       });
+    }
+  }
+
+  if (voipTasks.length > 0) {
+    const results = await Promise.allSettled(voipTasks);
+    const failed = results.filter((result) => result.status === "rejected" || result.value === false).length;
+    if (failed > 0) {
+      functions.logger.warn("Some incoming call VoIP sends failed", {callId, failed, total: results.length});
     }
   }
 };
@@ -2306,20 +2751,28 @@ const notifyCallCancelledRecipients = async (params: {
   );
 
   const sendTasks: Array<Promise<string>> = [];
+  const voipTasks: Array<Promise<boolean>> = [];
   receiverDocs.forEach((userDoc, index) => {
     const receiverId = uniqueReceiverIds[index];
-    collectUserFcmTokens(userDoc.data()).forEach((token) => {
+    const userData = userDoc.data();
+    const targetDeviceId = activeCallDeviceSessionId(userData);
+    const cancellationPayload = {
+      type: "call_cancelled",
+      receiverId,
+      callerId,
+      chatId,
+      callId,
+      sessionId: callId,
+      ...(targetDeviceId ? {targetDeviceId} : {}),
+    };
+    if (activeCallVoipToken(userData).length >= 32) {
+      voipTasks.push(sendVoipCallPayload(userData, cancellationPayload, `call-cancel-${callId}`));
+    }
+    collectActiveCallFcmTokens(userData).forEach((token) => {
       sendTasks.push(
         admin.messaging().send({
           token,
-          data: {
-            type: "call_cancelled",
-            receiverId,
-            callerId,
-            chatId,
-            callId,
-            sessionId: callId,
-          },
+          data: cancellationPayload,
           android: {
             priority: "high",
             ttl: 30 * 1000,
@@ -2344,21 +2797,29 @@ const notifyCallCancelledRecipients = async (params: {
   if (sendTasks.length > 0) {
     await Promise.allSettled(sendTasks);
   }
+  if (voipTasks.length > 0) {
+    await Promise.allSettled(voipTasks);
+  }
 };
 
+// Android keeps blocks in settings/chat_privacy; iOS writes users/{uid}/blocked_users (legacy: blockedUsers).
 const readBlockedUserIds = async (uid: string): Promise<string[]> => {
   if (!uid) return [];
-  const settingsDoc = await db
-    .collection("users")
-    .doc(uid)
-    .collection("settings")
-    .doc("chat_privacy")
-    .get();
+  const userRef = db.collection("users").doc(uid);
+  const [settingsDoc, blockedSnap, legacyBlockedSnap] = await Promise.all([
+    userRef.collection("settings").doc("chat_privacy").get(),
+    userRef.collection("blocked_users").select().limit(1000).get(),
+    userRef.collection("blockedUsers").select().limit(1000).get(),
+  ]);
   const raw = settingsDoc.data()?.blockedUserIds;
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  return raw.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const ids = new Set<string>(
+    Array.isArray(raw) ?
+      raw.filter((value): value is string => typeof value === "string" && value.trim().length > 0) :
+      []
+  );
+  blockedSnap.docs.forEach((doc) => ids.add(doc.id));
+  legacyBlockedSnap.docs.forEach((doc) => ids.add(doc.id));
+  return [...ids];
 };
 
 const buildChatPreview = (messageData: FirebaseFirestore.DocumentData): string => {
@@ -2397,13 +2858,22 @@ const notifyChatParticipants = async (params: {
   const participants = Array.isArray(rawParticipants) ?
     rawParticipants.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0) :
     [];
+  const rawExitedParticipantIds = chatDoc.data()?.exitedParticipantIds;
+  const exitedParticipantIds = new Set(
+    Array.isArray(rawExitedParticipantIds) ?
+      rawExitedParticipantIds
+        .filter((value: unknown): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0) :
+      []
+  );
   if (participants.length === 0) return;
 
   const senderBlockedUserIds = await readBlockedUserIds(senderId);
   const tokens: string[] = [];
 
   for (const participantId of participants) {
-    if (!participantId || participantId === senderId) {
+    if (!participantId || participantId === senderId || exitedParticipantIds.has(participantId)) {
       continue;
     }
     if (senderBlockedUserIds.includes(participantId)) {
@@ -2807,7 +3277,32 @@ async function clearIncomingCallSessionMirrors(
   await batch.commit();
 }
 
-export const onCallSessionCreated = functions.firestore
+/**
+ * Releases the per-chat call lock only when it still points at this session.
+ * @param {string} sessionId The call session id.
+ * @param {admin.firestore.DocumentData | undefined} session The call session data.
+ */
+async function releaseChatCallLock(
+  sessionId: string,
+  session: admin.firestore.DocumentData | undefined,
+): Promise<void> {
+  const chatId = typeof session?.chatId === "string" ? session.chatId.trim() : "";
+  if (!chatId) return;
+
+  const chatRef = db.collection("chats").doc(chatId);
+  await db.runTransaction(async (transaction) => {
+    const chat = await transaction.get(chatRef);
+    if (!chat.exists || String((chat.data() || {}).activeCallSessionId || "").trim() !== sessionId) {
+      return;
+    }
+    transaction.update(chatRef, {
+      activeCallSessionId: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+export const onCallSessionCreated = functions.runWith({secrets: [secretApnsP8]}).firestore
   .document("call_sessions/{sessionId}")
   .onCreate(async (snap, context) => {
     const session = snap.data();
@@ -2845,7 +3340,6 @@ export const onCallSessionCreated = functions.firestore
     return undefined;
   });
 
-/** Syncs or clears incoming_call_sessions mirrors when call_sessions change (replaces legacy onUpdate-only handler). */
 /**
  * Writes the final server-owned call history after a caller ends or a direct callee declines.
  * @param {string} sessionId call_sessions document id.
@@ -2902,7 +3396,8 @@ async function syncTerminalCallHistory(
   await batch.commit();
 }
 
-export const onCallSessionUpdated = functions.firestore
+/** Syncs or clears incoming_call_sessions mirrors when call_sessions change (replaces legacy onUpdate-only handler). */
+export const onCallSessionUpdated = functions.runWith({secrets: [secretApnsP8]}).firestore
   .document("call_sessions/{sessionId}")
   .onWrite(async (change, context) => {
     const sessionId = context.params.sessionId as string;
@@ -2910,6 +3405,7 @@ export const onCallSessionUpdated = functions.firestore
     const after = change.after.exists ? change.after.data() : undefined;
     const wasRinging = before?.status === "ringing";
     const isRinging = after?.status === "ringing";
+    const terminalStatus = typeof after?.status === "string" ? after.status.trim().toLowerCase() : "";
 
     await syncTerminalCallHistory(sessionId, after);
 
@@ -2918,8 +3414,13 @@ export const onCallSessionUpdated = functions.firestore
         sessionId,
         before ?? after,
       );
-      // Dismiss ring UI on Android/iOS when a ringing session ends/decline/accept-elsewhere.
-      if (wasRinging) {
+      if (["ended", "declined", "missed"].includes(terminalStatus)) {
+        await releaseChatCallLock(sessionId, after);
+      }
+      // Accepting a call clears only the ringing mirror. It is not a cancellation:
+      // a cancellation push here can race the receiver's Agora join and immediately
+      // dismiss the call they just answered.
+      if (wasRinging && ["ended", "declined", "missed"].includes(terminalStatus)) {
         const session = before ?? after;
         const callerId = typeof session?.callerId === "string" ? session.callerId.trim() : "";
         const receiverId = typeof session?.receiverId === "string" ? session.receiverId.trim() : "";
@@ -3020,6 +3521,8 @@ const sendDatingActivityPush = async (params: {
     readBlockedUserIds(actorId),
   ]);
   if (!recipientDoc.exists) return;
+  // Never send dating activity to minors or accounts without dating access.
+  if (resolveDatingAccessForUserData((recipientDoc.data() || {}) as Record<string, unknown>) !== true) return;
   if (recipientBlocked.includes(actorId) || actorBlocked.includes(recipientId)) return;
   if (settingsDoc.data()?.datingActivity === false) return;
 
@@ -3056,6 +3559,28 @@ const sendDatingActivityPush = async (params: {
   }
 };
 
+const DATING_LOOP_LIKE_CONTEXT = "Dating Loop Profile";
+const DATING_SUPER_LIKES_PER_DAY = 1;
+const DATING_SUPER_LIKE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// Server-side Super Like allowance (the app limit is client-only). Server-only collection.
+const claimDailyDatingSuperLike = async (senderId: string, recipientId: string): Promise<boolean> => {
+  const quotaRef = db.collection("dating_super_like_quota").doc(senderId);
+  return db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(quotaRef);
+    const nowMs = Date.now();
+    const storedRecent: unknown = snap.data()?.recent;
+    const recent = (Array.isArray(storedRecent) ? storedRecent : [])
+      .filter((entry: unknown): entry is {recipientId: string; atMs: number} =>
+        !!entry && typeof (entry as {atMs?: unknown}).atMs === "number" &&
+        nowMs - (entry as {atMs: number}).atMs < DATING_SUPER_LIKE_WINDOW_MS);
+    if (recent.some((entry: {recipientId: string}) => entry.recipientId === recipientId)) return true;
+    if (recent.length >= DATING_SUPER_LIKES_PER_DAY) return false;
+    transaction.set(quotaRef, {recent: [...recent, {recipientId, atMs: nowMs}], updatedAtMs: nowMs});
+    return true;
+  });
+};
+
 export const onDatingLoopInvitationWriteNotify = functions.firestore
   .document("users/{userId}/invitations/{senderId}")
   .onWrite(async (change, context) => {
@@ -3070,7 +3595,12 @@ export const onDatingLoopInvitationWriteNotify = functions.firestore
     if (afterStatus === "pending" && beforeStatus !== "pending") {
       const senderName = datingPushString(after.senderName, 80) ||
         await readDatingDisplayName(senderId, "Someone");
-      const isSuperLike = datingPushString(after.context, 80).toLowerCase().includes("super like");
+      const requestedSuperLike = datingPushString(after.context, 80).toLowerCase().includes("super like");
+      const isSuperLike = requestedSuperLike && await claimDailyDatingSuperLike(senderId, userId);
+      if (requestedSuperLike && !isSuperLike) {
+        // Over the daily allowance (modified client): keep the like, drop the Super Like.
+        await change.after.ref.set({context: DATING_LOOP_LIKE_CONTEXT}, {merge: true});
+      }
       await sendDatingActivityPush({
         recipientId: userId,
         actorId: senderId,
@@ -5992,6 +6522,105 @@ const isUserBlockedInPrivacySettings = (
   return Array.isArray(blockedUserIds) && blockedUserIds.includes(targetUserId);
 };
 
+// Legacy rejoin checkouts parked profiles in awaiting_rejoin_payment; they can still rejoin.
+const isBlindDateRejoinableStatus = (status: unknown): boolean =>
+  ["matched", "awaiting_rejoin_payment"].includes(normalizeProfileStatus(status));
+
+const BLIND_DATE_MAX_MEDIA = 12;
+const BLIND_DATE_MAX_BIO_LENGTH = 1000;
+
+const assertBlindDateEnabled = async (): Promise<void> => {
+  const snap = await db.collection("app_config").doc("system_config").get();
+  if (snap.exists && snap.get("enableBlindDate") === false) {
+    throw new functions.https.HttpsError("failed-precondition", "Blind Date is temporarily unavailable. Try again later.");
+  }
+};
+
+// Media must come from the caller's own Blind Date or Dating Loop storage folders.
+const normalizeOwnedBlindDateMediaUrls = (userId: string, value: unknown): string[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Add at least one photo or video.");
+  }
+  if (value.length > BLIND_DATE_MAX_MEDIA) {
+    throw new functions.https.HttpsError("invalid-argument", `You can add up to ${BLIND_DATE_MAX_MEDIA} photos or videos.`);
+  }
+  const ownedPrefixes = [`blind_date_media/${userId}/`, `dating_images/${userId}/`];
+  return value.map((raw) => {
+    const url = typeof raw === "string" ? raw.trim() : "";
+    let decoded = url;
+    try {
+      decoded = decodeURIComponent(url);
+    } catch {
+      decoded = url;
+    }
+    if (!url.startsWith("https://") || url.length > 2048 || !ownedPrefixes.some((prefix) => decoded.includes(prefix))) {
+      throw new functions.https.HttpsError("invalid-argument", "Upload your Blind Date photos from the app and try again.");
+    }
+    return url;
+  });
+};
+
+const blindDateUsersBlockedInTransaction = async (
+  transaction: FirebaseFirestore.Transaction,
+  firstUid: string,
+  secondUid: string
+): Promise<boolean> => {
+  const blockDocs = await Promise.all([
+    transaction.get(db.collection("users").doc(firstUid).collection("blocked_users").doc(secondUid)),
+    transaction.get(db.collection("users").doc(firstUid).collection("blockedUsers").doc(secondUid)),
+    transaction.get(db.collection("users").doc(secondUid).collection("blocked_users").doc(firstUid)),
+    transaction.get(db.collection("users").doc(secondUid).collection("blockedUsers").doc(firstUid)),
+  ]);
+  return blockDocs.some((doc) => doc.exists);
+};
+
+// After a paid rejoin the user goes back to the pool with a 3-day invite hold on the old pair
+// (releaseStaleBlindDateMatchHolds clears it); the former partner is told via partnerRejoinedAt.
+const finalizeBlindDateRejoin = (
+  transaction: FirebaseFirestore.Transaction,
+  userId: string,
+  blindProfileData: Record<string, unknown>,
+  now: admin.firestore.Timestamp,
+  activationFields: Record<string, unknown> = {}
+): void => {
+  const profileRef = db.collection("blindDateProfiles").doc(userId);
+  const partnerId = asNonEmptyString(blindProfileData.matchedPartnerId);
+  const formerPartnerId = asNonEmptyString(blindProfileData.formerMatchedPartnerId);
+
+  if (partnerId) {
+    transaction.set(profileRef, {
+      ...activationFields,
+      status: "active",
+      matchedPartnerId: admin.firestore.FieldValue.delete(),
+      formerMatchedPartnerId: partnerId,
+      matchReleasedAt: now,
+      matchHoldExpiredAt: admin.firestore.FieldValue.delete(),
+      updatedAt: now,
+    }, {merge: true});
+    transaction.set(db.collection("blindDateProfiles").doc(partnerId), {
+      matchedPartnerId: admin.firestore.FieldValue.delete(),
+      formerMatchedPartnerId: userId,
+      partnerRejoinedAt: now,
+      updatedAt: now,
+    }, {merge: true});
+    return;
+  }
+
+  transaction.set(profileRef, {
+    ...activationFields,
+    status: "active",
+    formerMatchedPartnerId: admin.firestore.FieldValue.delete(),
+    matchHoldExpiredAt: admin.firestore.FieldValue.delete(),
+    updatedAt: now,
+  }, {merge: true});
+  if (formerPartnerId) {
+    transaction.set(db.collection("blindDateProfiles").doc(formerPartnerId), {
+      formerMatchedPartnerId: admin.firestore.FieldValue.delete(),
+      updatedAt: now,
+    }, {merge: true});
+  }
+};
+
 export const joinBlindDate = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
@@ -5999,8 +6628,14 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
     }
     const userId = context.auth.uid;
     const requestData = data as JoinBlindDateRequest;
-    if (!requestData.mediaUrls || !Array.isArray(requestData.mediaUrls) || requestData.mediaUrls.length === 0 || !requestData.bio || !requestData.gender) {
-      throw new functions.https.HttpsError("invalid-argument", "Missing required data: mediaUrls, bio, or gender.");
+    await assertBlindDateEnabled();
+    const mediaUrls = normalizeOwnedBlindDateMediaUrls(userId, requestData.mediaUrls);
+    const bio = typeof requestData.bio === "string" ? requestData.bio.trim() : "";
+    if (!bio || !requestData.gender) {
+      throw new functions.https.HttpsError("invalid-argument", "Add a short bio and choose your gender.");
+    }
+    if (bio.length > BLIND_DATE_MAX_BIO_LENGTH) {
+      throw new functions.https.HttpsError("invalid-argument", `Keep your bio under ${BLIND_DATE_MAX_BIO_LENGTH} characters.`);
     }
     const gender = normalizeBlindDateGender(requestData.gender);
     const lookingFor = normalizeBlindDatePreference(requestData.lookingFor);
@@ -6024,12 +6659,13 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
     const profilePayload = {
       userId,
       name: displayNameForBlind,
-      profilePictureUrl: userRecord.photoURL ?? "",
+      // Same rule as the profile editor: the cover is the first Blind Date photo, not the account photo.
+      profilePictureUrl: mediaUrls[0] || "",
       gender,
       lookingFor,
-      media: requestData.mediaUrls,
-      mediaUrls: requestData.mediaUrls,
-      bio: requestData.bio,
+      media: mediaUrls,
+      mediaUrls,
+      bio,
     };
     const userPreview = await userRef.get();
     if (!userPreview.exists) throw new functions.https.HttpsError("not-found", "User profile not found.");
@@ -6168,11 +6804,12 @@ export const acceptBlindDateInvitation = functions.runWith({enforceAppCheck: tru
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     const acceptorId = context.auth.uid;
-    const senderId = (data as AcceptInvitationRequest).senderId;
+    const senderId = asNonEmptyString((data as AcceptInvitationRequest).senderId);
     if (!senderId) throw new functions.https.HttpsError("invalid-argument", "The 'senderId' is required.");
     if (senderId === acceptorId) {
       throw new functions.https.HttpsError("invalid-argument", "You cannot accept your own invitation.");
     }
+    await assertBlindDateEnabled();
 
     const acceptorAccountRef = db.collection("users").doc(acceptorId);
     const senderAccountRef = db.collection("users").doc(senderId);
@@ -6194,6 +6831,7 @@ export const acceptBlindDateInvitation = functions.runWith({enforceAppCheck: tru
         const acceptorInvite = await transaction.get(acceptorInviteRef);
         const acceptorPrivacy = await transaction.get(acceptorPrivacyRef);
         const senderPrivacy = await transaction.get(senderPrivacyRef);
+        const blockedViaSubcollection = await blindDateUsersBlockedInTransaction(transaction, acceptorId, senderId);
 
         if (!acceptorAccount.exists || !senderAccount.exists) throw new functions.https.HttpsError("not-found", "Account record missing.");
         assertDatingEligibleAccount(
@@ -6206,7 +6844,8 @@ export const acceptBlindDateInvitation = functions.runWith({enforceAppCheck: tru
         );
         if (!acceptorProfile.exists || acceptorProfile.data()?.status !== "active") throw new functions.https.HttpsError("failed-precondition", "Your profile is not active for matching.");
         if (!senderProfile.exists || senderProfile.data()?.status !== "active") throw new functions.https.HttpsError("failed-precondition", "The other user is no longer available for matching.");
-        if (isUserBlockedInPrivacySettings(acceptorPrivacy.data(), senderId) ||
+        if (blockedViaSubcollection ||
+            isUserBlockedInPrivacySettings(acceptorPrivacy.data(), senderId) ||
             isUserBlockedInPrivacySettings(senderPrivacy.data(), acceptorId)) {
           throw new functions.https.HttpsError("failed-precondition", "This match is unavailable because one of you blocked the other.");
         }
@@ -6221,7 +6860,25 @@ export const acceptBlindDateInvitation = functions.runWith({enforceAppCheck: tru
         if (invitationStatus !== "pending") throw new functions.https.HttpsError("failed-precondition", "This invitation is no longer pending.");
 
         const now = admin.firestore.Timestamp.now();
-        const chatData = {chatId: newChatRef.id, participants: [acceptorId, senderId], lastMessageText: "Blind Date match! Say hi.", lastMessageTimestamp: now};
+        const seedPreview = "Blind Date match! Say hi.";
+        const acceptorName = String(acceptorProfile.data()?.name || "").trim() || "Blind Date match";
+        const senderName = String(senderProfile.data()?.name || "").trim() || "Blind Date match";
+        const chatData = {
+          chatId: newChatRef.id,
+          chatType: "direct",
+          source: "blind_date",
+          participants: [acceptorId, senderId],
+          participantPairKey: [acceptorId, senderId].sort().join("_"),
+          participantDisplayNames: {[acceptorId]: acceptorName, [senderId]: senderName},
+          exitedParticipantIds: [],
+          lastMessage: seedPreview,
+          lastMessageText: seedPreview,
+          lastMessageTimestamp: now,
+          lastMessageSenderId: acceptorId,
+          lastMessageType: "TEXT",
+          createdAt: now,
+          updatedAt: now,
+        };
         transaction.set(newChatRef, chatData);
         transaction.update(acceptorProfileRef, {
           status: "matched",
@@ -6310,6 +6967,7 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) throw new functions.https.HttpsError("unauthenticated", "You must be logged in to rejoin.");
     const userId = context.auth.uid;
+    await assertBlindDateEnabled();
     const feeSettings = await getRuntimeFeeSettings();
     const blindDateFee = feeSettings.blindDateFeeUsd;
     const userRef = db.collection("users").doc(userId);
@@ -6325,11 +6983,11 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
         const [userDoc, profileDoc] = await Promise.all([transaction.get(userRef), transaction.get(blindDateProfileRef)]);
         if (!userDoc.exists) throw new functions.https.HttpsError("not-found", "User profile not found.");
         assertDatingEligibleAccount((userDoc.data() || {}) as Record<string, unknown>);
-        if (!profileDoc.exists || normalizeProfileStatus(profileDoc.data()?.status) !== "matched") {
+        if (!profileDoc.exists || !isBlindDateRejoinableStatus(profileDoc.data()?.status)) {
           throw new functions.https.HttpsError("failed-precondition", "You are not in a matched state to rejoin.");
         }
         const now = admin.firestore.Timestamp.now();
-        transaction.update(blindDateProfileRef, {status: "active", updatedAt: now});
+        finalizeBlindDateRejoin(transaction, userId, (profileDoc.data() || {}) as Record<string, unknown>, now);
         transaction.set(userRef.collection("transactions").doc(), {
           title: "Blind Date Re-join (Staff Exempt)", amount: 0, type: "INFO", status: "COMPLETED", timestamp: now,
           source: "BLIND_DATE_STAFF_EXEMPT", note: "Staff/owner exemption applied. No fee charged.",
@@ -6368,7 +7026,7 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
           if (isStaffFeeExempt(userData, (context.auth?.token || {}) as Record<string, unknown>)) {
             throw new functions.https.HttpsError("failed-precondition", "Your fee exemption changed. Rejoin again without payment.");
           }
-          if (!profileDoc.exists || normalizeProfileStatus(profileDoc.data()?.status) !== "matched") {
+          if (!profileDoc.exists || !isBlindDateRejoinableStatus(profileDoc.data()?.status)) {
             throw new functions.https.HttpsError("failed-precondition", "You are not in a matched state to rejoin.");
           }
           return {
@@ -6396,7 +7054,7 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
         if (isStaffFeeExempt(userData, (context.auth?.token || {}) as Record<string, unknown>)) {
           throw new functions.https.HttpsError("failed-precondition", "Your fee exemption changed. Rejoin again without checkout.");
         }
-        if (!profileDoc.exists || normalizeProfileStatus(profileDoc.data()?.status) !== "matched") {
+        if (!profileDoc.exists || !isBlindDateRejoinableStatus(profileDoc.data()?.status)) {
           throw new functions.https.HttpsError("failed-precondition", "You are not in a matched state to rejoin.");
         }
         return {
@@ -6666,6 +7324,7 @@ export const payForAgentRole = functions.runWith({enforceAppCheck: true})
 // (Your interfaces remain the same)
 interface RecipientBeneficiary {
   id?: string;
+  type?: string;
   name: string;
   accountNumber: string;
   bankCode?: string;
@@ -6679,6 +7338,10 @@ interface RecipientBeneficiary {
   recipientAddress?: string;
   bankAddress?: string;
   invoiceReference?: string;
+  providerChannel?: string;
+  afriexProviderChannel?: string;
+  route?: string;
+  afriexPayoutRoute?: string;
 }
 
 interface InitiateTransferRequest {
@@ -6722,6 +7385,7 @@ interface CreateBeneficiaryVerificationRequest {
 interface ApplyApprovedBeneficiaryVerificationRequest {
   beneficiaryId?: unknown;
   verificationId?: unknown;
+  replaceExisting?: unknown;
 }
 
 type BeneficiaryVerificationStatus =
@@ -7693,24 +8357,22 @@ const runBeneficiaryVerificationDecision = async (params: {
         countryCode,
         accountNumber: params.prepared.phoneE164,
         institutionCode: params.prepared.institutionCodeInput,
-        allowUpstreamOutageFallback: params.allowProviderNameOverride === true,
       });
       provider.predictedProvider = resolved.institutionName;
       if (!resolved.accountRouteVerified) {
         provider.providerAccountName = null;
         provider.nameMatchScore = null;
         provider.rawStatus = AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS;
-        functions.logger.warn("Afriex resolver unavailable; registering catalog-confirmed mobile money route", {
+        functions.logger.warn("Afriex resolver unavailable; rejecting mobile money recipient verification", {
           country: params.prepared.countryCanonical,
           institutionCode: resolved.institutionCode,
         });
         return {
-          status: "APPROVED",
-          canProceed: true,
-          matchLevel: "PHONE_ONLY",
-          reasonCode: "VERIFIED_CATALOG_ROUTE_PROVIDER_RESOLVE_UNAVAILABLE",
-          reasonMessage: "Afriex could not confirm this number right now, but the country and provider are supported. " +
-            "Confirm the recipient's name with them before saving. Afriex checks the number again when money is sent.",
+          status: "REJECTED",
+          canProceed: false,
+          matchLevel: "MISMATCH",
+          reasonCode: "AFRIEX_RECIPIENT_RESOLUTION_UNAVAILABLE",
+          reasonMessage: "The payment partner cannot verify this mobile money route right now. Try again shortly; no recipient was saved.",
           provider,
           aml,
         };
@@ -8299,6 +8961,14 @@ type AfriexBusinessCustomer = {
   reused: boolean;
 };
 
+// Afriex customer identity lives only in the private doc; any public copy is removed on write.
+const AFRIEX_PUBLIC_CUSTOMER_FIELD_CLEANUP: FirebaseFirestore.DocumentData = {
+  afriexBusinessCustomerId: admin.firestore.FieldValue.delete(),
+  afriexBusinessCustomerReference: admin.firestore.FieldValue.delete(),
+  afriexBusinessCustomerCountry: admin.firestore.FieldValue.delete(),
+  afriexBusinessCustomerUpdatedAt: admin.firestore.FieldValue.delete(),
+};
+
 const afriexCustomerPrivateRef = (userId: string): FirebaseFirestore.DocumentReference =>
   db.collection("users").doc(userId).collection("private").doc("afriex_customer");
 
@@ -8427,18 +9097,13 @@ const ensureAfriexCustomerForUser = async (userId: string): Promise<AfriexBusine
     throw new functions.https.HttpsError("invalid-argument", "Add a valid mobile number before verifying your customer profile.");
   }
 
-  const storedCustomerId = asNonEmptyString(
-    stored["customerId"],
-    user["afriexBusinessCustomerId"]
-  );
-  const storedCountryCode = asNonEmptyString(
-    stored["countryCode"],
-    user["afriexBusinessCustomerCountry"]
-  )?.toUpperCase();
+  // Only the server-owned private doc is trusted; the public user doc copy was owner-editable.
+  const storedCustomerId = asNonEmptyString(stored["customerId"]);
+  const storedCountryCode = asNonEmptyString(stored["countryCode"])?.toUpperCase();
   if (storedCustomerId && storedCountryCode === normalizedCountryCode) {
     return {
       customerId: storedCustomerId,
-      reference: asNonEmptyString(stored["reference"], user["afriexBusinessCustomerReference"]) || null,
+      reference: asNonEmptyString(stored["reference"]) || null,
       countryCode: normalizedCountryCode,
       createdAt: asNonEmptyString(stored["createdAt"]) || null,
       updatedAt: asNonEmptyString(stored["updatedAt"]) || null,
@@ -8491,12 +9156,7 @@ const ensureAfriexCustomerForUser = async (userId: string): Promise<AfriexBusine
       updatedAt: customer.updatedAt,
       customerSyncedAt: now,
     }, {merge: true}),
-    userRef.set({
-      afriexBusinessCustomerId: customer.customerId,
-      afriexBusinessCustomerReference: customer.reference,
-      afriexBusinessCustomerCountry: customer.countryCode,
-      afriexBusinessCustomerUpdatedAt: now,
-    }, {merge: true}),
+    userRef.set(AFRIEX_PUBLIC_CUSTOMER_FIELD_CLEANUP, {merge: true}),
   ]);
   return customer;
 };
@@ -8587,12 +9247,7 @@ export const verifyAfriexCustomer = functions.runWith({enforceAppCheck: true})
           bvnVerificationLastFailureAt: admin.firestore.FieldValue.delete(),
           bvnVerificationLastFailureCode: admin.firestore.FieldValue.delete(),
         }, {merge: true}),
-        db.collection("users").doc(context.auth.uid).set({
-          afriexBusinessCustomerId: persistedCustomer.customerId,
-          afriexBusinessCustomerReference: persistedCustomer.reference,
-          afriexBusinessCustomerCountry: "NG",
-          afriexBusinessCustomerUpdatedAt: verifiedAt,
-        }, {merge: true}),
+        db.collection("users").doc(context.auth.uid).set(AFRIEX_PUBLIC_CUSTOMER_FIELD_CLEANUP, {merge: true}),
       ]);
       return {
         success: true,
@@ -8622,8 +9277,12 @@ const buildRecipientPayoutMethodPublicPayload = (
     methodType === "SWIFT_BANK" ? "SWIFT" :
       (methodType === "BANK" ? "BANK" :
         (methodType === "MOBILE_MONEY" ? "MOBILE_MONEY" : null));
+  const requiresProviderNameMatch = deliveryRoute === "BANK" || deliveryRoute === "SWIFT";
+  const hasProviderNameMatch = data.accountNameVerified === true &&
+    !!asNonEmptyString(data.providerResolvedName);
   const isVerifiedReceiveRoute = data.appUserReceiveRouteVerified === true &&
     (deliveryRoute === "BANK" || deliveryRoute === "MOBILE_MONEY" || deliveryRoute === "SWIFT") &&
+    (!requiresProviderNameMatch || hasProviderNameMatch) &&
     isAppUserReceiveRouteEnabled(data as Record<string, unknown>);
   if (!isVerifiedReceiveRoute || !deliveryRoute) {
     return null;
@@ -8650,7 +9309,6 @@ const buildRecipientPayoutMethodPublicPayload = (
       bankName: asNonEmptyString(data.bankName, data.bank, data.institutionName) ||
         (deliveryRoute === "SWIFT" ? "SWIFT Bank" : "Bank Account"),
       country: asNonEmptyString(data.country, data.countryCode) || "",
-      accountHolderName: asNonEmptyString(data.providerResolvedName, data.accountHolderName) || "",
       institutionCode: asNonEmptyString(data.institutionCode, data.swiftCode, data.swiftBic) || "",
       swiftBic: asNonEmptyString(data.swiftCode, data.swiftBic) || "",
     };
@@ -9278,6 +9936,12 @@ const resolveAfriexWebhookSecret = (): string | undefined => {
 
 // Soft verification is an explicit sandbox-only UAT aid. Production webhooks
 // always require a valid provider signature or configured shared secret.
+const sharedSecretMatches = (provided: string | undefined, expected: string): boolean => {
+  const providedDigest = createHash("sha256").update(provided || "").digest();
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  return !!provided && timingSafeEqual(providedDigest, expectedDigest);
+};
+
 const isAfriexSandboxSoftWebhookVerificationEnabled = (): boolean =>
   resolveAfriexBusinessApiConfig().environment === "sandbox" &&
   ["1", "true", "yes", "on"].includes(String(process.env.AFRIEX_WEBHOOK_SOFT_VERIFY || "").trim().toLowerCase());
@@ -11174,7 +11838,19 @@ const hasServerIssuedBeneficiaryProof = (stored: Record<string, unknown>): boole
   // when a recipient predates the newer client-side confirmation audit fields.
   const hasCanonicalServerIdentityProof =
     isServerMarkedVerified && verifiedStatus && hasServerRouteIdentity;
+  // Resolver outages can leave an older customer-confirmed draft. It must not
+  // be reused for a funded payout until a current provider check succeeds.
+  if (
+    type === "MOBILE_MONEY" &&
+    String(stored.providerRouteValidation || "").trim().toUpperCase() ===
+      "PENDING_AFRIEX_PAYOUT_VALIDATION"
+  ) {
+    return false;
+  }
   if (hasCanonicalServerIdentityProof) return true;
+  // Owners can edit route fields on their saved recipients. A stored identity
+  // that no longer matches means the route changed after verification.
+  if (asNonEmptyString(stored.recipientIdentityKey) && !hasServerRouteIdentity) return false;
 
   const hasCompleteLegacyRoute = (() => {
     try {
@@ -11187,8 +11863,8 @@ const hasServerIssuedBeneficiaryProof = (stored: Record<string, unknown>): boole
       return false;
     }
   })();
-  // Beneficiaries are server-write-only in Firestore. Earlier iOS releases
-  // stored a verified provider status and complete route without the later
+  // Firestore rules reset verificationStatus when an owner edits route fields.
+  // Earlier iOS releases stored a verified provider status and complete route without the later
   // marker/audit fields; accept that server-owned proof rather than forcing
   // a second provider lookup from Android.
   if (verifiedStatus && hasCompleteLegacyRoute) return true;
@@ -11344,14 +12020,7 @@ const verifyBeneficiaryForServerSave = async (
       countryCode: country.iso2,
       accountNumber: asNonEmptyString(request.accountNumber, request.phone) || "",
       institutionCode: asNonEmptyString(request.institutionCode) || "",
-      allowUpstreamOutageFallback: true,
     });
-    if (!resolved.accountRouteVerified) {
-      functions.logger.warn("Afriex resolver unavailable; saving catalog-confirmed mobile money recipient", {
-        country: country.iso2,
-        institutionCode: resolved.institutionCode,
-      });
-    }
     const resolvedRecipientPhone = resolved.recipientPhone || normalizeAfriexIdentityPhone(
       asNonEmptyString(request.accountNumber, request.phone) || ""
     );
@@ -11670,6 +12339,7 @@ interface ApplyApprovedBankRecipientVerificationRequest {
   beneficiaryId?: unknown;
   verificationId?: unknown;
   recipientConfirmed?: unknown;
+  replaceExisting?: unknown;
 }
 
 /**
@@ -11747,6 +12417,7 @@ export const applyApprovedBankRecipientVerification = functions.runWith({enforce
     const request = (data || {}) as ApplyApprovedBankRecipientVerificationRequest;
     const beneficiaryId = asNonEmptyString(request.beneficiaryId);
     const verificationId = asNonEmptyString(request.verificationId);
+    const replaceExisting = request.replaceExisting === true;
     if (!beneficiaryId || !/^[A-Za-z0-9_-]{8,128}$/.test(beneficiaryId)) {
       throw new functions.https.HttpsError("invalid-argument", "A valid recipient identifier is required.");
     }
@@ -11791,7 +12462,7 @@ export const applyApprovedBankRecipientVerification = functions.runWith({enforce
       if (asNonEmptyString((verification.audit || {}).purpose) !== "BANK_RECIPIENT_REGISTRATION") {
         throw new functions.https.HttpsError("failed-precondition", "This verification cannot create a bank recipient.");
       }
-      if (beneficiarySnap.exists) {
+      if (beneficiarySnap.exists && !replaceExisting) {
         throw new functions.https.HttpsError("already-exists", "Choose a new recipient identifier and verify again.");
       }
 
@@ -11806,12 +12477,19 @@ export const applyApprovedBankRecipientVerification = functions.runWith({enforce
       if (recipientIdentityKey !== asNonEmptyString(verification.recipientIdentityKey)) {
         throw new functions.https.HttpsError("failed-precondition", "Bank recipient details changed. Verify again.");
       }
-      const nowMs = Date.now();
+      const now = admin.firestore.Timestamp.now();
+      const nowMs = now.toMillis();
       const recipient = {
         ...verifiedRecipient,
         recipientIdentityKey,
         recipientSavedAtMs: nowMs,
         registrationVerificationId: verificationId,
+        currency: resolveQuoteRecipientCurrency(
+          type === "SWIFT_BANK" ? "SWIFT" : "BANK",
+          asNonEmptyString(verifiedRecipient.country)
+        ),
+        createdAt: beneficiarySnap.exists ? beneficiarySnap.get("createdAt") || now : now,
+        updatedAt: now,
       };
       const existingIdentitySnap = await transaction.get(
         db.collection("users").doc(senderId).collection("beneficiaries")
@@ -11825,8 +12503,8 @@ export const applyApprovedBankRecipientVerification = functions.runWith({enforce
         if (hasServerIssuedBeneficiaryProof(existingRecipient)) {
           transaction.set(verificationRef, {
             registrationBeneficiaryId: existingIdentity.id,
-            registrationAppliedAt: admin.firestore.Timestamp.now(),
-            updatedAt: admin.firestore.Timestamp.now(),
+            registrationAppliedAt: now,
+            updatedAt: now,
           }, {merge: true});
           return {
             beneficiaryId: existingIdentity.id,
@@ -11837,8 +12515,8 @@ export const applyApprovedBankRecipientVerification = functions.runWith({enforce
       transaction.set(beneficiaryRef, recipient, {merge: true});
       transaction.set(verificationRef, {
         registrationBeneficiaryId: beneficiaryId,
-        registrationAppliedAt: admin.firestore.Timestamp.now(),
-        updatedAt: admin.firestore.Timestamp.now(),
+        registrationAppliedAt: now,
+        updatedAt: now,
       }, {merge: true});
       return {
         beneficiaryId,
@@ -12361,6 +13039,8 @@ const submitAfriexTransaction = async (
     transactionPayload.destinationId = paymentMethodId;
   }
 
+  // From here a timeout may mean Afriex created the transaction; retries must not resubmit blindly.
+  await payoutRef.set({providerTransactionSubmitStartedAtMs: Date.now()}, {merge: true});
   const transactionResponse = await axios.post(
     `${httpOptions.baseUrl}/transaction`,
     transactionPayload,
@@ -13127,10 +13807,22 @@ const afriexPayoutLimitUsageRef = (utcDate: string) =>
 
 const currentUtcDateKey = (): string => new Date().toISOString().slice(0, 10);
 
+// One sender must not be able to consume the whole shared account-level ceiling.
+const afriexProductionPerSenderDailyLimitUsd = (): number => {
+  const configured = Number(process.env.AFRIEX_PRODUCTION_PER_SENDER_DAILY_LIMIT_USD || "");
+  return Number.isFinite(configured) && configured > 0 ?
+    Math.min(configured, AFRIEX_PRODUCTION_PAYOUT_DAILY_LIMIT_USD) :
+    AFRIEX_PRODUCTION_PAYOUT_TRANSACTION_LIMIT_USD;
+};
+
+const afriexPayoutLimitSenderUsageRef = (utcDate: string, senderId: string) =>
+  afriexPayoutLimitUsageRef(utcDate).collection("senders").doc(senderId);
+
 const assertAfriexProductionPayoutDailyCapacity = async (params: {
   config: AfriexBusinessApiConfig;
   route: string;
   amountUsd: number;
+  senderId?: string;
 }): Promise<void> => {
   if (!isAfriexProductionPayoutCapRoute(params.config, params.route)) return;
   const usageSnap = await afriexPayoutLimitUsageRef(currentUtcDateKey()).get();
@@ -13139,6 +13831,16 @@ const assertAfriexProductionPayoutDailyCapacity = async (params: {
     throw new functions.https.HttpsError(
       "failed-precondition",
       `Afriex production payouts are limited to $${AFRIEX_PRODUCTION_PAYOUT_DAILY_LIMIT_USD.toLocaleString("en-US")} per UTC day.`
+    );
+  }
+  if (!params.senderId) return;
+  const senderLimitUsd = afriexProductionPerSenderDailyLimitUsd();
+  const senderUsageSnap = await afriexPayoutLimitSenderUsageRef(currentUtcDateKey(), params.senderId).get();
+  const senderUsedUsd = roundMoney(Number(senderUsageSnap.get("attemptedAmountUsd") || 0));
+  if (senderUsedUsd + params.amountUsd > senderLimitUsd + 0.0001) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `Transfers on this route are limited to $${senderLimitUsd.toLocaleString("en-US")} per sender per UTC day.`
     );
   }
 };
@@ -13155,14 +13857,43 @@ const reserveAfriexProductionPayoutLimit = async (params: {
   assertAfriexProductionPayoutTransactionLimit(params.config, params.route, params.amountUsd);
   const utcDate = currentUtcDateKey();
   const usageRef = afriexPayoutLimitUsageRef(utcDate);
+  const senderUsageRef = afriexPayoutLimitSenderUsageRef(utcDate, params.senderId);
+  const senderLimitUsd = afriexProductionPerSenderDailyLimitUsd();
   await db.runTransaction(async (transaction) => {
-    const usageSnap = await transaction.get(usageRef);
+    const [usageSnap, senderUsageSnap] = await Promise.all([
+      transaction.get(usageRef),
+      transaction.get(senderUsageRef),
+    ]);
     const usedUsd = roundMoney(Number(usageSnap.get("attemptedAmountUsd") || 0));
     if (usedUsd + params.amountUsd > AFRIEX_PRODUCTION_PAYOUT_DAILY_LIMIT_USD + 0.0001) {
       throw new functions.https.HttpsError(
         "failed-precondition",
         `Afriex production payouts are limited to $${AFRIEX_PRODUCTION_PAYOUT_DAILY_LIMIT_USD.toLocaleString("en-US")} per UTC day.`
       );
+    }
+    const senderUsedUsd = roundMoney(Number(senderUsageSnap.get("attemptedAmountUsd") || 0));
+    if (senderUsedUsd + params.amountUsd > senderLimitUsd + 0.0001) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `Transfers on this route are limited to $${senderLimitUsd.toLocaleString("en-US")} per sender per UTC day.`
+      );
+    }
+    transaction.set(senderUsageRef, {
+      utcDate,
+      senderId: params.senderId,
+      attemptedAmountUsd: roundMoney(senderUsedUsd + params.amountUsd),
+      attemptedTransferCount: Number(senderUsageSnap.get("attemptedTransferCount") || 0) + 1,
+      updatedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+    if (params.quoteId) {
+      // releaseWalletTransferQuoteReservation returns this capacity if the send never starts.
+      transaction.set(db.collection("wallet_transfer_quotes").doc(params.quoteId), {
+        afriexCapReservation: {
+          utcDate,
+          amountUsd: params.amountUsd,
+          released: false,
+        },
+      }, {merge: true});
     }
     transaction.set(usageRef, {
       utcDate,
@@ -13175,6 +13906,77 @@ const reserveAfriexProductionPayoutLimit = async (params: {
       lastReservedAt: admin.firestore.Timestamp.now(),
       updatedAt: admin.firestore.Timestamp.now(),
     }, {merge: true});
+  });
+};
+
+const positiveEnvNumber = (name: string, fallback: number): number => {
+  const configured = Number(process.env[name] || "");
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
+};
+
+const senderTransferLimitEntriesRef = (senderId: string) =>
+  db.collection("sender_transfer_limits").doc(senderId).collection("entries");
+
+/**
+ * Per-sender rolling limits across every external funding route, so a new
+ * account cannot move unlimited value even one transfer at a time. Entries are
+ * keyed by quote and removed when the quote reservation is released.
+ * @param {object} params Sender, USD amount and the reserving quote.
+ */
+const reserveSenderRollingTransferLimit = async (params: {
+  senderId: string;
+  amountUsd: number;
+  quoteId: string | null;
+}): Promise<void> => {
+  const dailyLimitUsd = positiveEnvNumber("SENDER_DAILY_TRANSFER_LIMIT_USD", 3000);
+  const monthlyLimitUsd = positiveEnvNumber("SENDER_30_DAY_TRANSFER_LIMIT_USD", 10000);
+  const dailyCountLimit = Math.trunc(positiveEnvNumber("SENDER_DAILY_TRANSFER_COUNT_LIMIT", 15));
+  const nowMs = Date.now();
+  const dayAgoMs = nowMs - 24 * 60 * 60 * 1000;
+  const monthAgoMs = nowMs - 30 * 24 * 60 * 60 * 1000;
+  const entriesRef = senderTransferLimitEntriesRef(params.senderId);
+  const entryRef = params.quoteId ? entriesRef.doc(params.quoteId) : entriesRef.doc();
+  await db.runTransaction(async (transaction) => {
+    const recent = await transaction.get(entriesRef.where("atMs", ">=", monthAgoMs));
+    let monthUsd = 0;
+    let dayUsd = 0;
+    let dayCount = 0;
+    recent.docs.forEach((doc) => {
+      if (doc.id === entryRef.id) return;
+      const amount = Number(doc.get("amountUsd") || 0);
+      const atMs = Number(doc.get("atMs") || 0);
+      monthUsd += amount;
+      if (atMs >= dayAgoMs) {
+        dayUsd += amount;
+        dayCount += 1;
+      }
+    });
+    if (dayCount + 1 > dailyCountLimit) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        `You can make up to ${dailyCountLimit} transfers in 24 hours. Try again later.`
+      );
+    }
+    if (dayUsd + params.amountUsd > dailyLimitUsd + 0.0001) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        `Transfers are limited to $${dailyLimitUsd.toLocaleString("en-US")} in 24 hours.`
+      );
+    }
+    if (monthUsd + params.amountUsd > monthlyLimitUsd + 0.0001) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        `Transfers are limited to $${monthlyLimitUsd.toLocaleString("en-US")} in 30 days.`
+      );
+    }
+    transaction.set(entryRef, {
+      senderId: params.senderId,
+      amountUsd: roundMoney(params.amountUsd),
+      atMs: nowMs,
+      quoteId: params.quoteId,
+      createdAt: admin.firestore.Timestamp.now(),
+      expiresAt: admin.firestore.Timestamp.fromMillis(nowMs + 31 * 24 * 60 * 60 * 1000),
+    });
   });
 };
 
@@ -13339,7 +14141,7 @@ const loadVerifiedMobileMoneyBeneficiary = async (
   if (storedType !== "MOBILE_MONEY" || !hasServerIssuedBeneficiaryProof(stored)) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "This saved mobile money recipient needs a one-time Afriex refresh. Select it and confirm the displayed details before requesting a quote or sending money."
+      "This saved mobile money recipient needs a verification refresh. Select it and confirm the displayed details before requesting a quote or sending money."
     );
   }
 
@@ -13511,6 +14313,26 @@ const processPendingAfriexBankSwiftPayout = async (
   }
   if (route === "SWIFT") assertSwiftBeneficiaryDetails(beneficiary);
 
+  // Afriex requires a transaction invoice for SWIFT. Generate an unguessable
+  // provider-readable URL on the server only; neither its URL nor token is
+  // returned to the client or stored on the customer-visible payout document.
+  let swiftInvoiceUrl: string | null = null;
+  let swiftInvoiceRecipientInfo: Record<string, unknown> | null = null;
+  if (route === "SWIFT") {
+    swiftInvoiceRecipientInfo = {
+      ...beneficiary,
+      providerChannel: "SWIFT",
+      afriexProviderChannel: "SWIFT",
+      afriexPayoutRoute: "SWIFT",
+    };
+    await payoutRef.set({
+      afriexPayoutRoute: "SWIFT",
+      recipientInfo: swiftInvoiceRecipientInfo,
+      updatedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+    swiftInvoiceUrl = await ensureAfriexSwiftTransferInvoiceUrl(payoutRef);
+  }
+
   const corridor = assertTransferDestinationCorridor(
     route,
     asNonEmptyString(beneficiary.country, data.recipientCountry, data.country)
@@ -13564,8 +14386,9 @@ const processPendingAfriexBankSwiftPayout = async (
         "The sender must have a verified name, email, phone, and country before a bank or SWIFT payout can be created."
       );
     }
-    const storedCustomerId = asNonEmptyString(sender.afriexBusinessCustomerId);
-    const storedCustomerCountry = asNonEmptyString(sender.afriexBusinessCustomerCountry)?.toUpperCase();
+    const privateCustomer = senderId ? ((await afriexCustomerPrivateRef(senderId).get()).data() || {}) : {};
+    const storedCustomerId = asNonEmptyString(privateCustomer.customerId);
+    const storedCustomerCountry = asNonEmptyString(privateCustomer.countryCode)?.toUpperCase();
     if (storedCustomerId && storedCustomerCountry === customerCountry) {
       providerCustomerId = storedCustomerId;
       providerCustomerReused = true;
@@ -13585,12 +14408,17 @@ const processPendingAfriexBankSwiftPayout = async (
       if (!providerCustomerId) {
         throw new Error("Afriex customer creation did not return customerId.");
       }
-      if (senderId) {
-        await db.collection("users").doc(senderId).set({
-          afriexBusinessCustomerId: providerCustomerId,
-          afriexBusinessCustomerCountry: customerCountry,
-          afriexBusinessCustomerUpdatedAt: admin.firestore.Timestamp.now(),
-        }, {merge: true});
+      // Never overwrite an existing (possibly BVN-verified) customer for another country.
+      if (senderId && !asNonEmptyString(privateCustomer.customerId)) {
+        await Promise.all([
+          afriexCustomerPrivateRef(senderId).set({
+            provider: "AFRIEX",
+            customerId: providerCustomerId,
+            countryCode: customerCountry,
+            customerSyncedAt: admin.firestore.Timestamp.now(),
+          }, {merge: true}),
+          db.collection("users").doc(senderId).set(AFRIEX_PUBLIC_CUSTOMER_FIELD_CLEANUP, {merge: true}),
+        ]);
       }
     }
     await payoutRef.set({
@@ -13635,7 +14463,7 @@ const processPendingAfriexBankSwiftPayout = async (
         recipientAddress: beneficiary.recipientAddress,
       };
       paymentMethodPayload.transaction = {
-        invoiceReference: beneficiary.invoiceReference,
+        invoiceReference: swiftInvoiceUrl || beneficiary.invoiceReference,
       };
     }
 
@@ -13672,7 +14500,10 @@ const processPendingAfriexBankSwiftPayout = async (
         idempotencyKey: `afriex_${route.toLowerCase()}_${payoutRef.id}`,
         narration: `VolunteersApp ${route === "SWIFT" ? "SWIFT" : "bank"} payout ${payoutRef.id}`,
         payoutRequestId: payoutRef.id,
-        ...(route === "SWIFT" ? {invoiceReference: beneficiary.invoiceReference} : {}),
+        ...(route === "SWIFT" ? {
+          invoiceReference: swiftInvoiceUrl || beneficiary.invoiceReference,
+          invoice: swiftInvoiceUrl || beneficiary.invoiceReference,
+        } : {}),
       },
     };
     transactionPayload.customerId = providerCustomerId;
@@ -13690,6 +14521,26 @@ const processPendingAfriexBankSwiftPayout = async (
     const normalizedStatus = rawStatus.toUpperCase();
     const isCompleted = ["SUCCESS", "SUCCEEDED", "COMPLETED"].includes(normalizedStatus);
     const isRejected = ["FAILED", "FAILURE", "DECLINED", "CANCELLED"].includes(normalizedStatus);
+    if (swiftInvoiceUrl) {
+      try {
+        await sendSwiftTransferInvoiceEmailOnce({
+          payoutRef,
+          payoutData: {
+            ...data,
+            afriexPayoutRoute: "SWIFT",
+            recipientInfo: swiftInvoiceRecipientInfo || beneficiary,
+          },
+          invoiceUrl: swiftInvoiceUrl,
+        });
+      } catch (error) {
+        // Invoice delivery cannot reverse an Afriex-accepted payout. The
+        // recipient can still use the server-authoritative receipt history.
+        functions.logger.warn("SWIFT invoice email delivery failed", {
+          payoutRequestId: payoutRef.id,
+          error: parseProviderErrorMessage(error),
+        });
+      }
+    }
     const fundingSource = String(data.fundingSource || "").trim().toUpperCase();
     const requiresFundingReconciliation =
       String(data.type || "").trim().toUpperCase() === "BENEFICIARY_TRANSFER" &&
@@ -13807,6 +14658,15 @@ const fetchAfriexBusinessTransactionStatus = async (
   };
 };
 
+const isSimulatedMobileMoneyProviderAllowed = (): boolean => {
+  if (process.env.FUNCTIONS_EMULATOR === "true") return true;
+  try {
+    return resolveAfriexBusinessApiConfig().environment === "sandbox";
+  } catch {
+    return false;
+  }
+};
+
 const processPendingMobileMoneyProviderPayout = async (
   payoutRef: FirebaseFirestore.DocumentReference,
   inputData?: FirebaseFirestore.DocumentData
@@ -13841,7 +14701,16 @@ const processPendingMobileMoneyProviderPayout = async (
     }
   }
 
-  const providerMode = String(process.env.MOBILE_MONEY_PROVIDER_MODE || "MANUAL").toUpperCase();
+  const configuredProviderMode = String(process.env.MOBILE_MONEY_PROVIDER_MODE || "MANUAL").toUpperCase();
+  // SIMULATED marks real transfers delivered without moving money; never honour it outside test environments.
+  const providerMode = configuredProviderMode === "SIMULATED" && !isSimulatedMobileMoneyProviderAllowed() ?
+    "MANUAL" :
+    configuredProviderMode;
+  if (configuredProviderMode !== providerMode) {
+    functions.logger.error("MOBILE_MONEY_PROVIDER_MODE=SIMULATED ignored outside the emulator or Afriex sandbox.", {
+      payoutRequestId: payoutRef.id,
+    });
+  }
   if (isFirstPartyMobileMoneyFeeCollection(initialData) && (providerMode !== "HTTP_API" || providerName !== "AFRIEX")) {
     // Simulated or manual completion would activate a paid service without
     // provider-confirmed funds, so the request waits for the live adapter.
@@ -13933,8 +14802,19 @@ const processPendingMobileMoneyProviderPayout = async (
     const currentData = currentSnap.data() || initialData;
     const currentStatus = String(currentData.status || "").toUpperCase();
     const currentProviderStatus = String(currentData.providerStatus || "").toUpperCase();
-    const canClaim = currentStatus === "PENDING_PROVIDER" ||
-      (currentStatus === "PROCESSING_PROVIDER" && currentProviderStatus === "SUBMISSION_UNCERTAIN");
+    const uncertainRetry = currentStatus === "PROCESSING_PROVIDER" && currentProviderStatus === "SUBMISSION_UNCERTAIN";
+    if (uncertainRetry && Number(currentData.providerTransactionSubmitStartedAtMs || 0) > 0) {
+      // Afriex's handling of meta.idempotencyKey is unconfirmed, so a resubmit could pay
+      // or collect twice. The provider webhook still settles it if the transaction exists.
+      transaction.set(payoutRef, {
+        providerStatus: "SUBMISSION_REVIEW_REQUIRED",
+        providerSubmissionReviewRequired: true,
+        providerMessage: "Afriex transaction may already exist. Awaiting provider webhook or manual review; not resubmitted.",
+        processedAt: admin.firestore.Timestamp.now(),
+      }, {merge: true});
+      return null;
+    }
+    const canClaim = currentStatus === "PENDING_PROVIDER" || uncertainRetry;
     if (!canClaim) return null;
 
     transaction.set(payoutRef, {
@@ -14004,6 +14884,8 @@ const markMobileMoneyMethodVerifiedFromCashIn = async (
   // Fee collections require an already-verified number and must not rewrite
   // verification provenance.
   if (isFirstPartyMobileMoneyFeeCollection(payoutData)) return;
+  // A simulated completion moved no money, so it is not proof of phone ownership.
+  if (String(process.env.MOBILE_MONEY_PROVIDER_MODE || "").trim().toUpperCase() === "SIMULATED") return;
   const paymentMethodId = asNonEmptyString(payoutData.paymentMethodId);
   const senderMethodsRef = db.collection("users").doc(senderId).collection("payment_methods");
   const now = admin.firestore.Timestamp.now();
@@ -14868,6 +15750,7 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
     const request = (data || {}) as ApplyApprovedBeneficiaryVerificationRequest;
     const beneficiaryId = asNonEmptyString(request.beneficiaryId);
     const verificationId = asNonEmptyString(request.verificationId);
+    const replaceExisting = request.replaceExisting === true;
     if (!beneficiaryId || !/^[A-Za-z0-9_-]{8,128}$/.test(beneficiaryId)) {
       throw new functions.https.HttpsError("invalid-argument", "A valid recipient identifier is required.");
     }
@@ -14913,7 +15796,7 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
           recipient: beneficiarySnap.data() || {},
         };
       }
-      if (beneficiarySnap.exists) {
+      if (beneficiarySnap.exists && !replaceExisting) {
         throw new functions.https.HttpsError("already-exists", "Choose a new recipient identifier and verify again.");
       }
 
@@ -14938,7 +15821,8 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
         );
       }
 
-      const nowMs = Date.now();
+      const now = admin.firestore.Timestamp.now();
+      const nowMs = now.toMillis();
       const accountNameVerified = !!providerResolvedName;
       const providerRouteResolvePending =
         provider.rawStatus === AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS;
@@ -14947,6 +15831,7 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
         phone,
         network: institutionName,
         country: route.country,
+        currency: resolveQuoteRecipientCurrency("MOBILE_MONEY", route.country),
         accountLast4: phone.slice(-4),
         type: "MOBILE_MONEY",
         verificationStatus: accountNameVerified ?
@@ -14974,6 +15859,8 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
         recipientNameConfirmedAtMs: nowMs,
         providerVerifiedAtMs: nowMs,
         registrationVerificationId: verificationId,
+        createdAt: beneficiarySnap.exists ? beneficiarySnap.get("createdAt") || now : now,
+        updatedAt: now,
       };
       const recipientIdentityKey = buildVerifiedBeneficiaryIdentityKey(recipient);
       recipient.recipientIdentityKey = recipientIdentityKey;
@@ -15422,7 +16309,43 @@ const releaseWalletTransferQuoteReservation = async (params: {
     const releasable = status === "IN_PROGRESS" ||
       (params.includeFundingInProgress === true && status === "FUNDING_IN_PROGRESS");
     if (!releasable || quoteSnap.get("consumedAt")) return;
+
+    const capReservation = quoteSnap.get("afriexCapReservation") as
+      {utcDate?: unknown; amountUsd?: unknown; released?: unknown} | undefined;
+    const capUtcDate = asNonEmptyString(capReservation?.utcDate);
+    const capAmountUsd = roundMoney(Number(capReservation?.amountUsd || 0));
+    const capReleaseFields: FirebaseFirestore.DocumentData = {};
+    if (capReservation && capReservation.released !== true && capUtcDate && capAmountUsd > 0) {
+      const usageRef = afriexPayoutLimitUsageRef(capUtcDate);
+      const senderUsageRef = afriexPayoutLimitSenderUsageRef(capUtcDate, params.senderId);
+      const [usageSnap, senderUsageSnap] = await Promise.all([
+        transaction.get(usageRef),
+        transaction.get(senderUsageRef),
+      ]);
+      const now = admin.firestore.Timestamp.now();
+      if (usageSnap.exists) {
+        transaction.set(usageRef, {
+          attemptedAmountUsd: Math.max(0, roundMoney(Number(usageSnap.get("attemptedAmountUsd") || 0) - capAmountUsd)),
+          releasedAmountUsd: roundMoney(Number(usageSnap.get("releasedAmountUsd") || 0) + capAmountUsd),
+          updatedAt: now,
+        }, {merge: true});
+      }
+      if (senderUsageSnap.exists) {
+        transaction.set(senderUsageRef, {
+          attemptedAmountUsd: Math.max(
+            0,
+            roundMoney(Number(senderUsageSnap.get("attemptedAmountUsd") || 0) - capAmountUsd)
+          ),
+          updatedAt: now,
+        }, {merge: true});
+      }
+      capReleaseFields.afriexCapReservation = {released: true, releasedAt: now};
+    }
+    // The send never started, so it must not count toward the sender's rolling limits.
+    transaction.delete(senderTransferLimitEntriesRef(params.senderId).doc(quoteRef.id));
+
     transaction.set(quoteRef, {
+      ...capReleaseFields,
       reservationStatus: "RELEASED",
       reservationReleasedAt: admin.firestore.Timestamp.now(),
       reservationReleaseReason: params.reason,
@@ -15553,6 +16476,17 @@ const assertReadyAppUserReceiveRoute = async (params: {
     throw new functions.https.HttpsError(
       "failed-precondition",
       "The recipient's receive route is no longer enabled. Ask them to update it before retrying."
+    );
+  }
+
+  if (
+    (route === "BANK" || route === "SWIFT") &&
+    (params.methodData.accountNameVerified !== true ||
+      !asNonEmptyString(params.methodData.providerResolvedName))
+  ) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "This bank route is saved for direct bank payouts, but it cannot receive App User transfers because the payment partner could not confirm the account holder name for this corridor."
     );
   }
 
@@ -15737,7 +16671,23 @@ const resolveAppUserPayoutDestination = async (params: {
   }
 
   const recipientData = (recipientSnap.data() || {}) as Record<string, unknown>;
-  const methodData = (methodSnap.data() || {}) as Record<string, unknown>;
+  // Full bank identifiers are deliberately kept outside the client-readable
+  // payment-method document. They are joined only inside this trusted server
+  // path immediately before the payout request is created.
+  const privateMethodSnap = await paymentMethodPrivateRef(recipientId, paymentMethodId).get();
+  const privateMethodData = (privateMethodSnap.data() || {}) as Record<string, unknown>;
+  const methodData = {
+    ...(methodSnap.data() || {}),
+    ...privateMethodData,
+  } as Record<string, unknown>;
+  const rawAccountNumber = asNonEmptyString(methodData.accountNumberRaw);
+  if (rawAccountNumber) {
+    methodData.accountNumber = rawAccountNumber;
+  }
+  const rawRoutingNumber = asNonEmptyString(methodData.routingNumberRaw);
+  if (rawRoutingNumber) {
+    methodData.routingNumber = rawRoutingNumber;
+  }
   const recipientCountry = asNonEmptyString(
     methodData.country,
     recipientData.country,
@@ -16582,11 +17532,14 @@ const initiateAfriexBankSwiftTransfer = async (params: {
   if (!fundingMethodId) {
     throw new functions.https.HttpsError("failed-precondition", "Select a verified funding method before sending.");
   }
-  const fundingSnap = await params.senderRef.collection("payment_methods").doc(fundingMethodId).get();
-  if (!fundingSnap.exists) {
-    throw new functions.https.HttpsError("not-found", "The selected funding card was not found.");
-  }
-  const fundingData = fundingSnap.data() || {};
+  // The quote check is not enough: a method can be unlinked or changed while
+  // the sender reviews the quote. Re-read the server-owned method immediately
+  // before a card/ACH charge is created.
+  const fundingData = await loadReadyExternalTransferFundingMethod({
+    senderId: params.senderId,
+    fundingSourceType: params.request.fundingSourceType,
+    fundingPaymentMethodId: fundingMethodId,
+  });
   const amountInCents = Math.round(params.totalDeduction * 100);
   if (!Number.isSafeInteger(amountInCents) || amountInCents <= 0) {
     throw new functions.https.HttpsError("invalid-argument", "Transfer amount must be greater than zero.");
@@ -16941,12 +17894,16 @@ const initiateTransferHandler = async (
   const requestData = data as InitiateTransferRequest;
   const providerWalletOnlyMode = !isInternalWalletCustodyAllowed();
 
-  if (!requestData.amount || requestData.amount <= 0) {
+  // Callable payloads are untyped JSON; a string amount would concatenate with fees.
+  if (typeof requestData.amount !== "number" || !Number.isFinite(requestData.amount) || requestData.amount <= 0) {
     throw new functions.https.HttpsError("invalid-argument", "Transfer amount must be positive.");
   }
+  requestData.amount = roundMoney(requestData.amount);
   if (!requestData.recipientId && !requestData.recipientBeneficiary) {
     throw new functions.https.HttpsError("invalid-argument", "A recipient must be specified.");
   }
+  // Covers every funding path, including bank/SWIFT, which has no route-specific check.
+  await assertNoExternalFundingReconciliationLock(senderId);
   // This boundary is intentionally independent of the UI and quote request.
   // A forged callable payload must never revive a stored-balance/custody route.
   const fundingSourceType = String(requestData.fundingSourceType || "").trim().toUpperCase();
@@ -16992,11 +17949,21 @@ const initiateTransferHandler = async (
   let quotedRecipientCurrency: string | null = null;
   let quotedDebitCurrency: string | null = null;
 
+  const inferredBeneficiaryRoute = requestData.recipientBeneficiary ?
+    asNonEmptyString(
+      requestData.recipientBeneficiary.providerChannel,
+      requestData.recipientBeneficiary.afriexProviderChannel,
+      requestData.recipientBeneficiary.route,
+      requestData.recipientBeneficiary.afriexPayoutRoute,
+      requestData.recipientBeneficiary.type,
+      "MOBILE_MONEY"
+    ) :
+    "BANK";
   let requestedDestinationRoute = normalizeTransferDestinationRoute(
     asNonEmptyString(
       requestData.destinationRoute,
       requestData.destinationType,
-      requestData.recipientBeneficiary ? "MOBILE_MONEY" : "BANK"
+      inferredBeneficiaryRoute
     ) || "MOBILE_MONEY"
   );
   let requestedRecipientCountry = asNonEmptyString(
@@ -17077,6 +18044,14 @@ const initiateTransferHandler = async (
       recipientId: requestData.recipientId,
       recipientPaymentMethodId: requestData.recipientPaymentMethodId,
     });
+    // Saved beneficiaries are screened at verification and bank/SWIFT send; member routes were not.
+    const recipientAml = await screenBeneficiaryNameWithAmlProvider(destination.recipientName);
+    if (recipientAml.blocked) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        recipientAml.reasonMessage || "Transfer blocked by AML/CFT screening."
+      );
+    }
     const requestedCountryKey = normalizeTransferCountryForComparison(requestedRecipientCountry);
     const routeCountryKey = normalizeTransferCountryForComparison(destination.recipientCountry);
     if (requestedCountryKey && routeCountryKey && requestedCountryKey !== routeCountryKey) {
@@ -17090,6 +18065,15 @@ const initiateTransferHandler = async (
       destination.paymentMethodId
     );
     providerDestinationRoute = destination.destinationRoute;
+  }
+  if (
+    requestData.fundingSourceType === "EXTERNAL_MOBILE_MONEY" &&
+    providerDestinationRoute !== "MOBILE_MONEY"
+  ) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Mobile money funding can deliver only to a verified mobile money route. Choose a card or verified US bank for a bank or SWIFT route."
+    );
   }
   const requestedCorridor = assertTransferDestinationCorridor(
     providerDestinationRoute,
@@ -17303,6 +18287,21 @@ const initiateTransferHandler = async (
         requestData.recipientBeneficiary as unknown as Record<string, unknown>
     ) || "USD",
   } : {};
+
+  try {
+    await reserveSenderRollingTransferLimit({
+      senderId,
+      amountUsd: requestData.amount,
+      quoteId: consumedQuoteId,
+    });
+  } catch (error) {
+    await releaseWalletTransferQuoteReservation({
+      quoteId: consumedQuoteId,
+      senderId,
+      reason: "Sender transfer limit was reached.",
+    });
+    throw error;
+  }
 
   if (afriexProductionCapConfig) {
     // Count accepted attempts conservatively. This is a compliance counter,
@@ -19426,6 +20425,241 @@ interface CreateUsBankAccountSetupIntentRequest {
   email?: string;
 }
 
+type CardFundingSetupIntentRequest = Record<string, unknown>;
+
+interface SaveCardFundingMethodRequest {
+  setupIntentId?: unknown;
+  isDefault?: unknown;
+  replacingPaymentMethodId?: unknown;
+}
+
+interface UpdateBankPaymentMethodRequest {
+  paymentMethodId?: unknown;
+  bankName?: unknown;
+  accountHolderName?: unknown;
+  accountNumber?: unknown;
+  routingNumber?: unknown;
+  country?: unknown;
+  currency?: unknown;
+}
+
+const stripeCustomerIdForPaymentMethod = (paymentMethod: Stripe.PaymentMethod): string | null => {
+  if (typeof paymentMethod.customer === "string") return paymentMethod.customer;
+  return paymentMethod.customer?.id || null;
+};
+
+const isStripeMissingResourceError = (error: unknown): boolean => {
+  const stripeError = error as Stripe.errors.StripeError | undefined;
+  const message = String(stripeError?.message || "").toLowerCase();
+  return stripeError?.statusCode === 404 || message.includes("no such") || message.includes("resource_missing");
+};
+
+const PAYMENT_METHOD_PRIVATE_COLLECTION = "payment_method_private";
+
+const paymentMethodPrivateRef = (
+  userId: string,
+  paymentMethodId: string
+): FirebaseFirestore.DocumentReference =>
+  db.collection(PAYMENT_METHOD_PRIVATE_COLLECTION).doc(`${userId.trim()}__${paymentMethodId.trim()}`);
+
+const maskedBankAccountNumber = (accountNumber: string): string =>
+  `********${accountNumber.slice(-4)}`;
+
+const ensureStripeCustomerForUser = async (
+  userId: string,
+  userRef: FirebaseFirestore.DocumentReference,
+  userData: FirebaseFirestore.DocumentData
+): Promise<string> => {
+  const existingCustomerId = asNonEmptyString(userData.paymentCustomerId);
+  if (existingCustomerId) return existingCustomerId;
+  const customer = await getStripe().customers.create({
+    email: asNonEmptyString(userData.email) || undefined,
+    metadata: {userId},
+  });
+  await userRef.set({paymentCustomerId: customer.id}, {merge: true});
+  return customer.id;
+};
+
+export const createCardFundingSetupIntent = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (_data: CardFundingSetupIntentRequest, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+
+    const userId = context.auth.uid;
+    const userRef = db.collection("users").doc(userId);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "User profile not found.");
+    }
+
+    try {
+      const customerId = await ensureStripeCustomerForUser(userId, userRef, userSnap.data() || {});
+      const setupIntent = await getStripe().setupIntents.create({
+        customer: customerId,
+        payment_method_types: ["card"],
+        usage: "off_session",
+        metadata: {
+          userId,
+          flow: "wallet_card_funding",
+        },
+      });
+      if (!setupIntent.client_secret) {
+        throw new functions.https.HttpsError("internal", "Stripe card setup did not return a client secret.");
+      }
+      return {setupIntentId: setupIntent.id, clientSecret: setupIntent.client_secret};
+    } catch (error) {
+      const stripeError = error as Stripe.errors.StripeError | undefined;
+      functions.logger.error("Failed to create card funding setup intent", {userId, error});
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        stripeError?.message || "Could not initialize card verification."
+      );
+    }
+  });
+
+export const saveCardFundingMethod = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+
+    const userId = context.auth.uid;
+    const request = (data || {}) as SaveCardFundingMethodRequest;
+    const setupIntentId = asNonEmptyString(request.setupIntentId);
+    const replacingPaymentMethodId = asNonEmptyString(request.replacingPaymentMethodId);
+    if (!setupIntentId || !setupIntentId.startsWith("seti_")) {
+      throw new functions.https.HttpsError("invalid-argument", "A verified card setup session is required.");
+    }
+
+    const userRef = db.collection("users").doc(userId);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "User profile not found.");
+    }
+    const userData = userSnap.data() || {};
+    const customerId = await ensureStripeCustomerForUser(userId, userRef, userData);
+
+    try {
+      const setupIntent = await getStripe().setupIntents.retrieve(setupIntentId);
+      const setupIntentCustomerId = typeof setupIntent.customer === "string" ?
+        setupIntent.customer : setupIntent.customer?.id;
+      const setupIntentUserId = asNonEmptyString(setupIntent.metadata?.userId);
+      const stripePaymentMethodId = typeof setupIntent.payment_method === "string" ?
+        setupIntent.payment_method : setupIntent.payment_method?.id;
+      if (
+        setupIntent.status !== "succeeded" ||
+        setupIntentCustomerId !== customerId ||
+        setupIntentUserId !== userId ||
+        !stripePaymentMethodId
+      ) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Card verification must finish in this account before the card can be saved."
+        );
+      }
+
+      const stripeMethod = await getStripe().paymentMethods.retrieve(stripePaymentMethodId) as Stripe.PaymentMethod;
+      if (stripeMethod.type !== "card" || !stripeMethod.card || stripeCustomerIdForPaymentMethod(stripeMethod) !== customerId) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Verified card does not belong to this account. Start card verification again."
+        );
+      }
+
+      const last4 = asNonEmptyString(stripeMethod.card.last4);
+      const expiryDate = `${String(stripeMethod.card.exp_month).padStart(2, "0")}/${String(stripeMethod.card.exp_year).slice(-2)}`;
+      const dedupeKey = buildPaymentMethodDedupeKey({type: "CARD", last4, expiryDate});
+      if (!last4 || !dedupeKey) {
+        throw new functions.https.HttpsError("failed-precondition", "Verified card is missing display details.");
+      }
+
+      const methodsRef = userRef.collection("payment_methods");
+      let methodRef: FirebaseFirestore.DocumentReference;
+      let previousStripePaymentMethodId: string | null = null;
+      let isDefault = request.isDefault === true;
+      if (replacingPaymentMethodId) {
+        methodRef = methodsRef.doc(replacingPaymentMethodId);
+        const existing = await methodRef.get();
+        if (!existing.exists || normalizeMethodType(existing.get("type")) !== "CARD") {
+          throw new functions.https.HttpsError("not-found", "Saved card not found.");
+        }
+        previousStripePaymentMethodId = asNonEmptyString(existing.get("chargePaymentMethodId")) || null;
+        isDefault = isDefault || existing.get("isDefault") === true;
+      } else {
+        const duplicate = await methodsRef.where("dedupeKey", "==", dedupeKey).limit(1).get();
+        if (!duplicate.empty) {
+          throw new functions.https.HttpsError("already-exists", "This card is already saved.");
+        }
+        methodRef = methodsRef.doc(`dedupe_${dedupeKey}`);
+        const existing = await methodRef.get();
+        if (existing.exists) {
+          throw new functions.https.HttpsError("already-exists", "This card is already saved.");
+        }
+        if (!isDefault) {
+          const existingMethods = await methodsRef.get();
+          isDefault = !existingMethods.docs.some((doc) => doc.get("isDefault") === true);
+        }
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      const payload = {
+        type: "CARD",
+        label: `Card ending in ${last4}`,
+        cardHolderName: asNonEmptyString(stripeMethod.billing_details?.name) || "Cardholder",
+        cardNumber: `**** **** **** ${last4}`,
+        brand: stripeMethod.card.brand || null,
+        last4,
+        expiryDate,
+        dedupeKey,
+        isDefault,
+        chargePaymentMethodId: stripePaymentMethodId,
+        chargeCustomerId: customerId,
+        requiresRelinkForCharges: false,
+        chargeSetupCheckedAt: now,
+        fundingMethodOnly: true,
+        stripeConnectExternalAccountManaged: false,
+        ...(replacingPaymentMethodId ? {} : {createdAt: now}),
+        updatedAt: now,
+      };
+      const batch = db.batch();
+      batch.set(methodRef, payload, {merge: true});
+      if (isDefault) {
+        const allMethods = await methodsRef.get();
+        allMethods.docs.forEach((doc) => {
+          batch.set(doc.ref, {isDefault: doc.id === methodRef.id, updatedAt: now}, {merge: true});
+        });
+      }
+      await batch.commit();
+
+      if (previousStripePaymentMethodId && previousStripePaymentMethodId !== stripePaymentMethodId) {
+        try {
+          const previous = await getStripe().paymentMethods.retrieve(previousStripePaymentMethodId) as Stripe.PaymentMethod;
+          if (stripeCustomerIdForPaymentMethod(previous) === customerId) {
+            await getStripe().paymentMethods.detach(previousStripePaymentMethodId);
+          }
+        } catch (error) {
+          functions.logger.warn("Could not detach replaced card", {
+            userId,
+            paymentMethodId: methodRef.id,
+            stripePaymentMethodId: previousStripePaymentMethodId,
+            error,
+          });
+        }
+      }
+
+      return {success: true, paymentMethodId: methodRef.id, message: "Card verified and saved."};
+    } catch (error) {
+      if (error instanceof functions.https.HttpsError) throw error;
+      const stripeError = error as Stripe.errors.StripeError | undefined;
+      functions.logger.error("Failed to save verified card", {userId, setupIntentId, error});
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        stripeError?.message || "Verified card could not be saved."
+      );
+    }
+  });
+
 export const createUsBankAccountSetupIntent = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
@@ -19703,36 +20937,32 @@ export const attachExternalAccount = functions.runWith({enforceAppCheck: true})
 
     try {
       if (methodType === "CARD") {
-        // Payment Methods stores a customer charge instrument only. It must not
-        // create or modify a Stripe Connect external payout account.
         const chargeCardToken = chargeToken || request.externalAccountToken;
-        if (chargeCardToken) {
-          const resolvedCustomerId = await ensureCustomerId();
-          const chargeMethod = await getStripe().paymentMethods.create({
-            type: "card",
-            card: {token: chargeCardToken},
-          });
-
-          await getStripe().paymentMethods.attach(chargeMethod.id, {customer: resolvedCustomerId});
-
-          if (isDefault) {
-            await getStripe().customers.update(resolvedCustomerId, {
-              invoice_settings: {default_payment_method: chargeMethod.id},
-            });
-          }
-
-          chargePaymentMethodId = chargeMethod.id;
-          await userRef.collection("payment_methods").doc(request.paymentMethodId).set({
-            chargePaymentMethodId: chargePaymentMethodId,
-            requiresRelinkForCharges: false,
-            chargeSetupCheckedAt: admin.firestore.Timestamp.now(),
-          }, {merge: true});
-        } else {
-          await userRef.collection("payment_methods").doc(request.paymentMethodId).set({
-            requiresRelinkForCharges: true,
-            chargeSetupCheckedAt: admin.firestore.Timestamp.now(),
-          }, {merge: true});
+        if (!chargeCardToken?.startsWith("pm_")) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "Update the app and verify this card before saving it."
+          );
         }
+        const resolvedCustomerId = await ensureCustomerId();
+        const chargeMethod = await getStripe().paymentMethods.retrieve(chargeCardToken) as Stripe.PaymentMethod;
+        if (chargeMethod.type !== "card" || stripeCustomerIdForPaymentMethod(chargeMethod) !== resolvedCustomerId) {
+          throw new functions.https.HttpsError(
+            "permission-denied",
+            "This verified card belongs to a different customer. Verify it again from this account."
+          );
+        }
+        if (isDefault) {
+          await getStripe().customers.update(resolvedCustomerId, {
+            invoice_settings: {default_payment_method: chargeMethod.id},
+          });
+        }
+        chargePaymentMethodId = chargeMethod.id;
+        await userRef.collection("payment_methods").doc(request.paymentMethodId).set({
+          chargePaymentMethodId,
+          requiresRelinkForCharges: false,
+          chargeSetupCheckedAt: admin.firestore.Timestamp.now(),
+        }, {merge: true});
       }
 
       if (methodType === "BANK") {
@@ -19788,6 +21018,89 @@ export const attachExternalAccount = functions.runWith({enforceAppCheck: true})
       const message = stripeError?.message || "Could not link transfer funding method.";
       throw new functions.https.HttpsError("failed-precondition", message);
     }
+  });
+
+/**
+ * Replaces a provider-bank receive route without routing the bank data through
+ * Stripe. The full account number is server-only, and the route remains
+ * unavailable to App User transfers until the provider sync verifies it.
+ */
+export const updateBankPaymentMethod = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+
+    const request = (data || {}) as UpdateBankPaymentMethodRequest;
+    const paymentMethodId = asNonEmptyString(request.paymentMethodId);
+    const bankName = asNonEmptyString(request.bankName);
+    const accountHolderName = asNonEmptyString(request.accountHolderName);
+    const accountNumber = sanitizeAfriexAccountNumber(asNonEmptyString(request.accountNumber) || "");
+    const country = asNonEmptyString(request.country)?.toUpperCase() || "";
+    const currency = asNonEmptyString(request.currency)?.toUpperCase() || "";
+    const routingNumber = String(request.routingNumber || "").replace(/\D/g, "");
+    if (!paymentMethodId || !bankName || !accountHolderName || !accountNumber || !/^[A-Z]{2}$/.test(country) || !/^[A-Z]{3}$/.test(currency)) {
+      throw new functions.https.HttpsError("invalid-argument", "Complete bank details are required.");
+    }
+    if (accountNumber.length < 4 || accountNumber.length > 64) {
+      throw new functions.https.HttpsError("invalid-argument", "Enter a valid bank account number.");
+    }
+    if (country === "US" && routingNumber.length !== 9) {
+      throw new functions.https.HttpsError("invalid-argument", "A 9-digit routing number is required for US accounts.");
+    }
+
+    const userId = context.auth.uid;
+    const methodRef = db.collection("users").doc(userId)
+      .collection("payment_methods").doc(paymentMethodId);
+    const methodSnap = await methodRef.get();
+    if (!methodSnap.exists || normalizeMethodType(methodSnap.get("type")) !== "BANK") {
+      throw new functions.https.HttpsError("not-found", "Saved bank account not found.");
+    }
+    if (methodSnap.get("financialConnectionsLinked") === true) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "US funding banks are managed through Financial Connections and cannot be edited as payout routes."
+      );
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    const batch = db.batch();
+    batch.set(paymentMethodPrivateRef(userId, paymentMethodId), {
+      accountNumberRaw: accountNumber,
+      routingNumberRaw: country === "US" ? routingNumber : null,
+      updatedAt: now,
+    }, {merge: true});
+    batch.set(methodRef, {
+      bankName,
+      accountHolderName,
+      accountNumber: maskedBankAccountNumber(accountNumber),
+      last4: accountNumber.slice(-4),
+      routingNumber: admin.firestore.FieldValue.delete(),
+      country,
+      currency,
+      label: `${bankName} • ${accountNumber.slice(-4)}`,
+      status: "PENDING_VERIFICATION",
+      verificationStatus: "PENDING_PROVIDER",
+      accountNameVerified: false,
+      accountRouteVerified: false,
+      appUserReceiveRouteVerified: false,
+      appUserReceiveRouteLabel: admin.firestore.FieldValue.delete(),
+      appUserReceiveRouteVerifiedAt: admin.firestore.FieldValue.delete(),
+      providerResolvedName: admin.firestore.FieldValue.delete(),
+      afriexDestinationPaymentMethodId: admin.firestore.FieldValue.delete(),
+      providerDestinationPaymentMethodId: admin.firestore.FieldValue.delete(),
+      destinationId: admin.firestore.FieldValue.delete(),
+      providerCustomerId: admin.firestore.FieldValue.delete(),
+      afriexCustomerId: admin.firestore.FieldValue.delete(),
+      updatedAt: now,
+    }, {merge: true});
+    await batch.commit();
+
+    return {
+      success: true,
+      paymentMethodId,
+      message: "Bank details saved. Provider verification is required before receiving.",
+    };
   });
 
 // =============================================================================
@@ -20684,10 +21997,10 @@ const settleFirstPartyMobileMoneyFeeCollection = async (
       break;
     }
     case "BLIND_DATE_REJOIN": {
-      if (!profileRef || !profileDoc?.exists || normalizeProfileStatus(profileDoc.data()?.status) !== "matched") {
+      if (!profileRef || !profileDoc?.exists || !isBlindDateRejoinableStatus(profileDoc.data()?.status)) {
         return reconcile("Blind Date profile was not eligible to rejoin at payment completion.");
       }
-      transaction.update(profileRef, {...receipt, status: "active"});
+      finalizeBlindDateRejoin(transaction, buyerId, (profileDoc?.data() || {}) as Record<string, unknown>, now, receipt);
       recordBuyerReceipt("Blind Date re-join");
       if (platformFeeUsd > 0) {
         recordPlatformRevenue(transaction, {
@@ -20875,6 +22188,7 @@ export const onMobileMoneyPayoutStatusChanged = functions.firestore
       await releaseAppUserTransferLock({
         senderId,
         payoutRequestId: change.after.id,
+        collectionRequestId: asNonEmptyString(after.collectionRequestId),
         outcome: nextTxStatus === "COMPLETED" ? "DELIVERED" : "FUNDING_FAILED",
       });
     }
@@ -20925,8 +22239,7 @@ export const mobileMoneyProviderWebhook = functions.https.onRequest(async (req, 
         }
       }
     } else if (expectedSecret) {
-      const providedSecret = req.header(secretHeaderName) || "";
-      if (providedSecret !== expectedSecret) {
+      if (!sharedSecretMatches(req.header(secretHeaderName), expectedSecret)) {
         res.status(403).json({error: "Invalid webhook secret."});
         return;
       }
@@ -20935,11 +22248,14 @@ export const mobileMoneyProviderWebhook = functions.https.onRequest(async (req, 
       return;
     }
   } else if (expectedSecret) {
-    const providedSecret = req.header(secretHeaderName) || "";
-    if (providedSecret !== expectedSecret) {
+    if (!sharedSecretMatches(req.header(secretHeaderName), expectedSecret)) {
       res.status(403).json({error: "Invalid webhook secret."});
       return;
     }
+  } else {
+    // An unauthenticated status update could mark a collection COMPLETED and release a payout.
+    res.status(503).json({error: "Mobile money webhook verification is not configured."});
+    return;
   }
 
   const body = (req.body || {}) as Record<string, unknown>;
@@ -21243,6 +22559,37 @@ export const reconcilePendingMobileMoneyProviderPayouts = functions.pubsub
               processedAt: now,
             }, {merge: true});
           }
+          continue;
+        }
+        const providerStatusUpper = String(payoutData.providerStatus || "").toUpperCase();
+        if (providerStatusUpper === "SUBMISSION_REVIEW_REQUIRED") {
+          skipped += 1;
+          continue;
+        }
+        const submitStartedAtMs = Number(payoutData.providerTransactionSubmitStartedAtMs || 0);
+        const processingStartedAtMs = toMillisTimestamp(payoutData.providerProcessingStartedAt) || 0;
+        const staleClaim = String(payoutData.status || "").toUpperCase() === "PROCESSING_PROVIDER" &&
+          providerStatusUpper === "PROCESSING" &&
+          processingStartedAtMs > 0 &&
+          nowMs - processingStartedAtMs > 15 * 60 * 1000;
+        if (staleClaim) {
+          // The worker died mid-submission. Before /transaction a retry is safe; after it, review.
+          await doc.ref.set(submitStartedAtMs > 0 ? {
+            providerStatus: "SUBMISSION_REVIEW_REQUIRED",
+            providerSubmissionReviewRequired: true,
+            providerMessage: "Afriex submission was interrupted after the transaction request. Awaiting provider webhook or manual review.",
+            lastProviderStatusCheckAt: now,
+            processedAt: now,
+          } : {
+            providerStatus: "SUBMISSION_UNCERTAIN",
+            providerMessage: "Afriex submission was interrupted before the transaction request; it will be retried.",
+            lastProviderStatusCheckAt: now,
+            processedAt: now,
+          }, {merge: true});
+          if (submitStartedAtMs > 0) {
+            functions.logger.error("Afriex mobile money submission needs manual review.", {payoutRequestId: doc.id});
+          }
+          skipped += 1;
           continue;
         }
         await doc.ref.set({
@@ -21786,6 +23133,25 @@ export const reconcilePendingBankDeposits = functions.pubsub
     return null;
   });
 
+/**
+ * Stripe webhooks are at-least-once and overlap the scheduled reconciler, so a
+ * bank-funded payout leaves bank settlement exactly once.
+ * @param {FirebaseFirestore.DocumentReference} payoutRef Payout request document.
+ * @param {FirebaseFirestore.DocumentData} update Fields to merge when the payout is still awaiting bank settlement.
+ * @return {Promise<boolean>} Whether this caller applied the transition.
+ */
+const advancePendingBankSettlement = async (
+  payoutRef: FirebaseFirestore.DocumentReference,
+  update: FirebaseFirestore.DocumentData
+): Promise<boolean> => db.runTransaction(async (transaction) => {
+  const snap = await transaction.get(payoutRef);
+  if (!snap.exists) return false;
+  const status = String(snap.get("status") || "").trim().toUpperCase();
+  if (status !== "PENDING_BANK_SETTLEMENT" && status !== "PROCESSING_BANK_SETTLEMENT") return false;
+  transaction.set(payoutRef, update, {merge: true});
+  return true;
+});
+
 const settlePendingStripeFundedAppUserTransfer = async (
   payoutRef: FirebaseFirestore.DocumentReference,
   payoutData: FirebaseFirestore.DocumentData
@@ -21793,12 +23159,13 @@ const settlePendingStripeFundedAppUserTransfer = async (
   const senderId = asNonEmptyString(payoutData.senderId);
   const bankChargeId = asNonEmptyString(payoutData.fundingBankChargeId);
   if (!bankChargeId) {
-    await payoutRef.set({
+    const failed = await advancePendingBankSettlement(payoutRef, {
       status: "FAILED",
       providerStatus: "FAILED",
       errorMessage: "Missing bank charge reference for settlement.",
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
+    if (!failed) return;
     if (senderId) {
       await finalizeSenderTransactionsForPayout(senderId, payoutRef, payoutData, "FAILED");
       await releaseAppUserTransferLock({
@@ -21813,12 +23180,13 @@ const settlePendingStripeFundedAppUserTransfer = async (
   const charge = await getStripe().charges.retrieve(bankChargeId);
   const chargeStatus = String((charge as Stripe.Charge).status || "").toLowerCase();
   if (chargeStatus === "succeeded") {
-    await payoutRef.set({
+    const settled = await advancePendingBankSettlement(payoutRef, {
       status: "PENDING",
       fundingBankChargeStatus: chargeStatus,
       bankSettlementCompletedAt: admin.firestore.Timestamp.now(),
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
+    if (!settled) return;
     const refreshed = await payoutRef.get();
     if (refreshed.exists) {
       try {
@@ -21837,17 +23205,17 @@ const settlePendingStripeFundedAppUserTransfer = async (
     return;
   }
   if (chargeStatus === "pending") {
-    await payoutRef.set({
+    await advancePendingBankSettlement(payoutRef, {
       status: "PENDING_BANK_SETTLEMENT",
       fundingBankChargeStatus: chargeStatus,
       lastStatusCheckAt: admin.firestore.Timestamp.now(),
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
     return;
   }
 
   const failureMessage = "Bank funding did not settle. Transfer was cancelled.";
-  await payoutRef.set({
+  const failed = await advancePendingBankSettlement(payoutRef, {
     status: "FAILED",
     providerStatus: "FAILED",
     errorMessage: failureMessage,
@@ -21855,7 +23223,8 @@ const settlePendingStripeFundedAppUserTransfer = async (
     fundingBankChargeStatus: chargeStatus || "failed",
     lastStatusCheckAt: admin.firestore.Timestamp.now(),
     processedAt: admin.firestore.Timestamp.now(),
-  }, {merge: true});
+  });
+  if (!failed) return;
   if (senderId) {
     await finalizeSenderTransactionsForPayout(senderId, payoutRef, payoutData, "FAILED");
     await releaseAppUserTransferLock({
@@ -21873,14 +23242,14 @@ const settlePendingBankFundedTransferRequest = async (
   const senderId = asNonEmptyString(payoutData.senderId);
   const bankChargeId = asNonEmptyString(payoutData.fundingBankChargeId);
   if (!bankChargeId) {
-    await payoutRef.set({
+    const failed = await advancePendingBankSettlement(payoutRef, {
       status: "FAILED",
       providerStatus: "FAILED",
       errorMessage: "Missing bank charge reference for settlement.",
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
 
-    if (senderId) {
+    if (failed && senderId) {
       await finalizeSenderTransactionsForPayout(senderId, payoutRef, payoutData, "FAILED");
     }
     return;
@@ -21890,12 +23259,13 @@ const settlePendingBankFundedTransferRequest = async (
   const chargeStatus = String((charge as Stripe.Charge).status || "").toLowerCase();
 
   if (chargeStatus === "succeeded") {
-    await payoutRef.set({
+    const settled = await advancePendingBankSettlement(payoutRef, {
       status: "PENDING_PROVIDER",
       fundingBankChargeStatus: chargeStatus,
       bankSettlementCompletedAt: admin.firestore.Timestamp.now(),
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
+    if (!settled) return;
 
     const refreshed = await payoutRef.get();
     if (refreshed.exists) {
@@ -21905,17 +23275,17 @@ const settlePendingBankFundedTransferRequest = async (
   }
 
   if (chargeStatus === "pending") {
-    await payoutRef.set({
+    await advancePendingBankSettlement(payoutRef, {
       status: "PENDING_BANK_SETTLEMENT",
       fundingBankChargeStatus: chargeStatus,
       lastStatusCheckAt: admin.firestore.Timestamp.now(),
       processedAt: admin.firestore.Timestamp.now(),
-    }, {merge: true});
+    });
     return;
   }
 
   const failureMessage = "Bank funding did not settle. Transfer was cancelled.";
-  await payoutRef.set({
+  const failed = await advancePendingBankSettlement(payoutRef, {
     status: "FAILED",
     providerStatus: "FAILED",
     errorMessage: failureMessage,
@@ -21923,9 +23293,9 @@ const settlePendingBankFundedTransferRequest = async (
     fundingBankChargeStatus: chargeStatus || "failed",
     lastStatusCheckAt: admin.firestore.Timestamp.now(),
     processedAt: admin.firestore.Timestamp.now(),
-  }, {merge: true});
+  });
 
-  if (senderId) {
+  if (failed && senderId) {
     await finalizeSenderTransactionsForPayout(senderId, payoutRef, payoutData, "FAILED");
   }
 };
@@ -22251,10 +23621,10 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
       if (!buyerId) return reconcile("Blind Date rejoin is missing the account.");
       const profileRef = db.collection("blindDateProfiles").doc(buyerId);
       const profile = await transaction.get(profileRef);
-      if (!profile.exists || normalizeProfileStatus(profile.data()?.status) !== "matched") {
+      if (!profile.exists || !isBlindDateRejoinableStatus(profile.data()?.status)) {
         return reconcile("Blind Date profile was not eligible to rejoin at payment completion.");
       }
-      transaction.update(profileRef, {...receipt, status: "active", updatedAt: now});
+      finalizeBlindDateRejoin(transaction, buyerId, (profile.data() || {}) as Record<string, unknown>, now, receipt);
       recordBuyerReceipt("Blind Date re-join");
       if (platformFeeUsd > 0) {
         recordPlatformRevenue(transaction, {
@@ -22412,7 +23782,123 @@ const reconcileStripeConnectPayoutSettlement = async (
   }
 };
 
+const isStripeFundingReversalEvent = (eventType: string): boolean => (
+  eventType === "charge.refunded" ||
+  eventType === "charge.failed" ||
+  eventType === "charge.dispute.created" ||
+  eventType === "charge.dispute.closed"
+);
+
+// Payouts in these states never released money, so a reversal of their funding is not a loss.
+const FUNDING_REVERSAL_UNEXPOSED_STATUSES = new Set([
+  "FAILED",
+  "REFUNDED",
+  "CANCELLED",
+  "CANCELED",
+  "EXPIRED",
+  "FUNDING_FAILED",
+  "PENDING_BANK_SETTLEMENT",
+  "PROCESSING_BANK_SETTLEMENT",
+  "FUNDING_IN_PROGRESS",
+]);
+
+/**
+ * A refund, dispute or ACH return after delivery is an unrecoverable platform
+ * loss: record it and lock the sender from further external sends until
+ * support reviews it.
+ * @param {Stripe.Event} event Verified Stripe event.
+ */
+const recordStripeFundingReversal = async (event: Stripe.Event): Promise<void> => {
+  const object = event.data.object as unknown as Record<string, unknown>;
+  const isDispute = event.type.startsWith("charge.dispute.");
+  const chargeId = asNonEmptyString(isDispute ? object.charge : object.id);
+  const paymentIntentId = asNonEmptyString(object.payment_intent);
+  if (!chargeId && !paymentIntentId) return;
+
+  const queries: Promise<FirebaseFirestore.QuerySnapshot>[] = [];
+  if (chargeId) {
+    queries.push(db.collection("payout_requests").where("fundingBankChargeId", "==", chargeId).limit(20).get());
+  }
+  if (paymentIntentId) {
+    queries.push(db.collection("payout_requests").where("fundingPaymentIntentId", "==", paymentIntentId).limit(20).get());
+  }
+  const docsById = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+  for (const snap of await Promise.all(queries)) {
+    snap.docs.forEach((doc) => docsById.set(doc.id, doc));
+  }
+  if (docsById.size === 0) return;
+
+  const disputeStatus = isDispute ? asNonEmptyString(object.status) || null : null;
+  const lockSender = event.type === "charge.refunded" ||
+    event.type === "charge.dispute.created" ||
+    event.type === "charge.failed" ||
+    (event.type === "charge.dispute.closed" && disputeStatus === "lost");
+  const now = admin.firestore.Timestamp.now();
+  const exposedPayoutIds: string[] = [];
+  const lockedSenderIds = new Set<string>();
+
+  for (const doc of docsById.values()) {
+    const data = doc.data() || {};
+    const status = String(data.status || "").trim().toUpperCase();
+    // A failed ACH charge before settlement is the normal failure path, handled by settlement reconciliation.
+    if (event.type === "charge.failed" && !data.bankSettlementCompletedAt) continue;
+    if (FUNDING_REVERSAL_UNEXPOSED_STATUSES.has(status)) continue;
+    exposedPayoutIds.push(doc.id);
+    await doc.ref.set({
+      fundingReversed: true,
+      fundingReversalEventType: event.type,
+      fundingReversalDisputeStatus: disputeStatus,
+      fundingReversalRequiresReview: true,
+      fundingReversedAt: now,
+    }, {merge: true});
+    const senderId = asNonEmptyString(data.senderId);
+    if (lockSender && senderId && !lockedSenderIds.has(senderId)) {
+      lockedSenderIds.add(senderId);
+      await db.collection("external_funding_reconciliation_locks").doc(senderId).set({
+        active: true,
+        senderId,
+        payoutRequestId: doc.id,
+        reason: `Stripe ${event.type} after the transfer was released. Review before allowing further sends.`,
+        fundingReversal: true,
+        stripeEventId: event.id,
+        createdAt: now,
+        updatedAt: now,
+      }, {merge: true});
+    }
+  }
+  if (exposedPayoutIds.length === 0) return;
+
+  await db.collection("funding_reversals").doc(event.id).set({
+    stripeEventId: event.id,
+    eventType: event.type,
+    chargeId: chargeId || null,
+    paymentIntentId: paymentIntentId || null,
+    disputeStatus,
+    amountCents: Number(object.amount_refunded || object.amount || 0) || null,
+    reason: asNonEmptyString(object.reason, object.failure_code, object.failure_message) || null,
+    payoutRequestIds: exposedPayoutIds,
+    lockedSenderIds: Array.from(lockedSenderIds),
+    createdAt: now,
+  }, {merge: true});
+  functions.logger.error("External funding reversed after the transfer was released.", {
+    eventId: event.id,
+    eventType: event.type,
+    chargeId,
+    paymentIntentId,
+    payoutRequestIds: exposedPayoutIds,
+  });
+};
+
 const processStripeWebhookEvent = async (event: Stripe.Event): Promise<void> => {
+  if (isStripeFundingReversalEvent(event.type)) {
+    // Runs after settlement reconciliation for charge.failed, so an unsettled ACH failure is already FAILED.
+    if (event.type === "charge.failed") {
+      const failedChargeId = asNonEmptyString((event.data.object as {id?: unknown})?.id);
+      if (failedChargeId) await reconcileStripeChargeSettlement(failedChargeId);
+    }
+    await recordStripeFundingReversal(event);
+    return;
+  }
   if (isStripeCommerceCheckoutEvent(event.type)) {
     const session = event.data.object as Stripe.Checkout.Session;
     if (!asNonEmptyString(session?.id)) {
@@ -22736,6 +24222,14 @@ const MOBILE_MONEY_PHONE_OTP_CODE_LENGTH = 6;
 const MOBILE_MONEY_PHONE_OTP_TTL_MS = 10 * 60 * 1000;
 const MOBILE_MONEY_PHONE_OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 const MOBILE_MONEY_PHONE_OTP_MAX_ATTEMPTS = 5;
+// A resend must not reset a lockout, otherwise guesses are unlimited at one batch per cooldown.
+const MOBILE_MONEY_PHONE_OTP_LOCKOUT_MS = 30 * 60 * 1000;
+// Phone numbers are recycled by carriers; ownership proof must be renewed.
+const MOBILE_MONEY_PHONE_OTP_VERIFIED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// Each send costs an SMS; caps stop one account pumping messages to many numbers.
+const MOBILE_MONEY_PHONE_OTP_DAILY_SENDS_PER_USER = 10;
+const MOBILE_MONEY_PHONE_OTP_DAILY_SENDS_PER_PHONE = 5;
+const MOBILE_MONEY_PHONE_OTP_RATE_LIMIT_COLLECTION = "mobile_money_phone_otp_rate_limits";
 const MOBILE_MONEY_PHONE_OTP_UNAVAILABLE_MESSAGE =
   "Phone OTP service is temporarily unavailable. Use email verification or try again later.";
 
@@ -22866,6 +24360,42 @@ const buildMobileMoneyOtpDocId = (uid: string, phoneDigits: string): string => {
   const config = getMobileMoneyPhoneOtpConfig();
   const seed = `${uid}:${phoneDigits}:${config.codeSecret}`;
   return createHash("sha256").update(seed).digest("hex").slice(0, 48);
+};
+
+const isFreshMobileMoneyOtpVerification = (otpData: Record<string, unknown>): boolean => {
+  if (String(otpData.status || "").trim().toUpperCase() !== "VERIFIED") return false;
+  const verifiedAtMs = toMillisTimestamp(otpData.verifiedAt) || Number(otpData.verifiedAtMs || 0);
+  return Number.isFinite(verifiedAtMs) && verifiedAtMs > 0 &&
+    Date.now() - verifiedAtMs <= MOBILE_MONEY_PHONE_OTP_VERIFIED_TTL_MS;
+};
+
+/**
+ * Counts an OTP send against per-user and per-number daily caps before the SMS
+ * is requested, so concurrent calls cannot exceed them.
+ * @param {string} uid Requesting user.
+ * @param {string} phoneDigits Normalized destination digits.
+ */
+const reserveMobileMoneyOtpSendQuota = async (uid: string, phoneDigits: string): Promise<void> => {
+  const day = new Date().toISOString().slice(0, 10);
+  const phoneKey = createHash("sha256").update(phoneDigits).digest("hex").slice(0, 32);
+  const collection = db.collection(MOBILE_MONEY_PHONE_OTP_RATE_LIMIT_COLLECTION);
+  const userRef = collection.doc(`user_${uid}_${day}`);
+  const phoneRef = collection.doc(`phone_${phoneKey}_${day}`);
+  await db.runTransaction(async (transaction) => {
+    const [userSnap, phoneSnap] = await Promise.all([transaction.get(userRef), transaction.get(phoneRef)]);
+    const userCount = Math.trunc(Number(userSnap.get("count") || 0));
+    const phoneCount = Math.trunc(Number(phoneSnap.get("count") || 0));
+    if (userCount >= MOBILE_MONEY_PHONE_OTP_DAILY_SENDS_PER_USER || phoneCount >= MOBILE_MONEY_PHONE_OTP_DAILY_SENDS_PER_PHONE) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        "Too many verification codes requested today. Try again tomorrow."
+      );
+    }
+    const now = admin.firestore.Timestamp.now();
+    const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    transaction.set(userRef, {count: userCount + 1, day, updatedAt: now, expiresAt}, {merge: true});
+    transaction.set(phoneRef, {count: phoneCount + 1, day, updatedAt: now, expiresAt}, {merge: true});
+  });
 };
 
 const getMobileMoneyOtpRef = (
@@ -23319,8 +24849,7 @@ const assertMobileMoneyPhoneOtpVerified = async (params: {
   }
 
   const otpData = (otpSnap.data() || {}) as Record<string, unknown>;
-  const otpStatus = String(otpData.status || "").trim().toUpperCase();
-  if (otpStatus !== "VERIFIED") {
+  if (!isFreshMobileMoneyOtpVerification(otpData)) {
     throw new functions.https.HttpsError(
       "failed-precondition",
       "Verify this mobile money phone number with OTP before saving."
@@ -23379,6 +24908,24 @@ export const addPaymentMethod = functions.runWith({enforceAppCheck: true})
         createdAt: now,
         updatedAt: now,
       };
+      let privateBankFields: Record<string, unknown> | null = null;
+      if (methodType === "BANK") {
+        const fullAccountNumber = sanitizeAfriexAccountNumber(asNonEmptyString(payload.accountNumber) || "");
+        if (fullAccountNumber.length < 4) {
+          throw new functions.https.HttpsError("invalid-argument", "A valid bank account number is required.");
+        }
+        // Android's Stripe bank-token flow only sends a masked number; never store that as the raw one.
+        if (!fullAccountNumber.includes("*")) {
+          privateBankFields = {
+            accountNumberRaw: fullAccountNumber,
+            routingNumberRaw: asNonEmptyString(payload.routingNumber) || null,
+            updatedAt: now,
+          };
+          payload.accountNumber = maskedBankAccountNumber(fullAccountNumber);
+          delete payload.routingNumber;
+        }
+        payload.last4 = fullAccountNumber.slice(-4);
+      }
       if (methodType === "CARD") {
         payload.requiresRelinkForCharges = true;
         payload.chargeSetupCheckedAt = now;
@@ -23449,7 +24996,14 @@ export const addPaymentMethod = functions.runWith({enforceAppCheck: true})
       if (dedupeKey) {
         const docRef = methodsRef.doc(`dedupe_${dedupeKey}`);
         try {
-          await docRef.create(payload);
+          if (privateBankFields) {
+            const batch = db.batch();
+            batch.create(docRef, payload);
+            batch.set(paymentMethodPrivateRef(userId, docRef.id), privateBankFields, {merge: true});
+            await batch.commit();
+          } else {
+            await docRef.create(payload);
+          }
         } catch (error) {
           if (isAlreadyExistsError(error)) {
             throw new functions.https.HttpsError("already-exists", duplicateMessageForType(methodType));
@@ -23458,7 +25012,15 @@ export const addPaymentMethod = functions.runWith({enforceAppCheck: true})
         }
         paymentMethodId = docRef.id;
       } else {
-        const docRef = await methodsRef.add(payload);
+        const docRef = methodsRef.doc();
+        if (privateBankFields) {
+          const batch = db.batch();
+          batch.create(docRef, payload);
+          batch.set(paymentMethodPrivateRef(userId, docRef.id), privateBankFields, {merge: true});
+          await batch.commit();
+        } else {
+          await docRef.create(payload);
+        }
         paymentMethodId = docRef.id;
       }
 
@@ -23556,56 +25118,20 @@ export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true}
         mobileNumber: phone || undefined,
       };
       assertSwiftBeneficiaryDetails(recipient);
-      const providerInstitution = await resolveAfriexBankSwiftInstitution(
+      await resolveAfriexBankSwiftInstitution(
         config,
         "SWIFT",
         country.iso2,
         recipient
       );
-      const identity =
-        `${country.iso2}:SWIFT:${providerInstitution.institutionCode}:${accountNumber}`;
-      const existing = await methodsRef
-        .where("appUserReceiveRouteIdentity", "==", identity)
-        .limit(1)
-        .get();
-      const methodRef = existing.empty ? methodsRef.doc() : existing.docs[0].ref;
-      await methodRef.set({
-        type: "SWIFT_BANK",
-        deliveryRoute: "SWIFT",
-        label: `${providerInstitution.institutionName} • ${accountNumber.slice(-4)}`,
-        bankName: providerInstitution.institutionName,
-        accountHolderName,
-        accountNumber,
-        last4: accountNumber.slice(-4),
-        country: country.country,
-        currency: "USD",
-        institutionCode: providerInstitution.institutionCode,
-        institutionName: providerInstitution.institutionName,
-        swiftCode: providerInstitution.institutionCode,
-        swiftBic: providerInstitution.institutionCode,
-        routingCode: asNonEmptyString(request.routingCode) || null,
-        phoneNumber: phone || null,
-        recipientEmail: asNonEmptyString(request.recipientEmail) || null,
-        recipientAddress: asNonEmptyString(request.recipientAddress) || null,
-        bankAddress: asNonEmptyString(request.bankAddress) || null,
-        providerResolvedName: null,
-        accountNameVerified: false,
-        accountRouteVerified: true,
-        appUserReceiveRouteVerified: true,
-        appUserReceiveRouteLabel: `SWIFT • ${providerInstitution.institutionName} • ${accountNumber.slice(-4)}`,
-        appUserReceiveRouteVerifiedAt: now,
-        appUserReceiveRouteIdentity: identity,
-        status: "VERIFIED",
-        ...(existing.empty ? {createdAt: now} : {}),
-        updatedAt: now,
-      }, {merge: true});
-
-      return {
-        success: true,
-        paymentMethodId: methodRef.id,
-        deliveryRoute: "SWIFT",
-        message: "Verified SWIFT receive route saved.",
-      };
+      // The provider can validate SWIFT institution details but does not
+      // confirm that the named account holder owns this account. Keep SWIFT
+      // available for direct bank payouts, but do not expose it as a
+      // member-to-member receive route without that ownership proof.
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "This SWIFT bank route can be used for direct bank payouts, but it cannot receive App User transfers because the payment partner cannot confirm the account holder name for this corridor."
+      );
     }
 
     const resolved = await resolveAfriexBankAccount({
@@ -23614,6 +25140,12 @@ export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true}
       accountNumber,
       institutionCode,
     });
+    if (!resolved.accountNameVerified || !asNonEmptyString(resolved.recipientName)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "This bank route is saved for direct bank payouts, but it cannot receive App User transfers because the payment partner could not confirm the account holder name for this corridor."
+      );
+    }
     if (
       resolved.accountNameVerified &&
       normalizeBeneficiaryName(accountHolderName) !== normalizeBeneficiaryName(resolved.recipientName || "")
@@ -23624,19 +25156,27 @@ export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true}
       );
     }
 
-    const existing = await methodsRef
-      .where("appUserReceiveRouteIdentity", "==", `${country.iso2}:${resolved.institutionCode}:${accountNumber}`)
-      .limit(1)
-      .get();
+    const legacyIdentity = `${country.iso2}:${resolved.institutionCode}:${accountNumber}`;
+    const routeIdentity = createHash("sha256").update(legacyIdentity).digest("hex");
+    const [legacyExisting, hashedExisting] = await Promise.all([
+      methodsRef.where("appUserReceiveRouteIdentity", "==", legacyIdentity).limit(1).get(),
+      methodsRef.where("appUserReceiveRouteIdentity", "==", routeIdentity).limit(1).get(),
+    ]);
+    const existing = legacyExisting.empty ? hashedExisting : legacyExisting;
     const methodRef = existing.empty ? methodsRef.doc() : existing.docs[0].ref;
     const storedName = resolved.recipientName || accountHolderName;
-    await methodRef.set({
+    const batch = db.batch();
+    batch.set(paymentMethodPrivateRef(context.auth.uid, methodRef.id), {
+      accountNumberRaw: accountNumber,
+      updatedAt: now,
+    }, {merge: true});
+    batch.set(methodRef, {
       type: "BANK",
       deliveryRoute: "BANK",
       label: `${resolved.institutionName} • ${accountNumber.slice(-4)}`,
       bankName: resolved.institutionName,
       accountHolderName: storedName,
-      accountNumber,
+      accountNumber: maskedBankAccountNumber(accountNumber),
       last4: accountNumber.slice(-4),
       country: country.country,
       currency: resolveQuoteRecipientCurrency("BANK", country.country),
@@ -23648,11 +25188,12 @@ export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true}
       appUserReceiveRouteVerified: true,
       appUserReceiveRouteLabel: `${resolved.institutionName} • ${accountNumber.slice(-4)}`,
       appUserReceiveRouteVerifiedAt: now,
-      appUserReceiveRouteIdentity: `${country.iso2}:${resolved.institutionCode}:${accountNumber}`,
+      appUserReceiveRouteIdentity: routeIdentity,
       status: "VERIFIED",
       ...(existing.empty ? {createdAt: now} : {}),
       updatedAt: now,
     }, {merge: true});
+    await batch.commit();
 
     return {
       success: true,
@@ -23756,22 +25297,92 @@ export const deletePaymentMethod = functions.runWith({enforceAppCheck: true})
       throw new functions.https.HttpsError("invalid-argument", "paymentMethodId is required.");
     }
 
-    const methodsRef = db.collection("users").doc(userId).collection("payment_methods");
+    const userRef = db.collection("users").doc(userId);
+    const methodsRef = userRef.collection("payment_methods");
     const methodRef = methodsRef.doc(paymentMethodId);
-    const methodSnap = await methodRef.get();
+    const [methodSnap, userSnap] = await Promise.all([methodRef.get(), userRef.get()]);
     if (!methodSnap.exists) {
       throw new functions.https.HttpsError("not-found", "Payment method not found.");
     }
 
+    const methodData = (methodSnap.data() || {}) as Record<string, unknown>;
+    const userData = (userSnap.data() || {}) as Record<string, unknown>;
     const methodType = normalizeMethodType(methodSnap.get("type"));
-    const wasDefault = methodSnap.get("isDefault") === true;
+    const externalAccountId = asNonEmptyString(methodData.externalAccountId, methodData.stripeExternalAccountId);
+    const chargePaymentMethodId = asNonEmptyString(methodData.chargePaymentMethodId, methodData.stripePaymentMethodId);
+    const chargeSourceId = asNonEmptyString(methodData.chargeSourceId);
+    const chargeCustomerId = asNonEmptyString(methodData.chargeCustomerId, userData.paymentCustomerId);
+    const connectAccountIds = [...new Set([
+      asNonEmptyString(userData.payoutAccountId),
+      asNonEmptyString(userData.stripeAccountId),
+    ].filter((value): value is string => !!value))];
+
+    let stripeObjectsRemoved = 0;
+    if (externalAccountId) {
+      for (const connectAccountId of connectAccountIds) {
+        try {
+          await getStripe().accounts.deleteExternalAccount(connectAccountId, externalAccountId);
+          stripeObjectsRemoved += 1;
+          break;
+        } catch (error) {
+          if (isStripeMissingResourceError(error)) continue;
+          functions.logger.warn("Could not remove Stripe external account during payment-method deletion", {
+            userId,
+            paymentMethodId,
+            methodType,
+            connectAccountId,
+            error,
+          });
+          break;
+        }
+      }
+    }
+
+    if (chargePaymentMethodId) {
+      try {
+        const paymentMethod = await getStripe().paymentMethods.retrieve(chargePaymentMethodId) as Stripe.PaymentMethod;
+        if (chargeCustomerId && stripeCustomerIdForPaymentMethod(paymentMethod) === chargeCustomerId) {
+          await getStripe().paymentMethods.detach(chargePaymentMethodId);
+          stripeObjectsRemoved += 1;
+        }
+      } catch (error) {
+        if (!isStripeMissingResourceError(error)) {
+          functions.logger.warn("Could not detach Stripe card during payment-method deletion", {
+            userId,
+            paymentMethodId,
+            methodType,
+            error,
+          });
+        }
+      }
+    }
+
+    if (chargeSourceId && chargeCustomerId) {
+      try {
+        await getStripe().customers.deleteSource(chargeCustomerId, chargeSourceId);
+        stripeObjectsRemoved += 1;
+      } catch (error) {
+        if (!isStripeMissingResourceError(error)) {
+          functions.logger.warn("Could not remove Stripe bank source during payment-method deletion", {
+            userId,
+            paymentMethodId,
+            methodType,
+            error,
+          });
+        }
+      }
+    }
+
+    const wasDefault = methodData.isDefault === true;
     const now = admin.firestore.Timestamp.now();
     const allMethodsSnap = await methodsRef.get();
     const remainingDocs = allMethodsSnap.docs.filter((doc) => doc.id !== paymentMethodId);
+    const anotherDefaultExists = remainingDocs.some((doc) => doc.get("isDefault") === true);
 
     const batch = db.batch();
     batch.delete(methodRef);
-    if (wasDefault && remainingDocs.length > 0) {
+    batch.delete(paymentMethodPrivateRef(userId, paymentMethodId));
+    if (remainingDocs.length > 0 && (wasDefault || !anotherDefaultExists)) {
       const fallbackDoc = remainingDocs[0];
       remainingDocs.forEach((doc) => {
         batch.set(doc.ref, {
@@ -23786,6 +25397,7 @@ export const deletePaymentMethod = functions.runWith({enforceAppCheck: true})
       success: true,
       message: deletedMessageForType(methodType),
       paymentMethodId,
+      stripeObjectsRemoved,
     };
   });
 
@@ -24745,7 +26357,7 @@ export const requestMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tr
     if (existingSnap.exists) {
       const existing = (existingSnap.data() || {}) as Record<string, unknown>;
       const status = String(existing.status || "").trim().toUpperCase();
-      if (status === "VERIFIED") {
+      if (isFreshMobileMoneyOtpVerification(existing)) {
         return {
           success: true,
           alreadyVerified: true,
@@ -24753,6 +26365,14 @@ export const requestMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tr
           expiresInSeconds: Math.trunc(MOBILE_MONEY_PHONE_OTP_TTL_MS / 1000),
           maskedPhone: maskPhoneNumberForOtp(phoneE164),
         };
+      }
+      const lockedUntilMs = Number(existing.lockedUntilMs || 0);
+      if (status === "LOCKED" && lockedUntilMs > nowMs) {
+        const retryMinutes = Math.max(1, Math.ceil((lockedUntilMs - nowMs) / 60000));
+        throw new functions.https.HttpsError(
+          "permission-denied",
+          `Too many invalid attempts. Try again in ${retryMinutes} minute(s).`
+        );
       }
 
       const sentAtMs = toMillisTimestamp(existing.sentAt) || Number(existing.sentAtMs || 0);
@@ -24770,6 +26390,7 @@ export const requestMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tr
       }
     }
 
+    await reserveMobileMoneyOtpSendQuota(uid, phoneDigits);
     await sendMobileMoneyPhoneOtpCode(phoneE164);
 
     const expiresAtMs = nowMs + MOBILE_MONEY_PHONE_OTP_TTL_MS;
@@ -24779,6 +26400,9 @@ export const requestMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tr
       phoneDigits,
       status: "SENT",
       attempts: 0,
+      lockedUntilMs: admin.firestore.FieldValue.delete(),
+      verifiedAt: admin.firestore.FieldValue.delete(),
+      verifiedAtMs: admin.firestore.FieldValue.delete(),
       maxAttempts: MOBILE_MONEY_PHONE_OTP_MAX_ATTEMPTS,
       sentAt: now,
       sentAtMs: nowMs,
@@ -24789,8 +26413,8 @@ export const requestMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tr
 
     await db.collection("users").doc(uid).set({
       mobileMoneyPhoneOtpLastSentAtMs: nowMs,
-      mobileMoneyPhoneOtpLastSentPhone: phoneE164,
-      mobileMoneyPhoneOtpLastSentPhoneDigits: phoneDigits,
+      mobileMoneyPhoneOtpLastSentPhone: admin.firestore.FieldValue.delete(),
+      mobileMoneyPhoneOtpLastSentPhoneDigits: admin.firestore.FieldValue.delete(),
       updatedAt: now,
     }, {merge: true});
 
@@ -24825,70 +26449,76 @@ export const verifyMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tru
     }
 
     const otpRef = getMobileMoneyOtpRef(uid, phoneDigits);
-    const otpSnap = await otpRef.get();
-    if (!otpSnap.exists) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Verification code not found. Request a new code."
-      );
-    }
-
-    const otpData = (otpSnap.data() || {}) as Record<string, unknown>;
-    const status = String(otpData.status || "SENT").trim().toUpperCase();
-    if (status === "VERIFIED") {
+    const lockedMessage = "Too many invalid attempts. Try again in 30 minutes.";
+    // Count the attempt before asking the provider so parallel guesses cannot exceed the limit.
+    const reservation = await db.runTransaction(async (transaction) => {
+      const otpSnap = await transaction.get(otpRef);
+      if (!otpSnap.exists) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Verification code not found. Request a new code."
+        );
+      }
+      const otpData = (otpSnap.data() || {}) as Record<string, unknown>;
+      if (isFreshMobileMoneyOtpVerification(otpData)) {
+        return {alreadyVerified: true, attempts: 0, maxAttempts: 0};
+      }
+      const status = String(otpData.status || "SENT").trim().toUpperCase();
+      const txNowMs = Date.now();
+      if (status === "LOCKED") {
+        throw new functions.https.HttpsError("permission-denied", lockedMessage);
+      }
+      const expiresAtMs = toMillisTimestamp(otpData.expiresAt) || Number(otpData.expiresAtMs || 0);
+      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= txNowMs) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Verification code expired. Request a new code."
+        );
+      }
+      const attempts = Math.max(0, Math.trunc(Number(otpData.attempts || 0)));
+      const maxAttempts = Math.max(1, Math.trunc(Number(otpData.maxAttempts || MOBILE_MONEY_PHONE_OTP_MAX_ATTEMPTS)));
+      if (attempts >= maxAttempts) {
+        transaction.set(otpRef, {
+          status: "LOCKED",
+          lockedUntilMs: txNowMs + MOBILE_MONEY_PHONE_OTP_LOCKOUT_MS,
+          updatedAt: admin.firestore.Timestamp.now(),
+        }, {merge: true});
+        return {alreadyVerified: false, attempts, maxAttempts, locked: true};
+      }
+      transaction.set(otpRef, {
+        attempts: attempts + 1,
+        lastAttemptAt: admin.firestore.Timestamp.now(),
+        updatedAt: admin.firestore.Timestamp.now(),
+      }, {merge: true});
+      return {alreadyVerified: false, attempts: attempts + 1, maxAttempts};
+    });
+    if (reservation.alreadyVerified) {
       return {
         success: true,
         alreadyVerified: true,
       };
     }
-    if (status === "LOCKED") {
-      throw new functions.https.HttpsError(
-        "permission-denied",
-        "Too many invalid attempts. Request a new verification code."
-      );
+    if ("locked" in reservation && reservation.locked) {
+      throw new functions.https.HttpsError("permission-denied", lockedMessage);
     }
 
     const nowMs = Date.now();
     const now = admin.firestore.Timestamp.now();
-    const expiresAtMs = toMillisTimestamp(otpData.expiresAt) || Number(otpData.expiresAtMs || 0);
-    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Verification code expired. Request a new code."
-      );
-    }
-
-    const attempts = Math.max(0, Math.trunc(Number(otpData.attempts || 0)));
-    const maxAttempts = Math.max(1, Math.trunc(Number(otpData.maxAttempts || MOBILE_MONEY_PHONE_OTP_MAX_ATTEMPTS)));
-    if (attempts >= maxAttempts) {
-      await otpRef.set({
-        status: "LOCKED",
-        updatedAt: now,
-      }, {merge: true});
-      throw new functions.https.HttpsError(
-        "permission-denied",
-        "Too many invalid attempts. Request a new verification code."
-      );
-    }
-
+    const attempts = reservation.attempts;
+    const maxAttempts = reservation.maxAttempts;
     const verificationResult = await verifyMobileMoneyPhoneOtpCode(phoneE164, rawCode);
     if (!verificationResult.approved) {
-      const nextAttempts = attempts + 1;
-      const remainingAttempts = Math.max(0, maxAttempts - nextAttempts);
-      const shouldLock = nextAttempts >= maxAttempts;
+      const remainingAttempts = Math.max(0, maxAttempts - attempts);
+      const shouldLock = attempts >= maxAttempts;
       await otpRef.set({
-        attempts: nextAttempts,
         status: shouldLock ? "LOCKED" : "SENT",
-        lastAttemptAt: now,
+        ...(shouldLock ? {lockedUntilMs: nowMs + MOBILE_MONEY_PHONE_OTP_LOCKOUT_MS} : {}),
         lastProviderStatus: verificationResult.status,
         updatedAt: now,
       }, {merge: true});
 
       if (shouldLock) {
-        throw new functions.https.HttpsError(
-          "permission-denied",
-          "Too many invalid attempts. Request a new verification code."
-        );
+        throw new functions.https.HttpsError("permission-denied", lockedMessage);
       }
       throw new functions.https.HttpsError(
         "permission-denied",
@@ -24900,7 +26530,8 @@ export const verifyMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tru
       phoneNumber: phoneE164,
       phoneDigits,
       status: "VERIFIED",
-      attempts: attempts + 1,
+      attempts,
+      lockedUntilMs: admin.firestore.FieldValue.delete(),
       verifiedAt: now,
       verifiedAtMs: nowMs,
       lastProviderStatus: verificationResult.status,
@@ -25690,8 +27321,7 @@ export const adminReversePayoutRequests = functions.https.onRequest(async (req, 
     return;
   }
 
-  const providedSecret = req.header("x-admin-reversal-secret") || "";
-  if (providedSecret !== expectedSecret) {
+  if (!sharedSecretMatches(req.header("x-admin-reversal-secret"), expectedSecret)) {
     res.status(403).json({error: "Invalid reversal secret."});
     return;
   }
@@ -25727,6 +27357,7 @@ interface WalletTransferQuoteRequestPayload {
   recipientNetwork?: string;
   destinationCountry?: string;
   providerChannel?: string;
+  afriexProviderChannel?: string;
   fundingPaymentMethodId?: string;
   recipientId?: string;
   recipientPaymentMethodId?: string;
@@ -25906,78 +27537,6 @@ const resolveQuoteRecipientCurrency = (
   if (currencyFromCountry) return currencyFromCountry.toUpperCase();
   if (route === "BANK" || route === "CARD" || route === "WALLET") return "USD";
   return "USD";
-};
-
-const loadQuoteEligibleFundingMethod = async (args: {
-  senderId: string;
-  senderData: Record<string, unknown>;
-  fundingSourceType: string;
-  fundingPaymentMethodId?: string | null;
-}): Promise<{id: string; data: Record<string, unknown>}> => {
-  const fundingPaymentMethodId = asNonEmptyString(args.fundingPaymentMethodId);
-  if (!fundingPaymentMethodId) {
-    throw new functions.https.HttpsError(
-      "failed-precondition",
-      "Select a saved funding method before requesting live pricing."
-    );
-  }
-
-  const methodSnap = await db.collection("users").doc(args.senderId)
-    .collection("payment_methods").doc(fundingPaymentMethodId).get();
-  if (!methodSnap.exists) {
-    throw new functions.https.HttpsError("not-found", "The selected funding method was not found.");
-  }
-
-  const method = (methodSnap.data() || {}) as Record<string, unknown>;
-  const type = normalizeMethodType(method.type || method.methodType);
-  const fundingSourceType = args.fundingSourceType.trim().toUpperCase();
-  if (fundingSourceType === "EXTERNAL_CARD") {
-    const paymentMethodId = asNonEmptyString(
-      method.chargePaymentMethodId,
-      method.stripePaymentMethodId
-    );
-    const customerId = asNonEmptyString(method.chargeCustomerId, args.senderData.paymentCustomerId);
-    if (type !== "CARD" || !paymentMethodId || !customerId || method.requiresRelinkForCharges === true) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Select a linked card that is ready for transfer funding."
-      );
-    }
-  } else if (fundingSourceType === "EXTERNAL_BANK") {
-    const country = resolveStripeConnectCountryCode(
-      asNonEmptyString(method.country, method.billingCountry)
-    );
-    const sourceStatus = String(method.chargeSourceStatus || "").trim().toLowerCase();
-    const customerId = asNonEmptyString(method.chargeCustomerId, args.senderData.paymentCustomerId);
-    if (
-      type !== "BANK" ||
-      country !== "US" ||
-      !asNonEmptyString(method.chargeSourceId) ||
-      sourceStatus !== "verified" ||
-      !customerId ||
-      method.requiresRelinkForCharges === true
-    ) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Select a verified US ACH bank account for transfer funding."
-      );
-    }
-  } else if (fundingSourceType === "EXTERNAL_MOBILE_MONEY") {
-    if (
-      type !== "MOBILE_MONEY" ||
-      method.phoneOwnershipVerified !== true ||
-      String(method.verificationStatus || "").trim().toUpperCase() !== "VERIFIED"
-    ) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Select a verified mobile money funding source."
-      );
-    }
-  } else {
-    throw new functions.https.HttpsError("failed-precondition", "Unsupported funding source.");
-  }
-
-  return {id: fundingPaymentMethodId, data: method};
 };
 
 /** Customer-safe conversion preview backed by Afriex's current business rate. */
@@ -26170,6 +27729,7 @@ const DEFAULT_SCHEDULE1_CORRIDOR_FEES: Record<string, {providerFeeUsd: number; o
   "BW_MOBILE_MONEY": {providerFeeUsd: 1.50, ownerFeeUsd: 0},
   "BJ_MOBILE_MONEY": {providerFeeUsd: 1.80, ownerFeeUsd: 0},
   "CG_MOBILE_MONEY": {providerFeeUsd: 1.80, ownerFeeUsd: 0},
+  "ET_MOBILE_MONEY": {providerFeeUsd: 1.20, ownerFeeUsd: 0},
 };
 
 const normalizeTransferDestinationRoute = (destinationRoute: unknown): string => {
@@ -26298,6 +27858,99 @@ const resolveTransferCorridorFees = async (args: {
   };
 };
 
+/**
+ * Quote-time validation keeps a stale or manually-crafted client request from
+ * showing a price for a funding source that the transfer worker will reject.
+ * @param {Object} params Sender, funding source type and payment method id.
+ * @return {Promise<Record<string, unknown>>} The ready funding method document.
+ */
+const loadReadyExternalTransferFundingMethod = async (params: {
+  senderId: string;
+  fundingSourceType: string;
+  fundingPaymentMethodId: string | null | undefined;
+}): Promise<Record<string, unknown>> => {
+  const methodId = params.fundingPaymentMethodId;
+  if (!methodId) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Select a verified funding method before requesting a live quote."
+    );
+  }
+
+  const methodSnap = await db.collection("users").doc(params.senderId)
+    .collection("payment_methods").doc(methodId).get();
+  if (!methodSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Selected funding method was not found.");
+  }
+
+  const method = (methodSnap.data() || {}) as Record<string, unknown>;
+  const methodType = normalizeMethodType(method.type || method.methodType);
+  const fundingType = String(params.fundingSourceType || "").trim().toUpperCase();
+  const requiresBillingCustomer = fundingType === "EXTERNAL_CARD" || fundingType === "EXTERNAL_BANK";
+  const senderData = requiresBillingCustomer ?
+    ((await db.collection("users").doc(params.senderId).get()).data() || {}) as Record<string, unknown> :
+    null;
+  const chargeCustomerId = asNonEmptyString(method.chargeCustomerId, senderData?.paymentCustomerId);
+
+  if (fundingType === "EXTERNAL_CARD") {
+    const brand = String(method.brand || "").trim().toUpperCase();
+    const isCard = methodType.includes("CARD") ||
+      ["VISA", "MASTERCARD", "AMEX", "DISCOVER", "DINERS", "JCB", "UNIONPAY"].some((value) => brand.includes(value));
+    if (
+      !isCard ||
+      !asNonEmptyString(method.chargePaymentMethodId, method.stripePaymentMethodId) ||
+      !chargeCustomerId ||
+      method.requiresRelinkForCharges === true
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Select a linked card that is ready to fund Send Money before requesting a live quote."
+      );
+    }
+    return method;
+  }
+
+  if (fundingType === "EXTERNAL_BANK") {
+    const bankCountry = resolveStripeConnectCountryCode(
+      asNonEmptyString(method.country, method.billingCountry)
+    );
+    if (
+      methodType !== "BANK" ||
+      !asNonEmptyString(method.chargeSourceId) ||
+      !chargeCustomerId ||
+      String(method.chargeSourceStatus || "").trim().toLowerCase() !== "verified" ||
+      bankCountry !== "US" ||
+      method.requiresRelinkForCharges === true
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Only verified US ACH bank accounts can fund Send Money. Use a linked card or verified mobile money instead."
+      );
+    }
+    return method;
+  }
+
+  if (fundingType === "EXTERNAL_MOBILE_MONEY") {
+    const phone = asNonEmptyString(method.phoneNumber);
+    const network = asNonEmptyString(method.network);
+    const country = asNonEmptyString(method.country);
+    if (
+      methodType !== "MOBILE_MONEY" ||
+      method.phoneOwnershipVerified !== true ||
+      String(method.verificationStatus || "").trim().toUpperCase() !== "VERIFIED" ||
+      !phone || !network || !country
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Select a verified mobile money funding method with a phone number, network, and country before requesting a live quote."
+      );
+    }
+    return method;
+  }
+
+  throw new functions.https.HttpsError("invalid-argument", "Unsupported funding source.");
+};
+
 export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
@@ -26314,7 +27967,17 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
       throw new functions.https.HttpsError("invalid-argument", "fundingSourceType is required.");
     }
 
-    const destinationRoute = normalizeTransferDestinationRoute(payload.destinationRoute);
+    const requestedDestinationRoute = normalizeTransferDestinationRoute(payload.destinationRoute);
+    const requestedProviderRoute = normalizeTransferDestinationRoute(
+      asNonEmptyString(payload.providerChannel, payload.afriexProviderChannel)
+    );
+    // Legacy mobile clients sometimes send BANK_ACCOUNT for every bank
+    // recipient. A declared SWIFT provider channel is more specific; the saved
+    // beneficiary is still loaded below, so a forged channel cannot relabel a
+    // local-bank recipient or obtain a quote for the wrong route.
+    const destinationRoute =
+      requestedDestinationRoute === "BANK" && requestedProviderRoute === "SWIFT" ?
+        "SWIFT" : requestedDestinationRoute;
     const requestedDeliveryChannel = asNonEmptyString(payload.deliveryChannel)?.toUpperCase() || null;
     if (requestedDeliveryChannel &&
       normalizeTransferDestinationRoute(requestedDeliveryChannel) !== destinationRoute) {
@@ -26355,6 +28018,7 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
     let recipientNetwork = payload.recipientNetwork || payload.providerChannel;
     let recipientId = asNonEmptyString(payload.recipientId);
     let providerDeliveryRoute = destinationRoute;
+    const fundingPaymentMethodId = asNonEmptyString(payload.fundingPaymentMethodId);
     if (isBankOrSwiftDelivery) {
       const savedBeneficiary = await loadVerifiedBankSwiftBeneficiary(
         context.auth.uid,
@@ -26385,6 +28049,17 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
       recipientId = destination.recipientId;
       providerDeliveryRoute = destination.destinationRoute;
     }
+    if (fundingSourceType === "EXTERNAL_MOBILE_MONEY" && providerDeliveryRoute !== "MOBILE_MONEY") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Mobile money funding can deliver only to a verified mobile money route. Choose a card or verified US bank for a bank or SWIFT route."
+      );
+    }
+    const fundingMethod = await loadReadyExternalTransferFundingMethod({
+      senderId: context.auth.uid,
+      fundingSourceType,
+      fundingPaymentMethodId,
+    });
     const resolvedCorridor = assertTransferDestinationCorridor(
       providerDeliveryRoute,
       recipientCountry
@@ -26398,6 +28073,7 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
         config,
         route: providerDeliveryRoute,
         amountUsd: amount,
+        senderId: context.auth.uid,
       });
     }
     if (
@@ -26430,6 +28106,7 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
           config,
           route: providerDeliveryRoute,
           amountUsd: amount,
+          senderId: context.auth.uid,
         });
       }
     }
@@ -26439,14 +28116,6 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
       senderData,
       (context.auth?.token || {}) as Record<string, unknown>
     );
-    const quoteFunding = await loadQuoteEligibleFundingMethod({
-      senderId: context.auth.uid,
-      senderData,
-      fundingSourceType,
-      fundingPaymentMethodId: asNonEmptyString(payload.fundingPaymentMethodId),
-    });
-    const fundingPaymentMethodId = quoteFunding.id;
-
     const recipientCurrency = resolveQuoteRecipientCurrency(
       providerDeliveryRoute,
       recipientCountry
@@ -26489,7 +28158,7 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
           "Select a verified mobile money funding source."
         );
       }
-      const fundingData = quoteFunding.data;
+      const fundingData = fundingMethod;
       const fundingCurrency = asNonEmptyString(fundingData.currency)?.toUpperCase() || "USD";
       const fundingCountry = asNonEmptyString(fundingData.country);
       if (!fundingCountry) {

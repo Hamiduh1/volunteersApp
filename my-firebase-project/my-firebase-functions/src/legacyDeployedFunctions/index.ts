@@ -700,12 +700,28 @@ const assertBlindDateFeatureEnabled = async (): Promise<void> => {
   }
 };
 
+// Android keeps blocks in settings/chat_privacy.blockedUserIds instead of the blocked_users subcollections.
+const userHasPrivacyBlocked = async (blockerUid: string, blockedUid: string): Promise<boolean> => {
+  if (!blockerUid || !blockedUid) return false;
+  const privacy = await db.collection("users").doc(blockerUid).collection("settings").doc("chat_privacy").get();
+  const raw = privacy.get("blockedUserIds");
+  return Array.isArray(raw) && raw.includes(blockedUid);
+};
+
 const directChatIsBlocked = async (chat: Record<string, unknown>): Promise<boolean> => {
   const participants = normalizeStringList(chat.participants);
   const chatType = String(chat.chatType || "").trim().toLowerCase();
-  if (chatType !== "direct" || participants.length !== 2) return false;
+  // Matches the rules' inferredDirectChat: untyped two-person chats are direct.
+  const isDirect = chatType === "direct" || (chatType !== "group" && participants.length === 2);
+  if (!isDirect || participants.length !== 2) return false;
   const [firstUid, secondUid] = participants;
-  return (await userHasBlocked(firstUid, secondUid)) || (await userHasBlocked(secondUid, firstUid));
+  const checks = await Promise.all([
+    userHasBlocked(firstUid, secondUid),
+    userHasBlocked(secondUid, firstUid),
+    userHasPrivacyBlocked(firstUid, secondUid),
+    userHasPrivacyBlocked(secondUid, firstUid),
+  ]);
+  return checks.some(Boolean);
 };
 
 const USER_PRIVATE_COLLECTION = "user_private";
@@ -13724,15 +13740,18 @@ export const releaseStaleBlindDateMatchHolds = functions.pubsub
 
     for (const doc of snapshot.docs) {
       const data = (doc.data() || {}) as Record<string, unknown>;
+      // Always clear matchReleasedAt, or processed docs keep filling the 250-doc page forever.
       if (!asNonEmptyString(data.formerMatchedPartnerId)) {
-        continue;
+        batch.set(doc.ref, {matchReleasedAt: admin.firestore.FieldValue.delete()}, {merge: true});
+      } else {
+        batch.set(doc.ref, {
+          formerMatchedPartnerId: admin.firestore.FieldValue.delete(),
+          matchReleasedAt: admin.firestore.FieldValue.delete(),
+          matchHoldExpiredAt: now,
+          updatedAt: now,
+        }, {merge: true});
+        releasedCount += 1;
       }
-      batch.set(doc.ref, {
-        formerMatchedPartnerId: admin.firestore.FieldValue.delete(),
-        matchHoldExpiredAt: now,
-        updatedAt: now,
-      }, {merge: true});
-      releasedCount += 1;
       batchCount += 1;
       if (batchCount >= 400) {
         await batch.commit();
@@ -23284,7 +23303,7 @@ const resolveSwiftTransferInvoicePublicBaseUrl = (): string => {
   return `https://us-central1-${projectId}.cloudfunctions.net/swiftTransferInvoice`;
 };
 
-const ensureAfriexSwiftTransferInvoiceUrl = async (
+export const ensureAfriexSwiftTransferInvoiceUrl = async (
   payoutRef: FirebaseFirestore.DocumentReference
 ): Promise<string> => {
   const invoiceUrl = await db.runTransaction(async (transaction) => {
@@ -34741,7 +34760,7 @@ const sendWalletTransferReceiptEmail = async (params: {
   );
 };
 
-const sendSwiftTransferInvoiceEmailOnce = async (params: {
+export const sendSwiftTransferInvoiceEmailOnce = async (params: {
   payoutRef: FirebaseFirestore.DocumentReference;
   payoutData: FirebaseFirestore.DocumentData;
   invoiceUrl: string;
@@ -40954,10 +40973,26 @@ const syncAfriexPayoutDestinationForSavedMethod = async (params: {
   }
 
   const existingDestinationId = getAfriexDestinationPaymentMethodId(methodData, methodData);
-  if (existingDestinationId) {
+  if (existingDestinationId && methodType === "MOBILE_MONEY") {
+    const phone = asNonEmptyString(methodData.phoneNumber, methodData.phone, methodData.mobileNumber);
+    const network = asNonEmptyString(methodData.institutionName, methodData.network, methodData.brand);
+    const isVerifiedMobileMoneyRoute =
+      methodType === "MOBILE_MONEY" &&
+      methodData.phoneOwnershipVerified === true &&
+      String(methodData.verificationStatus || "").trim().toUpperCase() === "VERIFIED" &&
+      !!phone &&
+      !!network;
     await markAfriexPayoutMethodSync({
       methodRef,
       state: "VERIFIED",
+      // Older records may have a provider destination but predate the
+      // App User route flag. Reuse this verified number rather than asking
+      // the member to add the same mobile-money method a second time.
+      patch: isVerifiedMobileMoneyRoute ? {
+        appUserReceiveRouteVerified: true,
+        appUserReceiveRouteLabel: `${network} • ${phone.slice(-4)}`,
+        appUserReceiveRouteVerifiedAt: admin.firestore.Timestamp.now(),
+      } : undefined,
     });
     return {paymentMethodId: methodId, state: "VERIFIED", message: "Provider payout destination is already active."};
   }
@@ -41066,6 +41101,12 @@ const syncAfriexPayoutDestinationForSavedMethod = async (params: {
         // Never copy the user-entered name into this provider-confirmed field.
         providerRecipientName: resolvedName,
         registeredName,
+        // A single verified mobile-money method is both this member's payout
+        // destination and their App User mobile-money receive route. Funding
+        // availability remains separately restricted to approved collections.
+        appUserReceiveRouteVerified: true,
+        appUserReceiveRouteLabel: `${resolvedInstitutionName || network} • ${phone.slice(-4)}`,
+        appUserReceiveRouteVerifiedAt: admin.firestore.Timestamp.now(),
         verificationStatus: "VERIFIED",
         verificationMethod: resolvedName ?
           "OTP_AND_AFRIEX_NAME_MATCH" :
@@ -41158,7 +41199,9 @@ const syncAfriexPayoutDestinationForSavedMethod = async (params: {
     countryCode,
     country,
   });
-  const destinationId = await createAfriexPaymentMethod({
+  // Re-sync existing routes so legacy bank methods can be made App User
+  // receive-ready without creating a second provider payment method.
+  const destinationId = existingDestinationId || await createAfriexPaymentMethod({
     providerUrl: provider.providerUrl,
     headers: provider.headers,
     timeoutMs: provider.timeoutMs,
@@ -41172,6 +41215,8 @@ const syncAfriexPayoutDestinationForSavedMethod = async (params: {
     senderId: params.userId,
     beneficiaryId: methodId,
   });
+  const providerResolvedName = asNonEmptyString(resolved.recipientName);
+  const accountNameVerified = !!providerResolvedName;
   await markAfriexPayoutMethodSync({
     methodRef,
     state: "VERIFIED",
@@ -41188,6 +41233,19 @@ const syncAfriexPayoutDestinationForSavedMethod = async (params: {
       accountHolderName: resolvedName,
       providerChannel: "BANK_ACCOUNT",
       afriexProviderChannel: "BANK_ACCOUNT",
+      accountRouteVerified: true,
+      accountNameVerified,
+      providerResolvedName: providerResolvedName || admin.firestore.FieldValue.delete(),
+      // An App User destination requires an account-owner match, not merely a
+      // valid account number or institution. This reuses the one verified bank
+      // method instead of asking members to set up the route twice.
+      appUserReceiveRouteVerified: accountNameVerified,
+      appUserReceiveRouteLabel: accountNameVerified ?
+        `${resolved.institutionName || institution.institutionName || bankName} • ${accountNumber.slice(-4)}` :
+        admin.firestore.FieldValue.delete(),
+      appUserReceiveRouteVerifiedAt: accountNameVerified ?
+        admin.firestore.Timestamp.now() :
+        admin.firestore.FieldValue.delete(),
     },
   });
   return {paymentMethodId: methodId, state: "VERIFIED", message: "Bank payout destination verified and synced."};
