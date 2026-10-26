@@ -1894,13 +1894,15 @@ service cloud.firestore {
         // Following unlocks followers-only lives and replays, so a blocked user can't re-follow.
         allow create: if isSignedIn() && request.auth.uid == followerId
           && !hasUserBlocked(userId, followerId);
-        allow delete: if isSignedIn() && request.auth.uid == followerId;
+        // The followed user may remove a follower (e.g. when blocking them).
+        allow delete: if isSignedIn() && (request.auth.uid == followerId || request.auth.uid == userId);
         allow update: if false;
       }
 
       match /following/{followingId} {
         allow read: if isSignedIn();
-        allow create, delete: if isSignedIn() && request.auth.uid == userId;
+        allow create: if isSignedIn() && request.auth.uid == userId;
+        allow delete: if isSignedIn() && (request.auth.uid == userId || request.auth.uid == followingId);
         allow update: if false;
       }
 
