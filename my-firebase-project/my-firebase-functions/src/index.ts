@@ -3848,6 +3848,18 @@ export const onMindLoomPostDeletedCleanupMedia = functions.firestore
   .onDelete(async (snap, context) => {
     const storagePath = extractStoragePathFromDownloadUrl(snap.data()?.mediaUrl);
     if (!storagePath) return undefined;
+    // mediaUrl is client-written, so only ever delete media stored under the post author's folder.
+    const authorId = String(context.params.userId || "");
+    const ownedByAuthor = authorId.length > 0 &&
+      !storagePath.split("/").includes("..") &&
+      mindLoomStoragePrefixes.some((prefix) => storagePath.startsWith(`${prefix}${authorId}/`));
+    if (!ownedByAuthor) {
+      functions.logger.warn("Skipped MindLoom media cleanup for media outside the author's folder", {
+        postPath: `users/${context.params.userId}/jokes/${context.params.jokeId}`,
+        storagePath,
+      });
+      return undefined;
+    }
 
     try {
       await admin.storage().bucket().file(storagePath).delete();

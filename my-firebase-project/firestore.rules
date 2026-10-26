@@ -1700,20 +1700,61 @@ service cloud.firestore {
           return !isLiveLinkedJoke(data) || isOwnLiveLinkedJoke(data);
         }
 
+        // Deleting a post deletes the Storage object its mediaUrl names, so any Storage
+        // object URL must point into the author's own MindLoom folder.
+        function isAllowedJokeMediaUrl(data) {
+          let url = data.get('mediaUrl', null);
+          return url == null || (
+            url is string && url.size() <= 4000 && (
+              !url.matches('[^?#]*/o/.*') ||
+              url.matches('[^?#]*/o/joke_(images|videos|docs|misc)(%2F|%2f|/)' + userId + '(%2F|%2f|/)[^?#]+([?#].*)?')
+            )
+          );
+        }
+
+        // Likes change by exactly the caller's own entry, so the list cannot be padded
+        // with duplicates or other user ids to inflate the count.
         function isOwnLikeToggle() {
-          let before = resource.data.get('likes', []).toSet();
-          let after = request.resource.data.likes.toSet();
-          return after.difference(before).hasOnly([request.auth.uid]) &&
-            before.difference(after).hasOnly([request.auth.uid]);
+          let beforeList = resource.data.get('likes', []);
+          let afterList = request.resource.data.likes;
+          let before = beforeList.toSet();
+          let after = afterList.toSet();
+          let uid = request.auth.uid;
+          return afterList is list && afterList.size() <= 500 && (
+            afterList == beforeList || (
+              !(uid in beforeList) &&
+              after.difference(before).hasOnly([uid]) &&
+              before.difference(after).size() == 0 &&
+              afterList.size() == beforeList.size() + 1
+            ) || (
+              uid in beforeList &&
+              !(uid in afterList) &&
+              before.difference(after).hasOnly([uid]) &&
+              after.difference(before).size() == 0
+            )
+          );
+        }
+
+        // status / isDeleted drive moderation hiding, so only the server may change them
+        // after creation. Legacy posts without a status may still be stamped ACTIVE.
+        function isOwnerModerationFieldsUnchanged() {
+          let affected = request.resource.data.diff(resource.data).affectedKeys();
+          return !affected.hasAny(['isDeleted']) && (
+            !affected.hasAny(['status']) ||
+            (!('status' in resource.data) && request.resource.data.status == 'ACTIVE')
+          );
         }
 
         allow read: if isSignedIn();
         allow create: if isOwner(userId) &&
           request.resource.data.authorId == request.auth.uid &&
           isAllowedJokeLiveReference(request.resource.data) &&
+          isAllowedJokeMediaUrl(request.resource.data) &&
           (!('commentsCount' in request.resource.data) || request.resource.data.commentsCount == 0) &&
-          (!('likes' in request.resource.data) ||
-            (request.resource.data.likes is list && request.resource.data.likes.size() <= 500));
+          (!('likes' in request.resource.data) || request.resource.data.likes == []) &&
+          (!('timestamp' in request.resource.data) || request.resource.data.timestamp == request.time) &&
+          (!('status' in request.resource.data) || request.resource.data.status == 'ACTIVE') &&
+          (!('isDeleted' in request.resource.data) || request.resource.data.isDeleted == false);
         // Owner edits: keep authorId stable. Others may only add/remove their own like (commentsCount is server-maintained).
         allow update: if
           (
@@ -1723,31 +1764,59 @@ service cloud.firestore {
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['commentsCount']) &&
             isAllowedJokeLiveReference(request.resource.data) &&
             (
-              !('likes' in request.resource.data) ||
-              (request.resource.data.likes is list && request.resource.data.likes.size() <= 500)
-            )
+              !request.resource.data.diff(resource.data).affectedKeys().hasAny(['mediaUrl']) ||
+              isAllowedJokeMediaUrl(request.resource.data)
+            ) &&
+            (
+              !request.resource.data.diff(resource.data).affectedKeys().hasAny(['likes']) ||
+              isOwnLikeToggle()
+            ) &&
+            (
+              !request.resource.data.diff(resource.data).affectedKeys().hasAny(['timestamp']) ||
+              request.resource.data.timestamp == request.time
+            ) &&
+            isOwnerModerationFieldsUnchanged()
           ) ||
           (
             isSignedIn() &&
             !isOwner(userId) &&
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) &&
             request.resource.data.authorId == resource.data.authorId &&
-            request.resource.data.likes is list &&
-            request.resource.data.likes.size() <= 500 &&
             isOwnLikeToggle()
           );
-        allow delete: if isOwner(userId);
+        allow delete: if isOwner(userId) || isPlatformAdmin();
 
         match /comments/{commentId} {
           allow read: if isSignedIn();
           // Every author field present must be the caller, so a comment cannot impersonate another user.
+          // The parent must exist so a comment cannot resurrect a deleted post via the count trigger.
           allow create: if isSignedIn() &&
+            request.resource.data.keys().hasOnly([
+              'authorId', 'authorUid', 'authorName', 'authorProfileUrl', 'text', 'isOwnerResponse', 'timestamp'
+            ]) &&
             ('authorId' in request.resource.data || 'authorUid' in request.resource.data) &&
             request.resource.data.get('authorId', request.auth.uid) == request.auth.uid &&
             request.resource.data.get('authorUid', request.auth.uid) == request.auth.uid &&
             request.resource.data.get('text', '') is string &&
-            request.resource.data.get('text', '').size() <= 2000;
-          allow update, delete: if false;
+            request.resource.data.get('text', '').size() > 0 &&
+            request.resource.data.get('text', '').size() <= 2000 &&
+            request.resource.data.get('authorName', '') is string &&
+            request.resource.data.get('authorName', '').size() <= 200 &&
+            (
+              request.resource.data.get('authorProfileUrl', null) == null ||
+              (request.resource.data.authorProfileUrl is string && request.resource.data.authorProfileUrl.size() <= 2048)
+            ) &&
+            request.resource.data.get('isOwnerResponse', false) is bool &&
+            (request.resource.data.get('isOwnerResponse', false) == false || request.auth.uid == userId) &&
+            request.resource.data.get('timestamp', null) == request.time &&
+            exists(/databases/$(database)/documents/users/$(userId)/jokes/$(jokeId)) &&
+            !hasAnyUserBlock(userId, request.auth.uid);
+          allow update: if false;
+          allow delete: if isSignedIn() && (
+            resource.data.get('authorId', resource.data.get('authorUid', '')) == request.auth.uid ||
+            isOwner(userId) ||
+            isPlatformAdmin()
+          );
         }
       }
 
@@ -2222,7 +2291,12 @@ service cloud.firestore {
           'archiveStartedAt',
           'archiveStoppedAt',
           'archiveReadyAt',
-          'archiveError'
+          'archiveError',
+          // Server-written. Without these, a recorded or reconciled session rejects every
+          // later host write, including End. Clients cannot set them (see create/update checks).
+          'archiveBucket',
+          'archivePlaybackUrl',
+          'endedReason'
         ]);
       }
 
@@ -2294,7 +2368,9 @@ service cloud.firestore {
           && !('archiveStartedAt' in request.resource.data)
           && !('archiveStoppedAt' in request.resource.data)
           && !('archiveReadyAt' in request.resource.data)
-          && !('archiveError' in request.resource.data);
+          && !('archiveError' in request.resource.data)
+          && !('archiveBucket' in request.resource.data)
+          && !('endedReason' in request.resource.data);
       }
 
       function validLiveSessionCreate() {
@@ -2670,7 +2746,12 @@ service cloud.firestore {
           && !isLiveViewerBlocked(sessionId, request.auth.uid)
           && liveChatEnabled(sessionId)
           && isActiveLiveStatus(get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.status);
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if isSignedIn() && (
+          resource.data.authorId == request.auth.uid ||
+          liveSessionHostIdFromData(get(/databases/$(database)/documents/live_sessions/$(sessionId)).data) == request.auth.uid ||
+          isPlatformAdmin()
+        );
       }
 
       match /viewers/{viewerId} {
