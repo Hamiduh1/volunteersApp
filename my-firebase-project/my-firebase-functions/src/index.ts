@@ -8530,9 +8530,10 @@ const runBeneficiaryVerificationDecision = async (params: {
         countryCode,
         accountNumber: params.prepared.phoneE164,
         institutionCode: params.prepared.institutionCodeInput,
-        // Only adding a new recipient may continue through Afriex's generic
-        // resolver outage; transfer-time checks still require a resolved route.
-        allowUpstreamOutageFallback: params.allowProviderNameOverride === true,
+        // Countries without mobile money name enquiry are accepted the same way
+        // when adding and when sending; an invalid number is still rejected and
+        // the destination is validated again when the payout is created.
+        allowUpstreamOutageFallback: true,
       });
       provider.predictedProvider = resolved.institutionName;
       if (!resolved.accountRouteVerified) {
@@ -8555,16 +8556,17 @@ const runBeneficiaryVerificationDecision = async (params: {
             aml,
           };
         }
-        functions.logger.warn("Afriex resolver unavailable; rejecting mobile money recipient verification", {
+        functions.logger.warn("Afriex name lookup unavailable; approving catalog-confirmed mobile money transfer route", {
           country: params.prepared.countryCanonical,
           institutionCode: resolved.institutionCode,
         });
         return {
-          status: "REJECTED",
-          canProceed: false,
-          matchLevel: "MISMATCH",
-          reasonCode: "AFRIEX_RECIPIENT_RESOLUTION_UNAVAILABLE",
-          reasonMessage: "The payment partner cannot verify this mobile money route right now. Try again shortly; no recipient was saved.",
+          status: "APPROVED",
+          canProceed: true,
+          matchLevel: "PHONE_ONLY",
+          reasonCode: "VERIFIED_CATALOG_ROUTE_PROVIDER_RESOLVE_UNAVAILABLE",
+          reasonMessage: "The country and mobile money provider are supported. " +
+            "The recipient's number is checked when the payout is created.",
           provider,
           aml,
         };
@@ -8847,6 +8849,8 @@ const readAndValidateBeneficiaryVerificationData = (params: {
   nowMs: number;
   /** When set, must match `request.amount` stored on the verification doc (if that amount exists). */
   expectedTransferAmount?: number;
+  /** False only when settling funds already collected under an older verification. */
+  enforceTransferBinding?: boolean;
 }): BeneficiaryVerificationUsage => {
   const data = params.data || {};
   const docSenderId = String(data.senderId || "");
@@ -8862,6 +8866,17 @@ const readAndValidateBeneficiaryVerificationData = (params: {
 
   if (data.consumedAt || data.consumedByPayoutRequestId) {
     throw new functions.https.HttpsError("failed-precondition", "Beneficiary verification was already used.");
+  }
+
+  // Registration approves a new recipient's details only; a payout needs the
+  // transfer-time check bound to the saved recipient and amount.
+  const verificationAudit = (data.audit || {}) as Record<string, unknown>;
+  const enforceTransferBinding = params.enforceTransferBinding !== false;
+  if (enforceTransferBinding && asNonEmptyString(verificationAudit.purpose) === "RECIPIENT_REGISTRATION") {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Verify the saved recipient again before sending."
+    );
   }
 
   const expiresAtMs = toTimestampMillis(data.expiresAt);
@@ -8883,6 +8898,12 @@ const readAndValidateBeneficiaryVerificationData = (params: {
     }
   }
   const expectedTransfer = params.expectedTransferAmount;
+  if (enforceTransferBinding && verifiedAmount == null) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Transfer amount is required to match beneficiary verification. Re-verify the recipient and confirm again."
+    );
+  }
   if (verifiedAmount != null) {
     if (typeof expectedTransfer !== "number" || !Number.isFinite(expectedTransfer) || expectedTransfer <= 0) {
       throw new functions.https.HttpsError(
@@ -8951,6 +8972,7 @@ const consumeBeneficiaryVerificationInTransaction = async (params: {
   expectedFingerprint: string;
   payoutRequestId: string;
   expectedTransferAmount?: number;
+  enforceTransferBinding?: boolean;
 }): Promise<BeneficiaryVerificationUsage> => {
   const verificationSnap = await params.transaction.get(params.verificationRef);
   if (!verificationSnap.exists) {
@@ -8963,6 +8985,7 @@ const consumeBeneficiaryVerificationInTransaction = async (params: {
     expectedFingerprint: params.expectedFingerprint,
     nowMs: Date.now(),
     expectedTransferAmount: params.expectedTransferAmount,
+    enforceTransferBinding: params.enforceTransferBinding,
   });
 
   const now = admin.firestore.Timestamp.now();
@@ -12041,12 +12064,28 @@ const hasServerIssuedBeneficiaryProof = (stored: Record<string, unknown>): boole
     isServerMarkedVerified && verifiedStatus && hasServerRouteIdentity;
   // Resolver outages can leave an older customer-confirmed draft. It must not
   // be reused for a funded payout until a current provider check succeeds.
+  // Countries without mobile money name enquiry never return a resolved route;
+  // their number is validated when the payout is created.
   if (
     type === "MOBILE_MONEY" &&
     String(stored.providerRouteValidation || "").trim().toUpperCase() ===
       "PENDING_AFRIEX_PAYOUT_VALIDATION"
   ) {
-    return false;
+    const pendingRouteCountry = (() => {
+      try {
+        return resolveTransferCountry(asNonEmptyString(
+          stored.country,
+          stored.destinationCountry,
+          stored.recipientCountry,
+          stored.countryCode
+        )).iso2;
+      } catch {
+        return null;
+      }
+    })();
+    if (!pendingRouteCountry || afriexMobileMoneySupportsNameEnquiry(pendingRouteCountry)) {
+      return false;
+    }
   }
   if (hasCanonicalServerIdentityProof) return true;
   // Owners can edit route fields on their saved recipients. A stored identity
@@ -12841,6 +12880,8 @@ export const refreshSavedBeneficiaryVerification = functions.runWith({enforceApp
           providerResolvedName: resolved.accountNameVerified ? resolved.recipientName : null,
           accountNameVerified: resolved.accountNameVerified,
           accountRouteVerified: resolved.accountRouteVerified,
+          providerRouteValidation: resolved.accountRouteVerified ?
+            "AFRIEX_RESOLVED" : "PENDING_AFRIEX_PAYOUT_VALIDATION",
           recipientDetailsConfirmed: true,
           isVerified: true,
           recipientNameConfirmationSource: resolved.accountNameVerified ?
@@ -15504,6 +15545,7 @@ const settleMobileMoneyCashInToWallet = async (
             expectedFingerprint,
             payoutRequestId: transferPayoutRef.id,
             expectedTransferAmount: latestAmount,
+            enforceTransferBinding: false,
           });
         }
         const senderTxRef = userRef.collection("transactions").doc();
@@ -26129,26 +26171,28 @@ export const ownerGrantAdminByEmail = functions.runWith({enforceAppCheck: true})
       throw new functions.https.HttpsError("invalid-argument", "Provide a valid email.");
     }
 
+    // Profile emails are client-editable; only the verified sign-in email
+    // identifies the account that receives admin access.
     let targetUid = "";
-    const byEmailSnap = await db.collection("users")
-      .where("email", "==", targetEmail)
-      .limit(1)
-      .get();
-    if (!byEmailSnap.empty) {
-      targetUid = byEmailSnap.docs[0].id;
-    } else {
-      try {
-        const authUser = await admin.auth().getUserByEmail(targetEmail);
-        targetUid = authUser.uid;
-      } catch {
-        // no-op: handled by not-found below
-      }
+    let targetEmailVerified = false;
+    try {
+      const authUser = await admin.auth().getUserByEmail(targetEmail);
+      targetUid = authUser.uid;
+      targetEmailVerified = authUser.emailVerified === true;
+    } catch {
+      // no-op: handled by not-found below
     }
 
     if (!targetUid) {
       throw new functions.https.HttpsError(
         "not-found",
         "User account not found for the provided email."
+      );
+    }
+    if (!targetEmailVerified) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "This account has not verified its email yet. Ask the user to verify their email first."
       );
     }
 
@@ -26219,25 +26263,26 @@ export const adminAddSupportAssociate = functions.runWith({enforceAppCheck: true
     }
 
     let targetUid = associateUid || "";
+    let associateEmailVerified = !!associateUid;
     if (!targetUid && associateEmail) {
-      const byEmailSnap = await db.collection("users")
-        .where("email", "==", associateEmail)
-        .limit(1)
-        .get();
-      if (!byEmailSnap.empty) {
-        targetUid = byEmailSnap.docs[0].id;
-      } else {
-        try {
-          const authUser = await admin.auth().getUserByEmail(associateEmail);
-          targetUid = authUser.uid;
-        } catch {
-          // no-op: handled by not-found below
-        }
+      // Profile emails are client-editable; resolve the verified sign-in email.
+      try {
+        const authUser = await admin.auth().getUserByEmail(associateEmail);
+        targetUid = authUser.uid;
+        associateEmailVerified = authUser.emailVerified === true;
+      } catch {
+        // no-op: handled by not-found below
       }
     }
 
     if (!targetUid) {
       throw new functions.https.HttpsError("not-found", "Associate account not found for the provided email.");
+    }
+    if (!associateEmailVerified) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "This account has not verified its email yet. Ask the user to verify their email first."
+      );
     }
 
     const targetRef = db.collection("users").doc(targetUid);
