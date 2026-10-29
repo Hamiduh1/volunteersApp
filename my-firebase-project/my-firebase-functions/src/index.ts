@@ -795,6 +795,21 @@ interface CreateCallSessionRequest {
   callType?: unknown;
 }
 
+/**
+ * Accepted sessions are not heartbeated, so their window must outlast a long group call
+ * that a third member could otherwise end by starting a new one.
+ * @param {FirebaseFirestore.DocumentData} session The call session data.
+ * @param {string} status The normalized "ringing" or "accepted" status.
+ * @return {boolean} True when the session can no longer be a live call.
+ */
+const isStaleCallSession = (session: FirebaseFirestore.DocumentData, status: string): boolean => {
+  const timestamp = (session.updatedAt || session.createdAt) as {toMillis?: () => number} | undefined;
+  const lastActivityMs = timestamp?.toMillis?.();
+  if (typeof lastActivityMs !== "number") return true;
+  const maxAgeMs = status === "ringing" ? 5 * 60 * 1000 : 4 * 60 * 60 * 1000;
+  return Date.now() - lastActivityMs > maxAgeMs;
+};
+
 // Call setup is server-owned so both mobile clients use one authorization path.
 export const createCallSession = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
@@ -935,13 +950,23 @@ export const createCallSession = functions.runWith({enforceAppCheck: true})
         const activeSession = await transaction.get(
           db.collection("call_sessions").doc(activeCallSessionId)
         );
-        const activeStatus = activeSession.exists ?
-          String((activeSession.data() || {}).status || "").trim().toLowerCase() : "";
+        const activeData = activeSession.exists ? activeSession.data() || {} : {};
+        const activeStatus = String(activeData.status || "").trim().toLowerCase();
         if (activeStatus === "ringing" || activeStatus === "accepted") {
-          throw new functions.https.HttpsError(
-            "already-exists",
-            "A call is already in progress for this chat."
-          );
+          if (!isStaleCallSession(activeData, activeStatus)) {
+            throw new functions.https.HttpsError(
+              "already-exists",
+              "A call is already in progress for this chat."
+            );
+          }
+          // A session abandoned by a crashed or offline client would otherwise lock the chat forever.
+          const staleNow = admin.firestore.FieldValue.serverTimestamp();
+          transaction.set(activeSession.ref, {
+            status: "ended",
+            endedAt: staleNow,
+            updatedAt: staleNow,
+            endReason: "stale_session",
+          }, {merge: true});
         }
       }
 
@@ -1098,13 +1123,10 @@ export const getConversationCallAvailability = functions.runWith({enforceAppChec
       .limit(8)
       .get();
     const activeCall = activeCallSnap.docs.find((doc) => {
-      const session = (doc.data() || {}) as Record<string, unknown>;
+      const session = doc.data() || {};
       const status = typeof session.status === "string" ? session.status.trim().toLowerCase() : "";
       if (status !== "ringing" && status !== "accepted") return false;
-      const timestamp = (session.updatedAt || session.createdAt) as {toMillis?: () => number} | undefined;
-      const lastActivityMs = timestamp?.toMillis?.();
-      const maxAgeMs = status === "ringing" ? 5 * 60 * 1000 : 30 * 60 * 1000;
-      return typeof lastActivityMs === "number" && Date.now() - lastActivityMs <= maxAgeMs;
+      return !isStaleCallSession(session, status);
     });
     if (activeCall) {
       const activeSession = (activeCall.data() || {}) as Record<string, unknown>;
@@ -2812,11 +2834,13 @@ const notifyIncomingCallRecipients = async (params: {
 
 const notifyCallCancelledRecipients = async (params: {
   receiverIds: string[];
+  ringingReceiverIds: string[];
   callerId: string;
   chatId: string;
   callId: string;
 }): Promise<void> => {
   const {receiverIds, callerId, chatId, callId} = params;
+  const ringingReceiverIds = new Set(params.ringingReceiverIds);
   const uniqueReceiverIds = [...new Set(
     receiverIds
       .map((value) => value.trim())
@@ -2843,7 +2867,9 @@ const notifyCallCancelledRecipients = async (params: {
       sessionId: callId,
       ...(targetDeviceId ? {targetDeviceId} : {}),
     };
-    if (activeCallVoipToken(userData).length >= 32) {
+    // iOS must show a CallKit call for every VoIP push, so a cancel for a phone that never
+    // reported ringing would flash a phantom call. Those phones get the background message.
+    if (ringingReceiverIds.has(receiverId) && activeCallVoipToken(userData).length >= 32) {
       voipTasks.push(sendVoipCallPayload(userData, cancellationPayload, `call-cancel-${callId}`));
     }
     collectActiveCallFcmTokens(userData).forEach((token) => {
@@ -2857,7 +2883,8 @@ const notifyCallCancelledRecipients = async (params: {
           },
           apns: {
             headers: {
-              "apns-priority": "10",
+              // APNs rejects priority 10 for content-available-only pushes.
+              "apns-priority": "5",
               "apns-push-type": "background",
               "apns-expiration": String(Math.floor(Date.now() / 1000) + 30),
             },
@@ -3452,7 +3479,7 @@ async function syncTerminalCallHistory(
   const historyStatus = sessionStatus === "ended" && wasAnswered ? "completed" : "missed";
   const chatRef = db.collection("chats").doc(chatId);
   const logRef = chatRef.collection("call_logs").doc(sessionId);
-  const existingLog = await logRef.get();
+  const [existingLog, chatSnap] = await Promise.all([logRef.get(), chatRef.get()]);
   const startedAt = existingLog.get("startedAt") as admin.firestore.Timestamp | undefined;
   const durationSeconds = startedAt && historyStatus === "completed" ?
     Math.max(0, Math.floor((Date.now() - startedAt.toMillis()) / 1000)) : 0;
@@ -3467,10 +3494,14 @@ async function syncTerminalCallHistory(
     isGroupCall: session.isGroup === true || participantIds.length > 2,
     groupName: typeof session.groupName === "string" ? session.groupName : "",
   }, {merge: true});
-  batch.set(chatRef, {
-    lastCallStatus: historyStatus,
-    lastCallTimestamp: now,
-  }, {merge: true});
+  // A newer call already owns the chat summary (for example after a stale session was retired).
+  const activeCallSessionId = String(chatSnap.get("activeCallSessionId") || "").trim();
+  if (chatSnap.exists && (!activeCallSessionId || activeCallSessionId === sessionId)) {
+    batch.set(chatRef, {
+      lastCallStatus: historyStatus,
+      lastCallTimestamp: now,
+    }, {merge: true});
+  }
   await batch.commit();
 }
 
@@ -3498,7 +3529,9 @@ export const onCallSessionUpdated = functions.runWith({secrets: [secretApnsP8]})
       // Accepting a call clears only the ringing mirror. It is not a cancellation:
       // a cancellation push here can race the receiver's Agora join and immediately
       // dismiss the call they just answered.
-      if (wasRinging && ["ended", "declined", "missed"].includes(terminalStatus)) {
+      // A stale session stopped ringing on every phone long ago; a cancel would only flash a phantom call.
+      if (wasRinging && ["ended", "declined", "missed"].includes(terminalStatus) &&
+        after?.endReason !== "stale_session") {
         const session = before ?? after;
         const callerId = typeof session?.callerId === "string" ? session.callerId.trim() : "";
         const receiverId = typeof session?.receiverId === "string" ? session.receiverId.trim() : "";
@@ -3511,9 +3544,23 @@ export const onCallSessionUpdated = functions.runWith({secrets: [secretApnsP8]})
         const recipientIds = participantIds.length > 0 ?
           participantIds :
           (receiverId ? [receiverId] : []);
+        const stringIds = (value: unknown): string[] => (Array.isArray(value) ? value : [])
+          .filter((entry: unknown): entry is string => typeof entry === "string")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0);
+        // A receiver who declined or hung up has already dismissed their own ring.
+        const settledReceiverIds = new Set([
+          ...stringIds(after?.declinedParticipantIds),
+          ...stringIds(after?.endedParticipantIds),
+        ]);
+        const ringingReceiverIds = [
+          ...stringIds(before?.ringingParticipantIds),
+          ...stringIds(after?.ringingParticipantIds),
+        ].filter((id) => !settledReceiverIds.has(id));
         if (callerId && chatId && recipientIds.length > 0) {
           await notifyCallCancelledRecipients({
             receiverIds: recipientIds,
+            ringingReceiverIds,
             callerId,
             chatId,
             callId: sessionId,
