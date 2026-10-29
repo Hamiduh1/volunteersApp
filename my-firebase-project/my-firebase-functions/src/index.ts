@@ -8469,12 +8469,31 @@ const runBeneficiaryVerificationDecision = async (params: {
         countryCode,
         accountNumber: params.prepared.phoneE164,
         institutionCode: params.prepared.institutionCodeInput,
+        // Only adding a new recipient may continue through Afriex's generic
+        // resolver outage; transfer-time checks still require a resolved route.
+        allowUpstreamOutageFallback: params.allowProviderNameOverride === true,
       });
       provider.predictedProvider = resolved.institutionName;
       if (!resolved.accountRouteVerified) {
         provider.providerAccountName = null;
         provider.nameMatchScore = null;
         provider.rawStatus = AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS;
+        if (params.allowProviderNameOverride === true) {
+          functions.logger.warn("Afriex resolver unavailable; registering catalog-confirmed mobile money route", {
+            country: params.prepared.countryCanonical,
+            institutionCode: resolved.institutionCode,
+          });
+          return {
+            status: "APPROVED",
+            canProceed: true,
+            matchLevel: "PHONE_ONLY",
+            reasonCode: "VERIFIED_CATALOG_ROUTE_PROVIDER_RESOLVE_UNAVAILABLE",
+            reasonMessage: "Afriex could not confirm this number right now, but the country and provider are supported. " +
+              "Confirm the recipient's name with them before saving. Afriex checks the number again when money is sent.",
+            provider,
+            aml,
+          };
+        }
         functions.logger.warn("Afriex resolver unavailable; rejecting mobile money recipient verification", {
           country: params.prepared.countryCanonical,
           institutionCode: resolved.institutionCode,
@@ -8556,7 +8575,11 @@ const runBeneficiaryVerificationDecision = async (params: {
         reasonCode: isApiAccessPending ?
           "PROVIDER_API_ACCESS_PENDING" :
           "PROVIDER_DESTINATION_RESOLVE_FAILED",
-        reasonMessage: buildAfriexRecipientVerificationFailureMessage(providerMessage),
+        // Messages raised by this backend are already customer-safe and say what
+        // to fix (provider, outage, phone mismatch); raw provider text is not.
+        reasonMessage: !isApiAccessPending && error instanceof functions.https.HttpsError && error.message ?
+          error.message :
+          buildAfriexRecipientVerificationFailureMessage(providerMessage),
         provider,
         aml,
       };
@@ -12132,7 +12155,14 @@ const verifyBeneficiaryForServerSave = async (
       countryCode: country.iso2,
       accountNumber: asNonEmptyString(request.accountNumber, request.phone) || "",
       institutionCode: asNonEmptyString(request.institutionCode) || "",
+      allowUpstreamOutageFallback: true,
     });
+    if (!resolved.accountRouteVerified) {
+      functions.logger.warn("Afriex resolver unavailable; saving catalog-confirmed mobile money recipient", {
+        country: country.iso2,
+        institutionCode: resolved.institutionCode,
+      });
+    }
     const resolvedRecipientPhone = resolved.recipientPhone || normalizeAfriexIdentityPhone(
       asNonEmptyString(request.accountNumber, request.phone) || ""
     );
