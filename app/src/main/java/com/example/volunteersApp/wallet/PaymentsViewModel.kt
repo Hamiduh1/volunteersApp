@@ -820,7 +820,7 @@ class PaymentsViewModel : ViewModel() {
         val name = readString(resultMap, listOf("institutionName", "name"))
             ?.trim().orEmpty()
         if (!verified || code.isBlank() || name.isBlank()) {
-            throw IllegalStateException("Afriex could not verify this SWIFT BIC or routing code.")
+            throw IllegalStateException("We could not verify this SWIFT BIC or routing code.")
         }
         return BankInstitutionOption(code = code, name = name)
     }

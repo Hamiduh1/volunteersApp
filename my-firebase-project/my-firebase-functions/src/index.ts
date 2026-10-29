@@ -95,6 +95,57 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
+/**
+ * Removes the payout partner's name from text that can reach a customer.
+ * Internal identifiers stored in Firestore (verification statuses, function
+ * names) are protocol values read by both apps and are not passed through here.
+ * @param {string} text Customer-visible text.
+ * @return {string} Text that names no payout partner.
+ */
+const scrubPartnerNameFromCustomerText = (text: string): string => {
+  const subjectVerbs = "returned|resolved|could|cannot|can|does|did|is|are|was|validates|checks|confirmed|" +
+    "rejected|only|currently|limits|requires|returns|has|lists|enables|approves";
+  return text
+    .replace(/(?:https?:\/\/)?[\w.-]*afriex\.com[^\s"',)]*/gi, "the payment partner")
+    .replace(/\bAFRIEX(?=_)/g, "PROVIDER")
+    .replace(/(^|[.!?:]\s+)Afriex's\b/g, "$1The payment partner's")
+    .replace(/\bAfriex's\b/gi, "the payment partner's")
+    // "Afriex returned ..." names the partner as the actor.
+    .replace(new RegExp(`(^|[.!?:]\\s+)Afriex(?=\\s+(?:${subjectVerbs})\\b)`, "g"), "$1The payment partner")
+    .replace(new RegExp(`\\bAfriex(?=\\s+(?:${subjectVerbs})\\b)`, "gi"), "the payment partner")
+    .replace(/\b(by|from|with|to|match|matches|at|via)\s+Afriex\b/gi, "$1 the payment partner")
+    .replace(/\ban\s+Afriex\b/g, "a supported")
+    .replace(/\bAn\s+Afriex\b/g, "A supported")
+    // "This Afriex payout corridor" / "Afriex production payouts": the name is
+    // only a qualifier, so drop it and keep the sentence.
+    .replace(/(^|[.!?:]\s+)Afriex\s+([a-z])/g, (_match, lead: string, next: string) => `${lead}${next.toUpperCase()}`)
+    .replace(/\bAfriex\s+(?=[\w$-])/g, "")
+    .replace(/\bAfriex\b/g, "the payment partner")
+    .replace(/afriex/gi, "provider");
+};
+
+const scrubPartnerNameFromCustomerValue = (value: unknown): unknown => {
+  if (typeof value === "string") return scrubPartnerNameFromCustomerText(value);
+  if (Array.isArray(value)) return value.map(scrubPartnerNameFromCustomerValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .map(([key, entry]) => [key, scrubPartnerNameFromCustomerValue(entry)]));
+  }
+  return value;
+};
+
+// Every callable error leaves through HttpsError#toJSON, so this covers
+// messages raised anywhere in the backend, including provider error text.
+const serializeHttpsErrorForClient = functions.https.HttpsError.prototype.toJSON;
+functions.https.HttpsError.prototype.toJSON = function(this: functions.https.HttpsError) {
+  const wire = serializeHttpsErrorForClient.call(this);
+  return {
+    ...wire,
+    message: scrubPartnerNameFromCustomerText(wire.message),
+    ...(wire.details === undefined ? {} : {details: scrubPartnerNameFromCustomerValue(wire.details)}),
+  };
+};
+
 // Bound only to the call triggers. The key remains in Secret Manager and is
 // never sent to either mobile client.
 const secretApnsP8 = defineSecret("APNS_P8");
@@ -5090,6 +5141,16 @@ const describeAfriexRecipientResolutionFailure = (
         noRecipientOrFunds + " Please try again later.",
     };
   }
+  // Documented 400 for a country/channel without account-name lookup: the
+  // provider asks the business to collect the recipient name instead.
+  if (status === 400 && normalizedMessage.includes("namelookupisnotavailable")) {
+    return {
+      code: "AFRIEX_NAME_LOOKUP_UNAVAILABLE",
+      httpStatus: status,
+      message: `The recipient's name can't be looked up for this ${railLabel} country.` +
+        " Confirm the recipient's name with them before saving.",
+    };
+  }
   const isGenericProviderFailure =
     normalizedMessage.includes("itsnotyouitsus") &&
     normalizedMessage.includes("reachouttosupport");
@@ -8488,8 +8549,8 @@ const runBeneficiaryVerificationDecision = async (params: {
             canProceed: true,
             matchLevel: "PHONE_ONLY",
             reasonCode: "VERIFIED_CATALOG_ROUTE_PROVIDER_RESOLVE_UNAVAILABLE",
-            reasonMessage: "Afriex could not confirm this number right now, but the country and provider are supported. " +
-              "Confirm the recipient's name with them before saving. Afriex checks the number again when money is sent.",
+            reasonMessage: "The recipient's name can't be looked up for this country, but the country and provider are supported. " +
+              "Confirm the recipient's name with them before saving. The number is checked again when money is sent.",
             provider,
             aml,
           };
@@ -8522,7 +8583,7 @@ const runBeneficiaryVerificationDecision = async (params: {
               canProceed: true,
               matchLevel: "PHONE_AND_PROVIDER_CONFIRMED",
               reasonCode: "VERIFIED_AFRIEX_RECIPIENT_NAME_REQUIRES_CONFIRMATION",
-              reasonMessage: "Afriex confirmed this mobile money account. Review and confirm the returned recipient name before saving.",
+              reasonMessage: "This mobile money account was confirmed. Review and confirm the returned recipient name before saving.",
               provider,
               aml,
             };
@@ -8532,7 +8593,7 @@ const runBeneficiaryVerificationDecision = async (params: {
             canProceed: false,
             matchLevel: "MISMATCH",
             reasonCode: "PROVIDER_RECIPIENT_NAME_MISMATCH",
-            reasonMessage: "The saved recipient name no longer matches Afriex. Verify the mobile money recipient again.",
+            reasonMessage: "The saved recipient name no longer matches the mobile money account. Verify the recipient again.",
             provider,
             aml,
           };
@@ -8542,7 +8603,7 @@ const runBeneficiaryVerificationDecision = async (params: {
           canProceed: true,
           matchLevel: "PHONE_AND_PROVIDER_CONFIRMED",
           reasonCode: "VERIFIED_AFRIEX_RECIPIENT_RESOLVED",
-          reasonMessage: "Afriex confirmed the recipient phone, provider, and account name.",
+          reasonMessage: "The recipient phone, provider, and account name were confirmed.",
           provider,
           aml,
         };
@@ -8554,7 +8615,7 @@ const runBeneficiaryVerificationDecision = async (params: {
         canProceed: true,
         matchLevel: "PHONE_AND_PROVIDER_CONFIRMED",
         reasonCode: "VERIFIED_AFRIEX_ROUTE_VALIDATED",
-        reasonMessage: "Afriex confirmed the recipient phone and provider for this corridor, but this route does not return the account name.",
+        reasonMessage: "The recipient phone and provider were confirmed, but this country does not return the account name.",
         provider,
         aml,
       };
@@ -8578,7 +8639,7 @@ const runBeneficiaryVerificationDecision = async (params: {
         // Messages raised by this backend are already customer-safe and say what
         // to fix (provider, outage, phone mismatch); raw provider text is not.
         reasonMessage: !isApiAccessPending && error instanceof functions.https.HttpsError && error.message ?
-          error.message :
+          scrubPartnerNameFromCustomerText(error.message) :
           buildAfriexRecipientVerificationFailureMessage(providerMessage),
         provider,
         aml,
@@ -11356,7 +11417,7 @@ const resolveAfriexMobileMoneyAccount = async (params: {
   ) {
     throw new functions.https.HttpsError(
       "invalid-argument",
-      "A recipient phone, country, and Afriex mobile money provider are required."
+      "A recipient phone, country, and mobile money provider are required."
     );
   }
   assertAfriexMobileMoneyResolutionCountry(countryCode);
@@ -11372,7 +11433,7 @@ const resolveAfriexMobileMoneyAccount = async (params: {
   if (!institution) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "Select the recipient's current mobile money provider from Afriex before verifying."
+      "Select the recipient's current mobile money provider from the list before verifying."
     );
   }
 
@@ -11390,10 +11451,15 @@ const resolveAfriexMobileMoneyAccount = async (params: {
       error.details && typeof error.details === "object" ?
       (error.details as Record<string, unknown>).failureCode :
       null;
-    // Afriex's generic resolver outage says nothing about the number itself.
-    // Registration may continue on the catalog-confirmed provider; Afriex
-    // still validates the destination when the payout is created.
-    if (params.allowUpstreamOutageFallback && failureCode === "AFRIEX_RESOLUTION_UPSTREAM_UNAVAILABLE") {
+    // Afriex documents a 400 "account name lookup is not available" for
+    // countries without mobile-money name lookup; before Oct 20, 2026 the same
+    // case returned the generic 500. Neither says anything about the number:
+    // the provider is catalog-confirmed, the sender supplies the name, and the
+    // destination is validated again when the payout is created.
+    const noNameLookup = failureCode === "AFRIEX_NAME_LOOKUP_UNAVAILABLE" ||
+      (failureCode === "AFRIEX_RESOLUTION_UPSTREAM_UNAVAILABLE" &&
+        !afriexMobileMoneySupportsNameEnquiry(countryCode));
+    if (params.allowUpstreamOutageFallback !== false && noNameLookup) {
       return {
         recipientName: null,
         recipientPhone: null,
@@ -11412,7 +11478,7 @@ const resolveAfriexMobileMoneyAccount = async (params: {
   if (returnedInstitutionCode && returnedInstitutionCode !== requestedInstitutionCode) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "Afriex resolved a different mobile money provider for this number. Select that provider and try again."
+      "This number belongs to a different mobile money provider. Select that provider and try again."
     );
   }
   const recipientName = asNonEmptyString(resolved["recipientName"], resolved["accountName"]);

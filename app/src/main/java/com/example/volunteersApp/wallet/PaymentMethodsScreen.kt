@@ -596,7 +596,7 @@ fun PaymentMethodsScreen(
                                     color = Color.Gray
                                 )
                                 Text(
-                                    "Never used for Send Money, Afriex payouts, local or SWIFT banks, mobile money, App User payouts, top-ups, or cash-out. Stripe Connect is business account setup, not a payment card or remittance route.",
+                                    "Never used for Send Money, partner payouts, local or SWIFT banks, mobile money, App User payouts, top-ups, or cash-out. Stripe Connect is business account setup, not a payment card or remittance route.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary,
                                     fontWeight = FontWeight.Medium
@@ -1574,7 +1574,7 @@ private fun AddSwiftReceiveRouteDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    "USD SWIFT delivery across Afriex's 100-country rail. Resolve the bank BIC before saving. SWIFT is payout/withdraw only — it cannot fund Send Money.",
+                    "USD SWIFT delivery to more than 100 countries. Resolve the bank BIC before saving. SWIFT is payout/withdraw only — it cannot fund Send Money.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

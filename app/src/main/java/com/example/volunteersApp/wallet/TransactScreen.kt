@@ -3268,7 +3268,7 @@ fun BeneficiaryRegistrationSheet(
                 }
                 if (!isBank && uiState.isMobileMoneyRecipientRegistrationCountriesLoading) {
                     DropdownMenuItem(
-                        text = { Text("Loading Afriex destinations...") },
+                        text = { Text("Loading mobile money destinations...") },
                         enabled = false,
                         onClick = {},
                     )
@@ -3311,7 +3311,7 @@ fun BeneficiaryRegistrationSheet(
                     "This mobile-money payout route is not currently available for recipient setup. Choose another live destination."
                 } else {
                     uiState.mobileMoneyRecipientRegistrationCountriesError
-                        ?: "Choose a live Afriex mobile-money destination to continue."
+                        ?: "Choose a live mobile money destination to continue."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = SendMoneyTextSecondary,
@@ -4669,7 +4669,7 @@ fun BeneficiaryRegistrationSheet(
                     if (resolvedMobileRecipient?.accountNameVerified == false && name.isBlank()) {
                         Toast.makeText(
                             context,
-                            "Enter the recipient's full name before saving. Afriex does not return it for this corridor.",
+                            "Enter the recipient's full name before saving. It isn't returned automatically for this country.",
                             Toast.LENGTH_LONG
                         ).show()
                         return@Button

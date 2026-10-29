@@ -1742,15 +1742,15 @@ class TransactViewModel : ViewModel() {
         val raw = parseFirebaseCallableMessageDeep(error).lowercase(Locale.US)
         return when {
             raw.contains("$2,000 per transfer") ->
-                "Afriex limits this payout to $2,000 per transfer."
+                "This payout is limited to $2,000 per transfer."
             raw.contains("$5,000 per utc day") ->
-                "Afriex limits payouts to $5,000 per UTC day."
+                "Payouts are limited to $5,000 per UTC day."
             raw.contains("agreed msa mobile money fee") ||
                 ((raw.contains("provider fee") || raw.contains("mobile-money provider fee")) &&
                     raw.contains("not configured")) ->
                 "This mobile money corridor needs its agreed fee configured before it can be quoted."
             raw.contains("agreed afriex production") || raw.contains("not enabled for this production afriex account") ->
-                "This Afriex corridor is not enabled for this production account."
+                "This corridor is not enabled yet."
             raw.contains("payout uat is not enabled") || raw.contains("bank and swift payouts are not enabled") ->
                 "Bank and SWIFT transfers are not available in this environment yet."
             raw.contains("verified recipient") || raw.contains("recipient needs") ->
@@ -3352,7 +3352,7 @@ class TransactViewModel : ViewModel() {
                     resolvedCode.isNullOrBlank() ||
                     institutionName.isNullOrBlank()
                 ) {
-                    throw IllegalStateException("Afriex could not verify this local bank account. Check the account number and bank.")
+                    throw IllegalStateException("We could not verify this local bank account. Check the account number and bank.")
                 }
                 onComplete(
                     ResolvedBankRecipient(
@@ -3451,7 +3451,7 @@ class TransactViewModel : ViewModel() {
                 val resolvedCode = result?.get("institutionCode") as? String
                 val institutionName = result?.get("institutionName") as? String
                 if (!verified || resolvedCode.isNullOrBlank() || institutionName.isNullOrBlank()) {
-                    throw IllegalStateException("Afriex could not verify this SWIFT BIC or routing code.")
+                    throw IllegalStateException("We could not verify this SWIFT BIC or routing code.")
                 }
                 onComplete(
                     ResolvedBankInstitution(

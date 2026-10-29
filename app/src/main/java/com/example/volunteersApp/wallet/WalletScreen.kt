@@ -843,7 +843,7 @@ fun WalletOperationsScreen(
                 ) {
                     Text("Mobile Money Operations", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "Cash in is available only in Afriex live mobile-money collection countries.",
+                        "Cash in is available only in live mobile money collection countries.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -878,7 +878,7 @@ fun WalletOperationsScreen(
 
             if (flow == MobileMoneyFlow.CASH_IN && selectableMobileMethods.isEmpty()) {
                 Text(
-                    "No linked mobile money method is in an Afriex-supported deposit country.",
+                    "No linked mobile money method is in a supported deposit country.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
