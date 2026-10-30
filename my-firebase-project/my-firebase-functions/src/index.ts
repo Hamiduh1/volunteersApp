@@ -95,6 +95,83 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
+// Root user profiles are readable by every signed-in member (directory, chat,
+// dating). Payment, verified-phone and staff-grant fields live in the
+// server-only user_private doc instead; legacy functions read the same doc.
+const USER_PRIVATE_PROFILE_FIELDS = [
+  "paymentCustomerId",
+  "stripeConnectPurpose",
+  "stripeConnectCommerceServices",
+  "afriexCustomerId",
+  "phoneVerifiedNumber",
+  "phoneVerifiedDigits",
+  "phoneVerificationMethod",
+  "mobileMoneyPhoneOtpLastSentPhone",
+  "mobileMoneyPhoneOtpLastSentPhoneDigits",
+  "mobileMoneyPhoneOtpVerifiedPhone",
+  "mobileMoneyPhoneOtpVerifiedPhoneDigits",
+  "grantedByOwnerId",
+  "grantedAdminAt",
+  "supportGrantedAt",
+  "supportGrantedBy",
+  "supportNote",
+  "ownerBootstrappedAt",
+  "staffAssignedRole",
+  "staffPreviousRole",
+] as const;
+type UserPrivateProfileField = typeof USER_PRIVATE_PROFILE_FIELDS[number];
+
+const userPrivateProfileRef = (uid: string) => db.collection("user_private").doc(uid);
+
+/**
+ * Overlays server-only profile fields onto a root user profile. Root values
+ * remain a fallback for users not yet migrated.
+ * @param {string} uid User id.
+ * @param {Record<string, unknown>} rootData Root users/{uid} data.
+ * @return {Promise<Record<string, unknown>>} Profile with private fields applied.
+ */
+const withUserPrivateProfile = async (
+  uid: string,
+  rootData: Record<string, unknown>
+): Promise<Record<string, unknown>> => {
+  const privateData = (await userPrivateProfileRef(uid).get()).data() || {};
+  const merged: Record<string, unknown> = {...rootData};
+  USER_PRIVATE_PROFILE_FIELDS.forEach((field) => {
+    const value = privateData[field];
+    if (value !== undefined && value !== null && value !== "") merged[field] = value;
+  });
+  return merged;
+};
+
+/**
+ * Writes server-only profile fields to user_private and removes any copy
+ * from the member-readable root profile.
+ * @param {string} uid User id.
+ * @param {Partial<Record<UserPrivateProfileField, unknown>>} patch Private fields.
+ * @param {FirebaseFirestore.Transaction} transaction Optional transaction.
+ */
+const setUserPrivateProfileFields = async (
+  uid: string,
+  patch: Partial<Record<UserPrivateProfileField, unknown>>,
+  transaction?: FirebaseFirestore.Transaction
+): Promise<void> => {
+  const fields = Object.keys(patch) as UserPrivateProfileField[];
+  if (fields.length === 0) return;
+  const privateRef = userPrivateProfileRef(uid);
+  const rootRef = db.collection("users").doc(uid);
+  const privatePatch = {...patch, updatedAt: admin.firestore.Timestamp.now()};
+  const rootCleanup = Object.fromEntries(fields.map((field) => [field, admin.firestore.FieldValue.delete()]));
+  if (transaction) {
+    transaction.set(privateRef, privatePatch, {merge: true});
+    transaction.set(rootRef, rootCleanup, {merge: true});
+    return;
+  }
+  const batch = db.batch();
+  batch.set(privateRef, privatePatch, {merge: true});
+  batch.set(rootRef, rootCleanup, {merge: true});
+  await batch.commit();
+};
+
 /**
  * Removes the payout partner's name from text that can reach a customer.
  * Internal identifiers stored in Firestore (verification statuses, function
@@ -2099,7 +2176,7 @@ const resolveVerifiedStripeConnectDestination = async (
   commerceService: StripeConnectCommerceService
 ): Promise<string> => {
   const userSnap = await db.collection("users").doc(userId).get();
-  const userData = (userSnap.data() || {}) as Record<string, unknown>;
+  const userData = await withUserPrivateProfile(userId, (userSnap.data() || {}) as Record<string, unknown>);
   if (!hasStripeConnectCommerceService(userData, commerceService)) {
     throw new functions.https.HttpsError(
       "failed-precondition",
@@ -18243,7 +18320,10 @@ const initiateTransferHandlerWithQuoteHold = async (
 
   const senderRef = db.collection("users").doc(senderId);
   const senderSnapForFees = await senderRef.get();
-  const senderDataForFees = (senderSnapForFees.data() || {}) as Record<string, unknown>;
+  const senderDataForFees = await withUserPrivateProfile(
+    senderId,
+    (senderSnapForFees.data() || {}) as Record<string, unknown>
+  );
   const staffFeeExempt = isStaffFeeExempt(
     senderDataForFees,
       (context.auth?.token || {}) as Record<string, unknown>
@@ -19515,7 +19595,7 @@ const initiateTransferHandlerWithQuoteHold = async (
         throw new functions.https.HttpsError("failed-precondition", "This card has not been properly configured. Please remove and re-add it.");
       }
 
-      const customerId = userSnap.data()?.paymentCustomerId as string | undefined;
+      const customerId = await readUserPaymentCustomerId(senderId, userSnap.data());
       if (!customerId) {
         functions.logger.error(`No payment customer ID for user ${senderId}`);
         throw new functions.https.HttpsError("failed-precondition", "Your card is not linked to a billing profile. Please re-add the card.");
@@ -19960,7 +20040,10 @@ const initiateTransferHandlerWithQuoteHold = async (
     }
 
     const chargeSourceId = asNonEmptyString(fundingData.chargeSourceId);
-    const chargeCustomerId = asNonEmptyString(fundingData.chargeCustomerId, userSnap.data()?.paymentCustomerId);
+    const chargeCustomerId = asNonEmptyString(
+      fundingData.chargeCustomerId,
+      await readUserPaymentCustomerId(senderId, userSnap.data())
+    );
     if (!chargeSourceId || !chargeCustomerId) {
       throw new functions.https.HttpsError(
         "failed-precondition",
@@ -20591,13 +20674,13 @@ export const createConnectAccount = functions.runWith({enforceAppCheck: true})
               },
             }) as Stripe.Account;
           }
-          await userRef.set({
-            ...(!userData.payoutAccountId && userData.stripeAccountId ?
-              {payoutAccountId: userData.stripeAccountId} :
-              {}),
+          if (!userData.payoutAccountId && userData.stripeAccountId) {
+            await userRef.set({payoutAccountId: userData.stripeAccountId}, {merge: true});
+          }
+          await setUserPrivateProfileFields(userId, {
             stripeConnectPurpose: connectPurpose,
             stripeConnectCommerceServices: admin.firestore.FieldValue.arrayUnion(commerceService),
-          }, {merge: true});
+          });
           await syncStripeWalletMirrorForUser({
             userId,
             userData: userData as Record<string, unknown>,
@@ -20693,9 +20776,11 @@ export const createConnectAccount = functions.runWith({enforceAppCheck: true})
       await userRef.set({
         payoutAccountId: account.id,
         stripeAccountId: account.id,
+      }, {merge: true});
+      await setUserPrivateProfileFields(userId, {
         stripeConnectPurpose: connectPurpose,
         stripeConnectCommerceServices: admin.firestore.FieldValue.arrayUnion(commerceService),
-      }, {merge: true});
+      });
       await syncStripeWalletMirrorForUser({
         userId,
         userData: {
@@ -20768,10 +20853,10 @@ export const createConnectOnboardingLink = functions.runWith({enforceAppCheck: t
       throw new functions.https.HttpsError("failed-precondition", "Payout account not found.");
     }
 
-    await userRef.set({
+    await setUserPrivateProfileFields(userId, {
       stripeConnectPurpose: connectPurpose,
       stripeConnectCommerceServices: admin.firestore.FieldValue.arrayUnion(commerceService),
-    }, {merge: true});
+    });
 
     try {
       const link = await getStripe().accountLinks.create({
@@ -20833,8 +20918,10 @@ export const getConnectAccountStatus = functions.runWith({enforceAppCheck: true}
         pendingCreditCents: mirror.pendingCreditCents,
         currentlyDue: requirements?.currently_due || [],
         eventuallyDue: requirements?.eventually_due || [],
-        commerceServices: Array.isArray(userData.stripeConnectCommerceServices) ?
-          userData.stripeConnectCommerceServices : [],
+        commerceServices: await (async () => {
+          const services = (await withUserPrivateProfile(userId, userData)).stripeConnectCommerceServices;
+          return Array.isArray(services) ? services : [];
+        })(),
       };
     } catch (error) {
       functions.logger.error("Failed to retrieve payout account status", error);
@@ -20894,18 +20981,24 @@ const paymentMethodPrivateRef = (
 const maskedBankAccountNumber = (accountNumber: string): string =>
   `********${accountNumber.slice(-4)}`;
 
+const readUserPaymentCustomerId = async (
+  userId: string,
+  rootData: FirebaseFirestore.DocumentData | undefined
+): Promise<string | undefined> =>
+  asNonEmptyString((await withUserPrivateProfile(userId, rootData || {})).paymentCustomerId);
+
 const ensureStripeCustomerForUser = async (
   userId: string,
   userRef: FirebaseFirestore.DocumentReference,
   userData: FirebaseFirestore.DocumentData
 ): Promise<string> => {
-  const existingCustomerId = asNonEmptyString(userData.paymentCustomerId);
+  const existingCustomerId = await readUserPaymentCustomerId(userId, userData);
   if (existingCustomerId) return existingCustomerId;
   const customer = await getStripe().customers.create({
     email: asNonEmptyString(userData.email) || undefined,
     metadata: {userId},
   });
-  await userRef.set({paymentCustomerId: customer.id}, {merge: true});
+  await setUserPrivateProfileFields(userId, {paymentCustomerId: customer.id});
   return customer.id;
 };
 
@@ -21104,14 +21197,14 @@ export const createUsBankAccountSetupIntent = functions.runWith({enforceAppCheck
     }
 
     const userData = userSnap.data() || {};
-    let customerId = asNonEmptyString(userData.paymentCustomerId);
+    let customerId = await readUserPaymentCustomerId(userId, userData);
     if (!customerId) {
       const customer = await getStripe().customers.create({
         email: asNonEmptyString(request.email, userData.email) || undefined,
         metadata: {userId},
       });
       customerId = customer.id;
-      await userRef.set({paymentCustomerId: customerId}, {merge: true});
+      await setUserPrivateProfileFields(userId, {paymentCustomerId: customerId});
     }
 
     try {
@@ -21181,14 +21274,14 @@ export const addUsBankAccountFromFinancialConnections = functions.runWith({enfor
     }
     const userData = userSnap.data() || {};
 
-    let customerId = asNonEmptyString(userData.paymentCustomerId);
+    let customerId = await readUserPaymentCustomerId(userId, userData);
     if (!customerId) {
       const customer = await getStripe().customers.create({
         email: asNonEmptyString(userData.email) || undefined,
         metadata: {userId},
       });
       customerId = customer.id;
-      await userRef.set({paymentCustomerId: customerId}, {merge: true});
+      await setUserPrivateProfileFields(userId, {paymentCustomerId: customerId});
     }
 
     let paymentMethod: Stripe.PaymentMethod;
@@ -21351,7 +21444,7 @@ export const attachExternalAccount = functions.runWith({enforceAppCheck: true})
     let chargeSourceId: string | null = null;
     let chargeSourceStatus: string | null = null;
     let achDebitEnabled = false;
-    let customerId = userSnap.data()?.paymentCustomerId as string | undefined;
+    let customerId = await readUserPaymentCustomerId(userId, userSnap.data());
 
     const ensureCustomerId = async (): Promise<string> => {
       if (customerId) return customerId;
@@ -21360,7 +21453,7 @@ export const attachExternalAccount = functions.runWith({enforceAppCheck: true})
         metadata: {userId},
       });
       customerId = customer.id;
-      await userRef.set({paymentCustomerId: customerId}, {merge: true});
+      await setUserPrivateProfileFields(userId, {paymentCustomerId: customerId});
       return customerId;
     };
 
@@ -23364,7 +23457,7 @@ export const onDepositRequestCreated = functions.firestore
           throw new functions.https.HttpsError("failed-precondition", "This card needs to be re-linked before it can be used for deposits.");
         }
 
-        const customerId = userSnap.data()?.paymentCustomerId as string | undefined;
+        const customerId = await readUserPaymentCustomerId(userId, userSnap.data());
         if (!customerId) {
           throw new functions.https.HttpsError("failed-precondition", "Your card is not linked to a billing profile. Please re-add the card.");
         }
@@ -23416,7 +23509,10 @@ export const onDepositRequestCreated = functions.firestore
         }
 
         const chargeSourceId = asNonEmptyString(methodData.chargeSourceId);
-        const chargeCustomerId = asNonEmptyString(methodData.chargeCustomerId, userSnap.data()?.paymentCustomerId);
+        const chargeCustomerId = asNonEmptyString(
+          methodData.chargeCustomerId,
+          await readUserPaymentCustomerId(userId, userSnap.data())
+        );
         if (!chargeSourceId || !chargeCustomerId) {
           throw new functions.https.HttpsError(
             "failed-precondition",
@@ -25740,7 +25836,10 @@ export const deletePaymentMethod = functions.runWith({enforceAppCheck: true})
     const externalAccountId = asNonEmptyString(methodData.externalAccountId, methodData.stripeExternalAccountId);
     const chargePaymentMethodId = asNonEmptyString(methodData.chargePaymentMethodId, methodData.stripePaymentMethodId);
     const chargeSourceId = asNonEmptyString(methodData.chargeSourceId);
-    const chargeCustomerId = asNonEmptyString(methodData.chargeCustomerId, userData.paymentCustomerId);
+    const chargeCustomerId = asNonEmptyString(
+      methodData.chargeCustomerId,
+      await readUserPaymentCustomerId(userId, userData)
+    );
     const connectAccountIds = [...new Set([
       asNonEmptyString(userData.payoutAccountId),
       asNonEmptyString(userData.stripeAccountId),
@@ -26205,9 +26304,9 @@ export const bootstrapOwnerSelf = functions.runWith({enforceAppCheck: true})
       staffAccessScope: "SUPPORT_CONSOLE",
       staffOnboardingStatus: "ACTIVE",
       profileStatus: "active",
-      ownerBootstrappedAt: now,
       updatedAt: now,
     }, {merge: true});
+    await setUserPrivateProfileFields(uid, {ownerBootstrappedAt: now});
 
     try {
       const authUser = await admin.auth().getUser(uid);
@@ -26313,10 +26412,9 @@ export const ownerGrantAdminByEmail = functions.runWith({enforceAppCheck: true})
       userRole: "admin",
       userType: "admin",
       staffOnboardingStatus: "ACTIVE",
-      grantedByOwnerId: callerUid,
-      grantedAdminAt: now,
       updatedAt: now,
     }, {merge: true});
+    await setUserPrivateProfileFields(targetUid, {grantedByOwnerId: callerUid, grantedAdminAt: now});
 
     try {
       const authUser = await admin.auth().getUser(targetUid);
@@ -26342,8 +26440,8 @@ export const ownerGrantAdminByEmail = functions.runWith({enforceAppCheck: true})
         userId: targetUid,
         email: asNonEmptyString(updatedData.email) || targetEmail,
         role: asNonEmptyString(updatedData.role) || "admin",
-        grantedByOwnerId: asNonEmptyString(updatedData.grantedByOwnerId) || callerUid,
-        grantedAdminAtMs: toMillisTimestamp(updatedData.grantedAdminAt),
+        grantedByOwnerId: callerUid,
+        grantedAdminAtMs: now.toMillis(),
       },
     };
   });
@@ -26397,11 +26495,13 @@ export const adminAddSupportAssociate = functions.runWith({enforceAppCheck: true
       email: associateEmail || targetData.email || null,
       role: "associate",
       supportAccess: true,
+      updatedAt: now,
+    }, {merge: true});
+    await setUserPrivateProfileFields(targetUid, {
       supportNote: asNonEmptyString(payload.note) || null,
       supportGrantedAt: now,
       supportGrantedBy: adminUid,
-      updatedAt: now,
-    }, {merge: true});
+    });
 
     try {
       const authUser = await admin.auth().getUser(targetUid);
@@ -26428,9 +26528,123 @@ export const adminAddSupportAssociate = functions.runWith({enforceAppCheck: true
         username: asNonEmptyString(updatedData.username, updatedData.name) || "Unknown",
         email: asNonEmptyString(updatedData.email) || associateEmail || "",
         role: asNonEmptyString(updatedData.role) || "associate",
-        supportGrantedAtMs: toMillisTimestamp(updatedData.supportGrantedAt),
+        supportGrantedAtMs: now.toMillis(),
       },
     };
+  });
+
+/**
+ * Copies server-only profile fields from one page of root users docs into
+ * user_private (never overwriting a newer private value) and removes them
+ * from the member-readable root. Afriex wallet customer ids leave the root
+ * only when the owner-only wallets doc already holds the same id.
+ * @param {object} params Page cursor and size.
+ * @return {Promise<object>} Page counts and the next cursor.
+ */
+const migrateUserPrivateProfilePage = async (params: {
+  pageSize: number;
+  startAfterUid: string | null;
+  dryRun: boolean;
+}) => {
+  const {pageSize, startAfterUid, dryRun} = params;
+  let query = db.collection("users")
+    .orderBy(admin.firestore.FieldPath.documentId())
+    .limit(pageSize);
+  if (startAfterUid) query = query.startAfter(startAfterUid);
+  const page = await query.get();
+
+  let usersChanged = 0;
+  let fieldsMoved = 0;
+  let afriexRootIdsRemoved = 0;
+  for (const userDoc of page.docs) {
+    const root = userDoc.data() || {};
+    const rootWallet = (root.wallet && typeof root.wallet === "object" ? root.wallet : {}) as Record<string, unknown>;
+    const presentFields = USER_PRIVATE_PROFILE_FIELDS.filter((field) => root[field] !== undefined);
+    const walletProvider = String(rootWallet.provider || root.walletProvider || "").trim().toUpperCase();
+    const hasRootAfriexIds = walletProvider === "AFRIEX" &&
+      (root.providerCustomerId !== undefined || rootWallet.providerCustomerId !== undefined);
+    if (presentFields.length === 0 && !hasRootAfriexIds) continue;
+
+    const [privateSnap, walletSnap] = await Promise.all([
+      userPrivateProfileRef(userDoc.id).get(),
+      hasRootAfriexIds ? db.collection("wallets").doc(userDoc.id).get() : Promise.resolve(null),
+    ]);
+    const privateData = privateSnap.data() || {};
+    const privatePatch: Record<string, unknown> = {};
+    const rootCleanup: Record<string, admin.firestore.FieldValue> = {};
+    presentFields.forEach((field) => {
+      const privateValue = privateData[field];
+      if ((privateValue === undefined || privateValue === null || privateValue === "") &&
+        root[field] !== null && root[field] !== "") {
+        privatePatch[field] = root[field];
+      }
+      rootCleanup[field] = admin.firestore.FieldValue.delete();
+    });
+    if (hasRootAfriexIds) {
+      const rootAfriexId = asNonEmptyString(root.providerCustomerId, rootWallet.providerCustomerId);
+      const walletAfriexId = asNonEmptyString(walletSnap?.get("providerCustomerId"));
+      if (rootAfriexId && walletAfriexId === rootAfriexId) {
+        if (!asNonEmptyString(privateData.afriexCustomerId, privatePatch.afriexCustomerId)) {
+          privatePatch.afriexCustomerId = rootAfriexId;
+        }
+        rootCleanup.providerCustomerId = admin.firestore.FieldValue.delete();
+        rootCleanup["wallet.providerCustomerId"] = admin.firestore.FieldValue.delete();
+        afriexRootIdsRemoved += 1;
+      }
+    }
+    if (Object.keys(rootCleanup).length === 0) continue;
+
+    usersChanged += 1;
+    fieldsMoved += Object.keys(privatePatch).length;
+    if (dryRun) continue;
+    const batch = db.batch();
+    if (Object.keys(privatePatch).length > 0) {
+      batch.set(userPrivateProfileRef(userDoc.id), {
+        ...privatePatch,
+        updatedAt: admin.firestore.Timestamp.now(),
+      }, {merge: true});
+    }
+    batch.update(userDoc.ref, rootCleanup);
+    await batch.commit();
+  }
+
+  const lastDoc = page.docs[page.docs.length - 1];
+  return {
+    dryRun,
+    scannedUsers: page.size,
+    usersChanged,
+    fieldsMoved,
+    afriexRootIdsRemoved,
+    nextStartAfterUid: page.size === pageSize && lastDoc ? lastDoc.id : null,
+  };
+};
+
+export const migrateUserPrivateProfileFieldsJob = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
+  .schedule("every 10 minutes")
+  .onRun(async () => {
+    const stateRef = db.collection("system").doc("user_private_profile_migration");
+    const state = (await stateRef.get()).data() || {};
+    if (state.completedAt) return null;
+    const result = await migrateUserPrivateProfilePage({
+      pageSize: 300,
+      startAfterUid: asNonEmptyString(state.nextStartAfterUid) || null,
+      dryRun: false,
+    });
+    const increment = admin.firestore.FieldValue.increment;
+    await stateRef.set({
+      nextStartAfterUid: result.nextStartAfterUid,
+      scannedUsers: increment(result.scannedUsers),
+      usersChanged: increment(result.usersChanged),
+      fieldsMoved: increment(result.fieldsMoved),
+      afriexRootIdsRemoved: increment(result.afriexRootIdsRemoved),
+      lastRunAt: admin.firestore.Timestamp.now(),
+      ...(result.nextStartAfterUid ? {} : {completedAt: admin.firestore.Timestamp.now()}),
+    }, {merge: true});
+    functions.logger.info("User private profile migration page processed.", result);
+    return null;
   });
 
 export const supportListUsers = functions.runWith({enforceAppCheck: true})
@@ -26971,15 +27185,17 @@ export const verifyMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tru
     }, {merge: true});
     await db.collection("users").doc(uid).set({
       mobileMoneyPhoneOtpVerifiedAt: now,
-      mobileMoneyPhoneOtpVerifiedPhone: phoneE164,
-      mobileMoneyPhoneOtpVerifiedPhoneDigits: phoneDigits,
       phoneVerified: true,
       phoneVerifiedAt: now,
+      updatedAt: now,
+    }, {merge: true});
+    await setUserPrivateProfileFields(uid, {
+      mobileMoneyPhoneOtpVerifiedPhone: phoneE164,
+      mobileMoneyPhoneOtpVerifiedPhoneDigits: phoneDigits,
       phoneVerifiedNumber: phoneE164,
       phoneVerifiedDigits: phoneDigits,
       phoneVerificationMethod: "TWILIO_VERIFY_SMS",
-      updatedAt: now,
-    }, {merge: true});
+    });
 
     return {
       success: true,
@@ -28319,10 +28535,13 @@ const loadReadyExternalTransferFundingMethod = async (params: {
   const methodType = normalizeMethodType(method.type || method.methodType);
   const fundingType = String(params.fundingSourceType || "").trim().toUpperCase();
   const requiresBillingCustomer = fundingType === "EXTERNAL_CARD" || fundingType === "EXTERNAL_BANK";
-  const senderData = requiresBillingCustomer ?
-    ((await db.collection("users").doc(params.senderId).get()).data() || {}) as Record<string, unknown> :
-    null;
-  const chargeCustomerId = asNonEmptyString(method.chargeCustomerId, senderData?.paymentCustomerId);
+  const senderPaymentCustomerId = requiresBillingCustomer ?
+    await readUserPaymentCustomerId(
+      params.senderId,
+      (await db.collection("users").doc(params.senderId).get()).data()
+    ) :
+    undefined;
+  const chargeCustomerId = asNonEmptyString(method.chargeCustomerId, senderPaymentCustomerId);
 
   if (fundingType === "EXTERNAL_CARD") {
     const brand = String(method.brand || "").trim().toUpperCase();

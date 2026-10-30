@@ -18726,14 +18726,24 @@ const buildProviderWalletRootPatch = (
   };
 
   if (record.provider === WalletRuntimeProvider.Afriex) {
-    patch["afriexCustomerId"] = record.providerCustomerId || admin.firestore.FieldValue.delete();
-    patch["providerCustomerId"] = record.providerCustomerId || admin.firestore.FieldValue.delete();
+    // Every signed-in member can read root profiles; the Afriex customer id
+    // stays on the owner-only wallets doc and server-only user_private.
+    patch["afriexCustomerId"] = admin.firestore.FieldValue.delete();
+    patch["providerCustomerId"] = admin.firestore.FieldValue.delete();
+    patch["wallet.providerCustomerId"] = admin.firestore.FieldValue.delete();
   } else {
     patch["providerCustomerId"] = record.providerCustomerId || admin.firestore.FieldValue.delete();
   }
 
   return patch;
 };
+
+const buildProviderWalletPrivatePatch = (
+  record: ProviderWalletMirrorRecord
+): Record<string, unknown> | null =>
+  record.provider === WalletRuntimeProvider.Afriex && record.providerCustomerId ?
+    {afriexCustomerId: record.providerCustomerId} :
+    null;
 
 const parseProviderWalletMirrorRecord = (
   uid: string,
@@ -18984,9 +18994,11 @@ const persistProviderWalletMirrorRecord = async (
   uid: string,
   record: ProviderWalletMirrorRecord
 ): Promise<void> => {
+  const privatePatch = buildProviderWalletPrivatePatch(record);
   await Promise.all([
     providerWalletRef(uid).set(buildProviderWalletDocumentPatch(uid, record), {merge: true}),
     rootUserRef(uid).set(buildProviderWalletRootPatch(record), {merge: true}),
+    ...(privatePatch ? [userPrivateRef(uid).set(privatePatch, {merge: true})] : []),
   ]);
 };
 
@@ -19116,6 +19128,10 @@ const createPendingProviderMirrorTransactionInTransaction = (params: {
     buildProviderWalletRootPatch(nextWallet),
     {merge: true}
   );
+  const nextWalletPrivatePatch = buildProviderWalletPrivatePatch(nextWallet);
+  if (nextWalletPrivatePatch) {
+    params.transaction.set(userPrivateRef(params.userId), nextWalletPrivatePatch, {merge: true});
+  }
 
   return {txRef, nextWallet};
 };
@@ -19174,6 +19190,10 @@ const syncProviderMirrorTransactionStatusById = async (params: {
       buildProviderWalletRootPatch(nextWallet),
       {merge: true}
     );
+    const nextWalletPrivatePatch = buildProviderWalletPrivatePatch(nextWallet);
+    if (nextWalletPrivatePatch) {
+      transaction.set(userPrivateRef(userId), nextWalletPrivatePatch, {merge: true});
+    }
   });
 };
 
@@ -36404,6 +36424,10 @@ export const afriexWalletWebhook = functions.https.onRequest(async (req, res) =>
           buildProviderWalletRootPatch(nextWallet),
           {merge: true}
         );
+        const nextWalletPrivatePatch = buildProviderWalletPrivatePatch(nextWallet);
+        if (nextWalletPrivatePatch) {
+          transaction.set(userPrivateRef(resolvedUserId), nextWalletPrivatePatch, {merge: true});
+        }
       }
     });
 
