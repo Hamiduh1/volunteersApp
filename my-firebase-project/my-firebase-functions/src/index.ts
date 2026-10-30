@@ -21017,7 +21017,19 @@ const ensureStripeCustomerForUser = async (
   userData: FirebaseFirestore.DocumentData
 ): Promise<string> => {
   const existingCustomerId = await readUserPaymentCustomerId(userId, userData);
-  if (existingCustomerId) return existingCustomerId;
+  if (existingCustomerId) {
+    const existingUsable = await getStripe().customers.retrieve(existingCustomerId).then(
+      (existing) => !(existing as Stripe.DeletedCustomer).deleted &&
+        (existing as Stripe.Customer).livemode === (getApiKeys().stripeEnv === "live"),
+      (error) => {
+        const statusCode = (error as {statusCode?: number})?.statusCode;
+        if (statusCode === 404 || statusCode === 403) return false;
+        throw error;
+      }
+    );
+    if (existingUsable) return existingCustomerId;
+    functions.logger.warn("Replacing unusable stored Stripe customer.", {userId, existingCustomerId});
+  }
   const customer = await getStripe().customers.create({
     email: asNonEmptyString(userData.email) || undefined,
     metadata: {userId},
@@ -26782,6 +26794,122 @@ export const auditUserPaymentIdentitiesJob = functions.runWith({
       usersWithFindings,
     }, {merge: true});
     functions.logger.info("User payment identity audit complete.", {scannedUsers: usersSnap.size, usersWithFindings});
+    return null;
+  });
+
+/**
+ * One-time repair of stored Stripe ids that live Stripe reports as missing or
+ * inaccessible. A missing customer is replaced by the user's tagged customer
+ * with the most saved payment methods (newest on a tie) or cleared; a payout
+ * account the platform cannot access is cleared from both copies. Transient
+ * Stripe errors leave the user untouched.
+ */
+export const repairUserPaymentIdentitiesJob = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
+  .schedule("every 10 minutes")
+  .onRun(async () => {
+    const stateRef = db.collection("system").doc("user_payment_identity_repair");
+    if ((await stateRef.get()).get("completedAt")) return null;
+    const stripe = getStripe();
+    const expectedLiveMode = getApiKeys().stripeEnv === "live";
+    const isDefinitelyMissing = (error: unknown) => {
+      const statusCode = (error as {statusCode?: number})?.statusCode;
+      return statusCode === 404 || statusCode === 403;
+    };
+    const savedMethodCount = async (customerId: string) => {
+      const [cards, banks] = await Promise.all([
+        stripe.paymentMethods.list({customer: customerId, type: "card", limit: 20}),
+        stripe.paymentMethods.list({customer: customerId, type: "us_bank_account", limit: 20}),
+      ]);
+      return cards.data.length + banks.data.length;
+    };
+
+    const usersSnap = await db.collection("users").limit(500).get();
+    let customersReplaced = 0;
+    let customersCleared = 0;
+    let payoutAccountsCleared = 0;
+    let usersSkipped = 0;
+    for (const userDoc of usersSnap.docs) {
+      const uid = userDoc.id;
+      const root = userDoc.data() || {};
+      const privateData = (await userPrivateProfileRef(uid).get()).data() || {};
+      try {
+        const storedCustomerId = asNonEmptyString(root.paymentCustomerId, privateData.paymentCustomerId);
+        if (storedCustomerId) {
+          const storedUsable = await stripe.customers.retrieve(storedCustomerId).then(
+            (customer) => !(customer as Stripe.DeletedCustomer).deleted &&
+              (customer as Stripe.Customer).livemode === expectedLiveMode,
+            (error) => {
+              if (isDefinitelyMissing(error)) return false;
+              throw error;
+            }
+          );
+          if (!storedUsable) {
+            let replacementId: string | null = null;
+            if (/^[A-Za-z0-9_-]+$/.test(uid)) {
+              const found = await stripe.customers.search({query: `metadata['userId']:'${uid}'`, limit: 20});
+              const ranked = await Promise.all(found.data
+                .filter((customer) => customer.livemode === expectedLiveMode)
+                .map(async (customer) => ({id: customer.id, created: customer.created, methods: await savedMethodCount(customer.id)})));
+              ranked.sort((a, b) => b.methods - a.methods || b.created - a.created);
+              replacementId = ranked[0]?.id || null;
+            }
+            await setUserPrivateProfileFields(uid, {
+              paymentCustomerId: replacementId || admin.firestore.FieldValue.delete(),
+            });
+            if (replacementId) customersReplaced += 1;
+            else customersCleared += 1;
+            functions.logger.info("Repaired stored Stripe customer.", {uid, storedCustomerId, replacementId});
+          }
+        }
+
+        const payoutIds = Array.from(new Set([
+          root.payoutAccountId, root.stripeAccountId, privateData.payoutAccountId, privateData.stripeAccountId,
+        ].map((value) => asNonEmptyString(value)).filter((id): id is string => !!id)));
+        for (const accountId of payoutIds) {
+          const accessible = await stripe.accounts.retrieve(accountId).then(
+            () => true,
+            (error) => {
+              if (isDefinitelyMissing(error)) return false;
+              throw error;
+            }
+          );
+          if (accessible) continue;
+          const rootCleanup: Record<string, admin.firestore.FieldValue> = {};
+          const privateCleanup: Record<string, admin.firestore.FieldValue> = {};
+          (["payoutAccountId", "stripeAccountId"] as const).forEach((field) => {
+            if (asNonEmptyString(root[field]) === accountId) rootCleanup[field] = admin.firestore.FieldValue.delete();
+            if (asNonEmptyString(privateData[field]) === accountId) privateCleanup[field] = admin.firestore.FieldValue.delete();
+          });
+          if (Object.keys(rootCleanup).length > 0) await userDoc.ref.set(rootCleanup, {merge: true});
+          await mirrorPayoutAccountIdsToPrivate(uid, privateCleanup);
+          payoutAccountsCleared += 1;
+          functions.logger.info("Cleared inaccessible payout account.", {
+            uid,
+            accountId,
+            clearedRoot: Object.keys(rootCleanup),
+            clearedPrivate: Object.keys(privateCleanup),
+          });
+        }
+      } catch (error) {
+        usersSkipped += 1;
+        functions.logger.warn("Skipped payment identity repair after a Stripe error.", {uid, error});
+      }
+    }
+
+    await stateRef.set({
+      ...(usersSkipped === 0 ? {completedAt: admin.firestore.Timestamp.now()} : {}),
+      lastRunAt: admin.firestore.Timestamp.now(),
+      customersReplaced,
+      customersCleared,
+      payoutAccountsCleared,
+      usersSkipped,
+    }, {merge: true});
+    functions.logger.info("User payment identity repair complete.", {
+      customersReplaced, customersCleared, payoutAccountsCleared, usersSkipped,
+    });
     return null;
   });
 
