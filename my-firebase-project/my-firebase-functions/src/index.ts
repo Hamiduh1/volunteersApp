@@ -123,9 +123,13 @@ type UserPrivateProfileField = typeof USER_PRIVATE_PROFILE_FIELDS[number];
 
 const userPrivateProfileRef = (uid: string) => db.collection("user_private").doc(uid);
 
+const isEmptyProfileValue = (value: unknown): boolean =>
+  value === undefined || value === null || value === "";
+
 /**
- * Overlays server-only profile fields onto a root user profile. Root values
- * remain a fallback for users not yet migrated.
+ * Overlays server-only profile fields onto a root user profile. Every private
+ * write deletes the root copy, so a root value that is still present was
+ * written later and wins over the private one.
  * @param {string} uid User id.
  * @param {Record<string, unknown>} rootData Root users/{uid} data.
  * @return {Promise<Record<string, unknown>>} Profile with private fields applied.
@@ -138,9 +142,25 @@ const withUserPrivateProfile = async (
   const merged: Record<string, unknown> = {...rootData};
   USER_PRIVATE_PROFILE_FIELDS.forEach((field) => {
     const value = privateData[field];
-    if (value !== undefined && value !== null && value !== "") merged[field] = value;
+    if (isEmptyProfileValue(rootData[field]) && !isEmptyProfileValue(value)) merged[field] = value;
   });
   return merged;
+};
+
+/**
+ * Keeps the private payout account copy in step with the root copy. The root
+ * copy stays member-readable because clients check it before app-user
+ * transfers; legacy payout paths read the private copy first.
+ * @param {string} uid User id.
+ * @param {Record<string, unknown>} patch payoutAccountId / stripeAccountId values or deletes.
+ * @return {Promise<void>}
+ */
+const mirrorPayoutAccountIdsToPrivate = async (
+  uid: string,
+  patch: {payoutAccountId?: unknown; stripeAccountId?: unknown}
+): Promise<void> => {
+  if (Object.keys(patch).length === 0) return;
+  await userPrivateProfileRef(uid).set({...patch, updatedAt: admin.firestore.Timestamp.now()}, {merge: true});
 };
 
 /**
@@ -10074,6 +10094,7 @@ const syncStripeWalletMirrorForUser = async (params: {
   const activationPending = !walletActive && (detailsSubmitted || chargesEnabled || !!accountId);
 
   await Promise.all([
+    mirrorPayoutAccountIdsToPrivate(userId, {payoutAccountId: accountId, stripeAccountId: accountId}),
     userRef.set({
       payoutAccountId: accountId,
       stripeAccountId: accountId,
@@ -20676,6 +20697,7 @@ export const createConnectAccount = functions.runWith({enforceAppCheck: true})
           }
           if (!userData.payoutAccountId && userData.stripeAccountId) {
             await userRef.set({payoutAccountId: userData.stripeAccountId}, {merge: true});
+            await mirrorPayoutAccountIdsToPrivate(userId, {payoutAccountId: userData.stripeAccountId});
           }
           await setUserPrivateProfileFields(userId, {
             stripeConnectPurpose: connectPurpose,
@@ -20749,6 +20771,7 @@ export const createConnectAccount = functions.runWith({enforceAppCheck: true})
           staleAccountUpdates.stripeAccountId = admin.firestore.FieldValue.delete();
         }
         await userRef.set(staleAccountUpdates, {merge: true});
+        await mirrorPayoutAccountIdsToPrivate(userId, staleAccountUpdates);
       }
     }
 
@@ -20777,6 +20800,7 @@ export const createConnectAccount = functions.runWith({enforceAppCheck: true})
         payoutAccountId: account.id,
         stripeAccountId: account.id,
       }, {merge: true});
+      await mirrorPayoutAccountIdsToPrivate(userId, {payoutAccountId: account.id, stripeAccountId: account.id});
       await setUserPrivateProfileFields(userId, {
         stripeConnectPurpose: connectPurpose,
         stripeConnectCommerceServices: admin.firestore.FieldValue.arrayUnion(commerceService),
@@ -24579,7 +24603,8 @@ export const backfillPayoutFields = functions.runWith({enforceAppCheck: true, ti
         usersUpdated += 1;
         if (!dryRun) {
           batch.set(doc.ref, {payoutAccountId: data.stripeAccountId}, {merge: true});
-          batchOps += 1;
+          batch.set(userPrivateProfileRef(doc.id), {payoutAccountId: data.stripeAccountId}, {merge: true});
+          batchOps += 2;
         }
       }
 
@@ -26535,8 +26560,8 @@ export const adminAddSupportAssociate = functions.runWith({enforceAppCheck: true
 
 /**
  * Copies server-only profile fields from one page of root users docs into
- * user_private (never overwriting a newer private value) and removes them
- * from the member-readable root. Afriex wallet customer ids leave the root
+ * user_private and removes them from the member-readable root. A root value
+ * that is still present is newer than the private copy, so it replaces it. Afriex wallet customer ids leave the root
  * only when the owner-only wallets doc already holds the same id.
  * @param {object} params Page cursor and size.
  * @return {Promise<object>} Page counts and the next cursor.
@@ -26573,9 +26598,7 @@ const migrateUserPrivateProfilePage = async (params: {
     const privatePatch: Record<string, unknown> = {};
     const rootCleanup: Record<string, admin.firestore.FieldValue> = {};
     presentFields.forEach((field) => {
-      const privateValue = privateData[field];
-      if ((privateValue === undefined || privateValue === null || privateValue === "") &&
-        root[field] !== null && root[field] !== "") {
+      if (!isEmptyProfileValue(root[field])) {
         privatePatch[field] = root[field];
       }
       rootCleanup[field] = admin.firestore.FieldValue.delete();
@@ -26644,6 +26667,121 @@ export const migrateUserPrivateProfileFieldsJob = functions.runWith({
       ...(result.nextStartAfterUid ? {} : {completedAt: admin.firestore.Timestamp.now()}),
     }, {merge: true});
     functions.logger.info("User private profile migration page processed.", result);
+    return null;
+  });
+
+/**
+ * Read-only check of each user's stored Stripe customer and payout account ids
+ * against Stripe, logged for owner review before any repair. Writes only its
+ * own progress document.
+ */
+export const auditUserPaymentIdentitiesJob = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
+  .schedule("every 10 minutes")
+  .onRun(async () => {
+    const stateRef = db.collection("system").doc("user_payment_identity_audit");
+    if ((await stateRef.get()).get("completedAt")) return null;
+    const stripe = getStripe();
+    const expectedLiveMode = getApiKeys().stripeEnv === "live";
+    const errorMessage = (error: unknown) => String((error as {message?: unknown})?.message || error || "");
+
+    const describeCustomer = async (customerId: string) => {
+      try {
+        const customer = await stripe.customers.retrieve(customerId);
+        if ((customer as Stripe.DeletedCustomer).deleted) return {customerId, status: "DELETED"};
+        const [cards, banks] = await Promise.all([
+          stripe.paymentMethods.list({customer: customerId, type: "card", limit: 20}),
+          stripe.paymentMethods.list({customer: customerId, type: "us_bank_account", limit: 20}),
+        ]);
+        return {
+          customerId,
+          status: (customer as Stripe.Customer).livemode === expectedLiveMode ? "OK" : "WRONG_MODE",
+          createdAtMs: (customer as Stripe.Customer).created * 1000,
+          cards: cards.data.length,
+          bankAccounts: banks.data.length,
+        };
+      } catch (error) {
+        return {customerId, status: "NOT_FOUND", message: errorMessage(error)};
+      }
+    };
+
+    const describeAccount = async (uid: string, accountId: string) => {
+      try {
+        const account = await stripe.accounts.retrieve(accountId) as Stripe.Account;
+        const accountType = String((account as unknown as {type?: unknown}).type || "").toLowerCase();
+        const controllerType = String(
+          (account as unknown as {controller?: {type?: unknown}}).controller?.type || ""
+        ).toLowerCase();
+        const transferCapability = String(account.capabilities?.transfers || "").toLowerCase();
+        const livemodeMatches = (account as unknown as {livemode?: boolean}).livemode === expectedLiveMode;
+        const metadataUserId = asNonEmptyString(account.metadata?.volunteersAppUserId, account.metadata?.userId);
+        return {
+          accountId,
+          usable: livemodeMatches &&
+            accountType === "express" && (!controllerType || controllerType === "application") &&
+            account.details_submitted === true &&
+            account.payouts_enabled === true &&
+            (!transferCapability || transferCapability === "active"),
+          livemodeMatches,
+          detailsSubmitted: account.details_submitted === true,
+          payoutsEnabled: account.payouts_enabled === true,
+          transferCapability: transferCapability || null,
+          ownerMatches: metadataUserId ? metadataUserId === uid : null,
+        };
+      } catch (error) {
+        return {accountId, usable: false, status: "NOT_FOUND", message: errorMessage(error)};
+      }
+    };
+
+    const usersSnap = await db.collection("users").limit(500).get();
+    let usersWithFindings = 0;
+    for (const userDoc of usersSnap.docs) {
+      const uid = userDoc.id;
+      const root = userDoc.data() || {};
+      const privateData = (await userPrivateProfileRef(uid).get()).data() || {};
+      const privateCustomerId = asNonEmptyString(privateData.paymentCustomerId) || null;
+      let searchedCustomerIds: string[] = [];
+      let customerSearchError: string | null = null;
+      if (/^[A-Za-z0-9_-]+$/.test(uid)) {
+        try {
+          const found = await stripe.customers.search({query: `metadata['userId']:'${uid}'`, limit: 20});
+          searchedCustomerIds = found.data.map((customer) => customer.id);
+        } catch (error) {
+          customerSearchError = errorMessage(error);
+        }
+      }
+      const customerIds = Array.from(new Set([privateCustomerId, ...searchedCustomerIds]
+        .filter((id): id is string => !!id)));
+      const rootPayoutAccountId = asNonEmptyString(root.payoutAccountId, root.stripeAccountId) || null;
+      const privatePayoutAccountId = asNonEmptyString(privateData.payoutAccountId, privateData.stripeAccountId) || null;
+      if (customerIds.length === 0 && !rootPayoutAccountId && !privatePayoutAccountId) continue;
+
+      usersWithFindings += 1;
+      const accountIds = Array.from(new Set([rootPayoutAccountId, privatePayoutAccountId]
+        .filter((id): id is string => !!id)));
+      const [customers, accounts] = await Promise.all([
+        Promise.all(customerIds.map(describeCustomer)),
+        Promise.all(accountIds.map((accountId) => describeAccount(uid, accountId))),
+      ]);
+      functions.logger.info("User payment identity audit.", {
+        uid,
+        privateCustomerId,
+        customers,
+        customerSearchError,
+        rootPayoutAccountId,
+        privatePayoutAccountId,
+        accounts,
+      });
+    }
+
+    await stateRef.set({
+      completedAt: admin.firestore.Timestamp.now(),
+      scannedUsers: usersSnap.size,
+      usersWithFindings,
+    }, {merge: true});
+    functions.logger.info("User payment identity audit complete.", {scannedUsers: usersSnap.size, usersWithFindings});
     return null;
   });
 
