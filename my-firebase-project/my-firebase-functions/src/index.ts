@@ -18023,6 +18023,18 @@ const initiateAfriexBankSwiftTransfer = async (params: {
       }
       throw new functions.https.HttpsError("unavailable", stripeError?.message || "Card funding could not be completed.");
     }
+    if (fundingIntent.status === "processing") {
+      // The charge may still succeed; keep the quote and sender locked until
+      // Stripe reconciliation completes so a retry cannot charge twice.
+      fundingPaymentIntentId = fundingIntent.id;
+      await markFundingReconciliationRequired(
+        "Card funding is still processing. Do not retry this transfer until Stripe reconciliation completes."
+      );
+      throw new functions.https.HttpsError(
+        "unavailable",
+        "Card funding is still processing. Do not retry; contact support with your payment reference."
+      );
+    }
     if (fundingIntent.status !== "succeeded") {
       await releaseWalletTransferQuoteReservation({
         quoteId: params.quoteId,
@@ -18180,9 +18192,10 @@ const initiateAfriexBankSwiftTransfer = async (params: {
   };
 };
 
-const initiateTransferHandler = async (
+const initiateTransferHandlerWithQuoteHold = async (
   data: unknown,
-  context: functions.https.CallableContext
+  context: functions.https.CallableContext,
+  quoteHold: {quoteId: string | null}
 ) => {
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError("unauthenticated", "You must be logged in to transfer.");
@@ -18528,6 +18541,7 @@ const initiateTransferHandler = async (
       }, {merge: true});
       return data;
     });
+    quoteHold.quoteId = quoteId;
     transferFeeUsd = roundMoney(Number(quoteData.corridorFee ?? quoteData.fee ?? 0));
     topUpFeeUsd = roundMoney(Number(quoteData.topUpFeeUsd || 0));
     providerFeeUsd = roundMoney(Number(quoteData.providerFeeUsd || 0));
@@ -20254,6 +20268,44 @@ const initiateTransferHandler = async (
     // --- Fallback error ---
   } else {
     throw new functions.https.HttpsError("invalid-argument", "Invalid funding source specified.");
+  }
+};
+
+/**
+ * Returns the quote, sender rolling-limit and shared payout-cap reservations
+ * when a send fails before funding starts. Funding that already started marks
+ * the quote FUNDING_IN_PROGRESS, which this release leaves locked for
+ * reconciliation so a retry cannot charge twice.
+ * @param {unknown} data Transfer request.
+ * @param {functions.https.CallableContext} context Callable context.
+ * @return {Promise<unknown>} The transfer result.
+ */
+const initiateTransferHandler = async (
+  data: unknown,
+  context: functions.https.CallableContext
+) => {
+  const quoteHold: {quoteId: string | null} = {quoteId: null};
+  const releaseHeldQuote = async (reason: string) => {
+    const senderId = context.auth?.uid;
+    if (!quoteHold.quoteId || !senderId) return;
+    await releaseWalletTransferQuoteReservation({quoteId: quoteHold.quoteId, senderId, reason})
+      .catch((releaseError) => {
+        functions.logger.error("Could not release transfer quote reservation.", {
+          senderId,
+          quoteId: quoteHold.quoteId,
+          releaseError,
+        });
+      });
+  };
+  try {
+    const result = await initiateTransferHandlerWithQuoteHold(data, context, quoteHold);
+    if ((result as {success?: unknown} | null)?.success === false) {
+      await releaseHeldQuote("Transfer was not submitted.");
+    }
+    return result;
+  } catch (error) {
+    await releaseHeldQuote("Transfer setup was not completed.");
+    throw error;
   }
 };
 
