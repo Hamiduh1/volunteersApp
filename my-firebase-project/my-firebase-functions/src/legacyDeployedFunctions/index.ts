@@ -5,7 +5,7 @@
 //  IMPORTS & INITIALIZATION
 // =============================================================================
 import axios from "axios";
-import {createHash, createHmac, randomInt, randomUUID} from "crypto";
+import {createHash, createHmac, randomInt, randomUUID, timingSafeEqual} from "crypto";
 import * as http2 from "http2";
 import jwt from "jsonwebtoken";
 import * as admin from "firebase-admin";
@@ -173,7 +173,7 @@ const getAppConfig = () => {
     // Separate from FX: added only to Stripe card-funded Send Money collections.
     stripeTransactionOwnerFeeRate: (process.env.CONFIG_STRIPE_TRANSACTION_OWNER_FEE_RATE ||
       configGroup["stripe_transaction_owner_fee_rate"] ||
-      "0.006") as string,
+      "0") as string,
     mobileMoneyHiddenFeeRate: (process.env.CONFIG_MOBILE_MONEY_HIDDEN_FEE_RATE ||
       configGroup["mobile_money_hidden_fee_rate"] ||
       "0.0") as string,
@@ -5422,11 +5422,60 @@ const isAfriexHostedAgentCashOutSource = (source: unknown): boolean =>
 const isAfriexHostedAgentEarningsCashOutSource = (source: unknown): boolean =>
   String(source || "").trim().toUpperCase() === AFRIEX_HOSTED_AGENT_EARNINGS_CASH_OUT_SOURCE;
 
+// Payouts created by the provider-rail flows in src/index.ts are funded by an
+// external card, bank, or mobile money collection and are owned by that module's
+// submitters, webhook, and reconcilers. Legacy custody paths must never fail,
+// resubmit, or settle them.
+const CURRENT_PROVIDER_RAIL_FUNDING_SOURCES = new Set([
+  "EXTERNAL_CARD",
+  "EXTERNAL_BANK",
+  "EXTERNAL_MOBILE_MONEY",
+  "PLATFORM_FEE_MOBILE_MONEY",
+]);
+
+const CURRENT_PROVIDER_RAIL_PAYOUT_SOURCES = new Set([
+  "APP_USER_PROVIDER_TRANSFER",
+  "AFRIEX_BANK_SWIFT_TRANSFER",
+  "PLATFORM_FEE_MOBILE_MONEY_COLLECTION",
+]);
+
+export const isCurrentProviderRailPayout = (
+  payoutData: FirebaseFirestore.DocumentData | Record<string, unknown>
+): boolean => {
+  const fundingSource = String(payoutData.fundingSource || "").trim().toUpperCase();
+  const source = String(payoutData.source || "").trim().toUpperCase();
+  return CURRENT_PROVIDER_RAIL_FUNDING_SOURCES.has(fundingSource) ||
+    CURRENT_PROVIDER_RAIL_PAYOUT_SOURCES.has(source);
+};
+
+type CurrentProviderRailResultHandler = (
+  payoutRef: FirebaseFirestore.DocumentReference,
+  payoutData: FirebaseFirestore.DocumentData,
+  result: {
+    status: "COMPLETED" | "PROCESSING" | "FAILED" | "REVERSED";
+    providerTransferId?: string;
+    providerMessage?: string;
+    rawStatus?: string;
+  }
+) => Promise<void>;
+
+let currentProviderRailResultHandler: CurrentProviderRailResultHandler | null = null;
+
+export const registerCurrentProviderRailResultHandler = (
+  handler: CurrentProviderRailResultHandler
+): void => {
+  currentProviderRailResultHandler = handler;
+};
+
 const legacyCustodyPayoutFlowName = (
   payoutData: FirebaseFirestore.DocumentData | Record<string, unknown>
 ): string | null => {
   const type = String(payoutData.type || "").trim().toUpperCase();
   const source = String(payoutData.source || "").trim().toUpperCase();
+
+  if (isCurrentProviderRailPayout(payoutData)) {
+    return null;
+  }
 
   if (source === AFRIEX_HOSTED_WALLET_TRANSFER_SOURCE ||
     source === AFRIEX_HOSTED_WALLET_CASH_IN_SOURCE ||
@@ -25785,6 +25834,12 @@ const applyMobileMoneyProviderResult = async (
   payoutData: FirebaseFirestore.DocumentData,
   result: MobileMoneyProviderResult
 ): Promise<boolean> => {
+  if (isCurrentProviderRailPayout(payoutData)) {
+    if (currentProviderRailResultHandler) {
+      await currentProviderRailResultHandler(payoutRef, payoutData, result);
+    }
+    return false;
+  }
   if (payoutData.complianceDisabled === true || legacyCustodyPayoutFlowName(payoutData)) {
     await failLegacyCustodyPayoutRequest(payoutRef, payoutData);
     return false;
@@ -25923,6 +25978,7 @@ const processPendingMobileMoneyProviderPayout = async (
   const latestSnap = await payoutRef.get();
   if (!latestSnap.exists) return;
   const data = latestSnap.data() || inputData || {};
+  if (isCurrentProviderRailPayout(data)) return;
   if (data.complianceDisabled === true || await failLegacyCustodyPayoutRequest(payoutRef, data)) {
     return;
   }
@@ -36155,7 +36211,9 @@ export const afriexWalletWebhook = functions.https.onRequest(async (req, res) =>
           "x-afriex-webhook-secret"
       ).toLowerCase();
       const providedSecret = req.header(secretHeaderName) || "";
-      if (expectedSecret && providedSecret && providedSecret === expectedSecret) {
+      const providedSecretDigest = createHash("sha256").update(providedSecret).digest();
+      const expectedSecretDigest = createHash("sha256").update(expectedSecret || "").digest();
+      if (expectedSecret && providedSecret && timingSafeEqual(providedSecretDigest, expectedSecretDigest)) {
         authMode = "shared_secret";
         functions.logger.warn("Afriex webhook accepted via shared-secret fallback; prefer x-webhook-signature.", {
           reason: signatureResult.reason,
@@ -36731,6 +36789,7 @@ export const reconcilePendingAfriexPayouts = functions.pubsub
       for (const doc of candidates) {
         examined += 1;
         const data = doc.data() || {};
+        if (isCurrentProviderRailPayout(data)) continue;
         const providerTransferId = asNonEmptyString(
           data.providerTransferId,
           data.afriexTransactionId,
@@ -38134,6 +38193,7 @@ const requeueOrphanedProviderProcessingPayout = async (
   payoutRef: FirebaseFirestore.DocumentReference,
   payoutData: FirebaseFirestore.DocumentData
 ): Promise<boolean> => {
+  if (isCurrentProviderRailPayout(payoutData)) return false;
   const status = String(payoutData.status || "").trim().toUpperCase();
   if (status !== "PROCESSING_PROVIDER" && status !== "PENDING_PROVIDER") {
     return false;
@@ -38227,6 +38287,9 @@ const tryFinalizePayoutFromStripeCharge = async (
   }
 
   const payoutData = payoutSnap.data() || {};
+  if (isCurrentProviderRailPayout(payoutData)) {
+    return {handled: false, payoutRequestId, action: "SKIPPED_CURRENT_PROVIDER_RAIL"};
+  }
   const type = String(payoutData.type || "").trim().toUpperCase();
   if (type === "CASH_IN" && isStripeSettledAfriexHostedWalletTopUp(payoutData)) {
     await settlePendingStripeBankFundedCashInRequest(payoutRef, payoutData);
@@ -45243,6 +45306,18 @@ const reconcilePayoutRequestsAdmin = async (
       const type = String(payoutData.type || "").trim().toUpperCase();
       const status = String(payoutData.status || "").trim().toUpperCase();
       let action = "INSPECTED";
+
+      if (isCurrentProviderRailPayout(payoutData)) {
+        results.push({
+          payoutRequestId,
+          handled: false,
+          action: "SKIPPED_CURRENT_PROVIDER_RAIL",
+          type: payoutData.type,
+          status: payoutData.status,
+          performedBy,
+        });
+        continue;
+      }
 
       if (
         type === "BENEFICIARY_TRANSFER" &&

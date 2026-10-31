@@ -16,6 +16,7 @@ import Stripe from "stripe";
 import {reconcileStaleLiveSessions} from "./liveSessions.js";
 import {
   ensureAfriexSwiftTransferInvoiceUrl,
+  registerCurrentProviderRailResultHandler,
   sendSwiftTransferInvoiceEmailOnce,
 } from "./legacyDeployedFunctions/index.js";
 // These names preserve deployed v1 function identities recovered after the
@@ -395,10 +396,10 @@ const getAppConfig = () => {
       "") as string,
     blindDateFee: (process.env.CONFIG_BLIND_DATE_FEE ||
       configGroup["blind_date_fee"] ||
-      "10.0") as string,
+      "0") as string,
     adPostFeeUsd: (process.env.CONFIG_AD_POST_FEE_USD ||
       configGroup["ad_post_fee_usd"] ||
-      "1.0") as string,
+      "0") as string,
     marketplacePlatinumFeeRate: (process.env.CONFIG_MARKETPLACE_PLATINUM_FEE_RATE ||
       configGroup["marketplace_platinum_fee_rate"] ||
       "0.02") as string,
@@ -726,13 +727,13 @@ const parseCountryPaymentOverrides = (raw: unknown): Record<string, CountryPayme
 const getDefaultRuntimeFeeSettings = (): RuntimeFeeSettings => {
   const config = getAppConfig();
   return {
-    blindDateFeeUsd: sanitizeNonNegativeNumber(config.blindDateFee, 10.0),
+    blindDateFeeUsd: sanitizeNonNegativeNumber(config.blindDateFee, 0),
     agentAuthorizationFeeUsd: sanitizeNonNegativeNumber(config.agentAuthorizationFeeUsd, 50.0),
     forexProfitMargin: sanitizeNonNegativeNumber(config.forexProfitMargin, 0.010),
     stripeForexDepositProfitMargin: sanitizeNonNegativeNumber(config.stripeForexDepositProfitMargin, 0.005),
     stripeTransactionOwnerFeeRate: sanitizeRateOverride(config.stripeTransactionOwnerFeeRate) || 0,
     mobileMoneyHiddenFeeRate: sanitizeNonNegativeNumber(config.mobileMoneyHiddenFeeRate, 0.0),
-    adPostFeeUsd: sanitizeNonNegativeNumber(config.adPostFeeUsd, 1.0),
+    adPostFeeUsd: sanitizeNonNegativeNumber(config.adPostFeeUsd, 0),
     marketplacePlatinumFeeRate: sanitizeNonNegativeNumber(config.marketplacePlatinumFeeRate, 0.02),
     garageSaleFeeRate: sanitizeNonNegativeNumber(config.garageSaleFeeRate, 0.02),
     eventTicketOwnerFeeRate: sanitizeNonNegativeNumber(config.eventTicketOwnerFeeRate, 0.05),
@@ -9737,12 +9738,34 @@ const normalizeMobileMoneyProviderResultStatus = (value: unknown): MobileMoneyPr
     "CANCELED",
     "ERROR",
     "REFUNDED",
-  ].includes(raw)) {
+  ].includes(raw) || AFRIEX_REVERSAL_RAW_STATUSES.has(raw)) {
     return "FAILED";
   }
 
   return "PROCESSING";
 };
+
+// Afriex returns SUCCESS when it accepts a transaction, before a payout settles
+// or a customer approves a collection; only a status check or update event is final.
+const normalizeAfriexSubmissionResultStatus = (value: unknown): MobileMoneyProviderResultStatus =>
+  normalizeMobileMoneyProviderResultStatus(value) === "FAILED" ? "FAILED" : "PROCESSING";
+
+const isAfriexTransactionCreatedEvent = (value: unknown): boolean =>
+  String(value || "").trim().toUpperCase().replace(/\s+/g, ".") === "TRANSACTION.CREATED";
+
+const AFRIEX_REVERSAL_RAW_STATUSES = new Set([
+  "REVERSED",
+  "REVERSAL",
+  "REVERSED_BY_PROVIDER",
+  "REVERSED_BY_CUSTOMER",
+  "REFUNDED",
+  "REFUND",
+  "RETURNED",
+  "ROLLED_BACK",
+  "ROLLBACK",
+  "CHARGEBACK",
+  "REVOKED",
+]);
 
 type AxiosLikeError = {
   response?: {
@@ -13457,6 +13480,9 @@ const submitAfriexTransaction = async (
     transactionPayload.destinationId = paymentMethodId;
   }
 
+  if (transactionType === "WITHDRAW") {
+    await rollAfriexCapReservationToSubmissionDay(payoutRef, payoutData);
+  }
   // From here a timeout may mean Afriex created the transaction; retries must not resubmit blindly.
   await payoutRef.set({providerTransactionSubmitStartedAtMs: Date.now()}, {merge: true});
   const transactionResponse = await axios.post(
@@ -13493,7 +13519,7 @@ const submitAfriexTransaction = async (
   }, {merge: true});
 
   return {
-    status: normalizeMobileMoneyProviderResultStatus(rawStatus),
+    status: normalizeAfriexSubmissionResultStatus(rawStatus),
     providerTransferId,
     providerMessage,
     rawStatus,
@@ -13920,8 +13946,9 @@ const applyMobileMoneyProviderResult = async (
     const isExternallyFundedBeneficiaryTransfer =
       String(latestData.type || "").trim().toUpperCase() === "BENEFICIARY_TRANSFER" &&
       ["EXTERNAL_CARD", "EXTERNAL_BANK", "EXTERNAL_MOBILE_MONEY"].includes(fundingSource);
-    const targetStatus = result.status === "COMPLETED" ?
-      "COMPLETED" : (result.status === "FAILED" ?
+    const isReversal = AFRIEX_REVERSAL_RAW_STATUSES.has(String(result.rawStatus || "").trim().toUpperCase());
+    const targetStatus = result.status === "COMPLETED" && !isReversal ?
+      "COMPLETED" : (result.status === "FAILED" || isReversal ?
         (isExternallyFundedBeneficiaryTransfer ? "FUNDING_RECONCILIATION_REQUIRED" : "FAILED") :
         "PROCESSING_PROVIDER");
     const terminalStatuses = new Set(["COMPLETED", "FAILED", "REFUNDED", "FUNDING_RECONCILIATION_REQUIRED"]);
@@ -13929,14 +13956,23 @@ const applyMobileMoneyProviderResult = async (
     // Provider webhooks are at-least-once and can arrive out of order. Once a
     // payout is terminal, retain the settled state and audit contradictory data.
     if (terminalStatuses.has(currentStatus)) {
+      const reversedAfterCompletion = isReversal && currentStatus === "COMPLETED" &&
+        latestData.providerReversed !== true;
       transaction.set(payoutRef, {
         ignoredProviderStatus: result.status,
         ignoredProviderRawStatus: result.rawStatus || null,
         ignoredProviderMessage: result.providerMessage || null,
         ignoredProviderTransferId: result.providerTransferId || null,
         ignoredProviderEventAt: now,
+        ...(reversedAfterCompletion ? {
+          providerReversed: true,
+          providerReversalRequiresReview: true,
+          providerReversalRawStatus: result.rawStatus || null,
+          providerReversalMessage: result.providerMessage || null,
+          providerReversedAt: now,
+        } : {}),
       }, {merge: true});
-      return {applied: false, payoutData: latestData, targetStatus};
+      return {applied: false, payoutData: latestData, targetStatus, reversedAfterCompletion};
     }
 
     const statusUpdate: Record<string, unknown> = {
@@ -13976,8 +14012,29 @@ const applyMobileMoneyProviderResult = async (
     }
 
     transaction.set(payoutRef, statusUpdate, {merge: true});
-    return {applied: true, payoutData: latestData, targetStatus};
+    return {applied: true, payoutData: latestData, targetStatus, reversedAfterCompletion: false};
   });
+
+  if (transition?.reversedAfterCompletion) {
+    const reversedSenderId = asNonEmptyString(transition.payoutData.senderId);
+    functions.logger.error("Provider reversed a completed payout.", {
+      payoutRequestId: payoutRef.id,
+      type: transition.payoutData.type || null,
+      rawStatus: result.rawStatus || null,
+    });
+    // A reversed collection means delivery may already have been released without funds.
+    if (reversedSenderId && String(transition.payoutData.type || "").trim().toUpperCase() === "CASH_IN") {
+      await db.collection("external_funding_reconciliation_locks").doc(reversedSenderId).set({
+        active: true,
+        senderId: reversedSenderId,
+        payoutRequestId: payoutRef.id,
+        reason: "The provider reversed a completed mobile money collection. Review before allowing further sends.",
+        providerReversal: true,
+        createdAt: now,
+        updatedAt: now,
+      }, {merge: true});
+    }
+  }
 
   if (!transition || !transition.applied) return;
 
@@ -14035,6 +14092,7 @@ const applyMobileMoneyProviderResult = async (
         "FAILED",
         result.providerMessage || "Provider rejected mobile money verification."
       );
+      await releaseTransferLimitsForFailedCollection(payoutRef, latestData);
     }
     if (senderId) {
       await finalizeSenderTransactionsForPayout(senderId, payoutRef, latestData, "FAILED");
@@ -14046,6 +14104,13 @@ const applyMobileMoneyProviderResult = async (
     await markMobileMoneyMethodVerificationStatus(senderId, latestData, "AWAITING_CONFIRMATION");
   }
 };
+
+registerCurrentProviderRailResultHandler((payoutRef, payoutData, result) =>
+  applyMobileMoneyProviderResult(payoutRef, payoutData, {
+    ...result,
+    status: result.status === "REVERSED" ? "FAILED" : result.status,
+  })
+);
 
 const isAfriexBankSwiftPayoutExecutionEnabled = (): boolean => {
   const value = String(process.env.AFRIEX_BANK_SWIFT_PAYOUTS_ENABLED || "").trim().toLowerCase();
@@ -14730,6 +14795,7 @@ const processPendingAfriexBankSwiftPayout = async (
     );
   }
   if (route === "SWIFT") assertSwiftBeneficiaryDetails(beneficiary);
+  await rollAfriexCapReservationToSubmissionDay(payoutRef, data);
 
   // Afriex requires a transaction invoice for SWIFT. Generate an unguessable
   // provider-readable URL on the server only; neither its URL nor token is
@@ -14937,7 +15003,9 @@ const processPendingAfriexBankSwiftPayout = async (
       transactionData["transactionId"], transactionData["id"], transactionData["reference"]
     );
     const normalizedStatus = rawStatus.toUpperCase();
-    const isCompleted = ["SUCCESS", "SUCCEEDED", "COMPLETED"].includes(normalizedStatus);
+    // An accepted transaction is not a settled payout; reconcilePendingAfriexBankSwiftPayouts
+    // or a later webhook confirms completion.
+    const isCompleted = false;
     const isRejected = ["FAILED", "FAILURE", "DECLINED", "CANCELLED"].includes(normalizedStatus);
     if (swiftInvoiceUrl) {
       try {
@@ -16776,6 +16844,178 @@ const releaseWalletTransferQuoteReservation = async (params: {
   });
 };
 
+const findTransferQuoteRefForPayout = async (
+  payoutRef: FirebaseFirestore.DocumentReference,
+  payoutData: FirebaseFirestore.DocumentData
+): Promise<FirebaseFirestore.DocumentReference | null> => {
+  const directQuoteId = asNonEmptyString(payoutData.quoteId, payoutData.transferIntent?.quoteId);
+  if (directQuoteId) return db.collection("wallet_transfer_quotes").doc(directQuoteId);
+  const consumerIds = [payoutRef.id, asNonEmptyString(payoutData.collectionRequestId)]
+    .filter((value): value is string => !!value);
+  for (const consumerId of consumerIds) {
+    const quoteSnap = await db.collection("wallet_transfer_quotes")
+      .where("consumedByPayoutRequestId", "==", consumerId)
+      .limit(1)
+      .get();
+    if (!quoteSnap.empty) return quoteSnap.docs[0].ref;
+  }
+  return null;
+};
+
+/**
+ * Afriex's daily ceiling applies on the day a payout is submitted. A send funded
+ * by ACH or an approved collection can be submitted days after its quote reserved
+ * capacity, so move the reservation onto the submission day.
+ * @param {FirebaseFirestore.DocumentReference} payoutRef Payout being submitted.
+ * @param {FirebaseFirestore.DocumentData} payoutData Payout data.
+ */
+const rollAfriexCapReservationToSubmissionDay = async (
+  payoutRef: FirebaseFirestore.DocumentReference,
+  payoutData: FirebaseFirestore.DocumentData
+): Promise<void> => {
+  try {
+    const quoteRef = await findTransferQuoteRefForPayout(payoutRef, payoutData);
+    if (!quoteRef) return;
+    const today = currentUtcDateKey();
+    await db.runTransaction(async (transaction) => {
+      const quoteSnap = await transaction.get(quoteRef);
+      if (!quoteSnap.exists) return;
+      const capReservation = quoteSnap.get("afriexCapReservation") as
+        {utcDate?: unknown; amountUsd?: unknown; released?: unknown} | undefined;
+      const fromDate = asNonEmptyString(capReservation?.utcDate);
+      const amountUsd = roundMoney(Number(capReservation?.amountUsd || 0));
+      const senderId = asNonEmptyString(quoteSnap.get("senderId"));
+      if (!capReservation || capReservation.released === true || !fromDate || fromDate === today ||
+        amountUsd <= 0 || !senderId) {
+        return;
+      }
+      const fromUsageRef = afriexPayoutLimitUsageRef(fromDate);
+      const fromSenderUsageRef = afriexPayoutLimitSenderUsageRef(fromDate, senderId);
+      const todayUsageRef = afriexPayoutLimitUsageRef(today);
+      const todaySenderUsageRef = afriexPayoutLimitSenderUsageRef(today, senderId);
+      const [fromUsageSnap, fromSenderUsageSnap, todayUsageSnap, todaySenderUsageSnap] = await Promise.all([
+        transaction.get(fromUsageRef),
+        transaction.get(fromSenderUsageRef),
+        transaction.get(todayUsageRef),
+        transaction.get(todaySenderUsageRef),
+      ]);
+      const now = admin.firestore.Timestamp.now();
+      if (fromUsageSnap.exists) {
+        transaction.set(fromUsageRef, {
+          attemptedAmountUsd: Math.max(0, roundMoney(Number(fromUsageSnap.get("attemptedAmountUsd") || 0) - amountUsd)),
+          rolledForwardAmountUsd: roundMoney(Number(fromUsageSnap.get("rolledForwardAmountUsd") || 0) + amountUsd),
+          updatedAt: now,
+        }, {merge: true});
+      }
+      if (fromSenderUsageSnap.exists) {
+        transaction.set(fromSenderUsageRef, {
+          attemptedAmountUsd: Math.max(
+            0,
+            roundMoney(Number(fromSenderUsageSnap.get("attemptedAmountUsd") || 0) - amountUsd)
+          ),
+          updatedAt: now,
+        }, {merge: true});
+      }
+      const todayUsedUsd = roundMoney(Number(todayUsageSnap.get("attemptedAmountUsd") || 0) + amountUsd);
+      transaction.set(todayUsageRef, {
+        utcDate: today,
+        attemptedAmountUsd: todayUsedUsd,
+        attemptedTransferCount: Number(todayUsageSnap.get("attemptedTransferCount") || 0) + 1,
+        updatedAt: now,
+      }, {merge: true});
+      transaction.set(todaySenderUsageRef, {
+        utcDate: today,
+        senderId,
+        attemptedAmountUsd: roundMoney(Number(todaySenderUsageSnap.get("attemptedAmountUsd") || 0) + amountUsd),
+        attemptedTransferCount: Number(todaySenderUsageSnap.get("attemptedTransferCount") || 0) + 1,
+        updatedAt: now,
+      }, {merge: true});
+      transaction.set(quoteRef, {
+        afriexCapReservation: {utcDate: today, rolledFromUtcDate: fromDate, rolledAt: now},
+      }, {merge: true});
+      if (todayUsedUsd > AFRIEX_PRODUCTION_PAYOUT_DAILY_LIMIT_USD + 0.0001) {
+        // Funds are already collected, so the payout proceeds; new sends are blocked by the counter.
+        functions.logger.warn("Delayed payout pushed today's Afriex usage over the daily ceiling.", {
+          payoutRequestId: payoutRef.id,
+          utcDate: today,
+          attemptedAmountUsd: todayUsedUsd,
+        });
+      }
+    });
+  } catch (error) {
+    functions.logger.error("Could not move the Afriex cap reservation to the submission day.", {
+      payoutRequestId: payoutRef.id,
+      error: parseProviderErrorMessage(error),
+    });
+  }
+};
+
+/**
+ * A mobile money collection that fails never funded its transfer, so the quote's
+ * shared payout-cap and rolling-limit reservations are returned even though the
+ * quote was consumed when the collection was created.
+ * @param {FirebaseFirestore.DocumentReference} collectionRef Failed collection.
+ * @param {FirebaseFirestore.DocumentData} collectionData Collection data.
+ */
+const releaseTransferLimitsForFailedCollection = async (
+  collectionRef: FirebaseFirestore.DocumentReference,
+  collectionData: FirebaseFirestore.DocumentData
+): Promise<void> => {
+  if (String(collectionData.type || "").trim().toUpperCase() !== "CASH_IN") return;
+  if (String(collectionData.fundingSource || "").trim().toUpperCase() !== "EXTERNAL_MOBILE_MONEY") return;
+  const senderId = asNonEmptyString(collectionData.senderId);
+  if (!senderId) return;
+  try {
+    const quoteRef = await findTransferQuoteRefForPayout(collectionRef, collectionData);
+    if (!quoteRef) return;
+    await db.runTransaction(async (transaction) => {
+      const quoteSnap = await transaction.get(quoteRef);
+      if (!quoteSnap.exists || asNonEmptyString(quoteSnap.get("senderId")) !== senderId) return;
+      if (asNonEmptyString(quoteSnap.get("consumedByPayoutRequestId")) !== collectionRef.id) return;
+      if (quoteSnap.get("collectionFailureLimitsReleasedAt")) return;
+
+      const capReservation = quoteSnap.get("afriexCapReservation") as
+        {utcDate?: unknown; amountUsd?: unknown; released?: unknown} | undefined;
+      const capUtcDate = asNonEmptyString(capReservation?.utcDate);
+      const capAmountUsd = roundMoney(Number(capReservation?.amountUsd || 0));
+      const releaseCap = !!capReservation && capReservation.released !== true && !!capUtcDate && capAmountUsd > 0;
+      const usageRef = releaseCap && capUtcDate ? afriexPayoutLimitUsageRef(capUtcDate) : null;
+      const senderUsageRef = releaseCap && capUtcDate ? afriexPayoutLimitSenderUsageRef(capUtcDate, senderId) : null;
+      const [usageSnap, senderUsageSnap] = await Promise.all([
+        usageRef ? transaction.get(usageRef) : Promise.resolve(null),
+        senderUsageRef ? transaction.get(senderUsageRef) : Promise.resolve(null),
+      ]);
+      const now = admin.firestore.Timestamp.now();
+      if (usageRef && usageSnap?.exists) {
+        transaction.set(usageRef, {
+          attemptedAmountUsd: Math.max(0, roundMoney(Number(usageSnap.get("attemptedAmountUsd") || 0) - capAmountUsd)),
+          releasedAmountUsd: roundMoney(Number(usageSnap.get("releasedAmountUsd") || 0) + capAmountUsd),
+          updatedAt: now,
+        }, {merge: true});
+      }
+      if (senderUsageRef && senderUsageSnap?.exists) {
+        transaction.set(senderUsageRef, {
+          attemptedAmountUsd: Math.max(
+            0,
+            roundMoney(Number(senderUsageSnap.get("attemptedAmountUsd") || 0) - capAmountUsd)
+          ),
+          updatedAt: now,
+        }, {merge: true});
+      }
+      transaction.delete(senderTransferLimitEntriesRef(senderId).doc(quoteRef.id));
+      transaction.set(quoteRef, {
+        ...(releaseCap ? {afriexCapReservation: {released: true, releasedAt: now}} : {}),
+        collectionFailureLimitsReleasedAt: now,
+      }, {merge: true});
+    });
+  } catch (error) {
+    functions.logger.error("Could not release transfer limits for a failed collection.", {
+      collectionRequestId: collectionRef.id,
+      error: parseProviderErrorMessage(error),
+    });
+  }
+};
+
 /**
  * Records an external funding attempt whose Stripe outcome is no longer safe to
  * retry automatically. The payout document is created before the provider call
@@ -16827,6 +17067,10 @@ const markExternalFundingReconciliationRequired = async (params: {
   });
 };
 
+// Transfer callables time out after 60 seconds, so an attempt older than this
+// stopped between charging and recording its outcome.
+const ORPHANED_FUNDING_ATTEMPT_MS = 10 * 60 * 1000;
+
 const assertNoExternalFundingReconciliationLock = async (senderId: string): Promise<void> => {
   const lockSnap = await db.collection("external_funding_reconciliation_locks").doc(senderId).get();
   if (lockSnap.exists && lockSnap.get("active") === true) {
@@ -16835,6 +17079,34 @@ const assertNoExternalFundingReconciliationLock = async (senderId: string): Prom
       "A previous external funding attempt is still being reconciled. Do not retry this transfer; contact support with your payment reference."
     );
   }
+
+  // An attempt still in FUNDING_IN_PROGRESS may already have charged the sender;
+  // a new attempt would use a new payout id and therefore a new Stripe idempotency key.
+  const inFlightSnap = await db.collection("payout_requests")
+    .where("senderId", "==", senderId)
+    .where("status", "==", "FUNDING_IN_PROGRESS")
+    .limit(5)
+    .get();
+  if (inFlightSnap.empty) return;
+
+  const nowMs = Date.now();
+  for (const doc of inFlightSnap.docs) {
+    const startedAtMs = toTimestampMillis(doc.get("fundingAttemptCreatedAt")) ||
+      toTimestampMillis(doc.get("createdAt")) || 0;
+    if (nowMs - startedAtMs < ORPHANED_FUNDING_ATTEMPT_MS) continue;
+    await markExternalFundingReconciliationRequired({
+      payoutRef: doc.ref,
+      senderId,
+      quoteId: asNonEmptyString(doc.get("quoteId")) || null,
+      reason: "A funding attempt stopped before its outcome was recorded. Confirm with Stripe whether the sender was charged.",
+      fundingPaymentIntentId: asNonEmptyString(doc.get("fundingPaymentIntentId")) || null,
+      fundingBankChargeId: asNonEmptyString(doc.get("fundingBankChargeId")) || null,
+    });
+  }
+  throw new functions.https.HttpsError(
+    "failed-precondition",
+    "A previous payment is still being confirmed. Do not retry; check Activity or contact support with your payment reference."
+  );
 };
 
 type AppUserPayoutDestination = {
@@ -18076,6 +18348,40 @@ const initiateAfriexBankSwiftTransfer = async (params: {
     });
   };
 
+  const recordFundingAttempt = async (): Promise<void> => {
+    const now = admin.firestore.Timestamp.now();
+    await payoutRef.set({
+      senderId: params.senderId,
+      beneficiaryId: beneficiary.id || null,
+      recipientName,
+      recipientCountry: corridor.country,
+      amount: params.sourceAmount,
+      sourceAmount: params.sourceAmount,
+      destinationAmount: params.destinationAmount,
+      currency: destinationCurrency,
+      sourceCurrency,
+      destinationCurrency,
+      destinationRoute: params.destinationRoute,
+      status: "FUNDING_IN_PROGRESS",
+      type: "BENEFICIARY_TRANSFER",
+      source: "AFRIEX_BANK_SWIFT_TRANSFER",
+      fundingSource,
+      fundingPaymentMethodId: fundingMethodId,
+      quoteId: params.quoteId,
+      totalDebit: params.totalDeduction,
+      fundingAttemptCreatedAt: now,
+      createdAt: now,
+    });
+  };
+
+  const markFundingAttemptFailed = async (reason: string): Promise<void> => {
+    await payoutRef.set({
+      status: "FUNDING_FAILED",
+      fundingFailureReason: reason,
+      processedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+  };
+
   if (fundingSource === "EXTERNAL_CARD") {
     const fundingMethodType = normalizeMethodType(fundingData.type || fundingData.methodType);
     if (fundingMethodType !== "CARD" || fundingData.requiresRelinkForCharges === true) {
@@ -18103,6 +18409,7 @@ const initiateAfriexBankSwiftTransfer = async (params: {
       senderId: params.senderId,
       payoutRequestId: payoutRef.id,
     });
+    await recordFundingAttempt();
     let fundingIntent: Stripe.PaymentIntent;
     try {
       fundingIntent = await getStripe().paymentIntents.create({
@@ -18122,6 +18429,7 @@ const initiateAfriexBankSwiftTransfer = async (params: {
           String(stripeError?.code || "").toLowerCase()
         );
       if (confirmedFundingFailure) {
+        await markFundingAttemptFailed(stripeError?.message || "Card funding was declined.");
         await releaseWalletTransferQuoteReservation({
           quoteId: params.quoteId,
           senderId: params.senderId,
@@ -18158,6 +18466,7 @@ const initiateAfriexBankSwiftTransfer = async (params: {
       );
     }
     if (fundingIntent.status !== "succeeded") {
+      await markFundingAttemptFailed(`Card funding did not complete (Stripe status: ${fundingIntent.status}).`);
       await releaseWalletTransferQuoteReservation({
         quoteId: params.quoteId,
         senderId: params.senderId,
@@ -18189,6 +18498,7 @@ const initiateAfriexBankSwiftTransfer = async (params: {
       senderId: params.senderId,
       payoutRequestId: payoutRef.id,
     });
+    await recordFundingAttempt();
     let bankCharge: Stripe.Charge;
     try {
       bankCharge = await getStripe().charges.create({
@@ -18206,6 +18516,7 @@ const initiateAfriexBankSwiftTransfer = async (params: {
           String(stripeError?.code || "").toLowerCase()
         );
       if (confirmedFundingFailure) {
+        await markFundingAttemptFailed(stripeError?.message || "Bank funding was declined.");
         await releaseWalletTransferQuoteReservation({
           quoteId: params.quoteId,
           senderId: params.senderId,
@@ -18229,6 +18540,7 @@ const initiateAfriexBankSwiftTransfer = async (params: {
     fundingBankChargeId = bankCharge.id;
     fundingBankChargeStatus = String(bankCharge.status || "pending").toLowerCase();
     if (fundingBankChargeStatus !== "succeeded" && fundingBankChargeStatus !== "pending") {
+      await markFundingAttemptFailed(`Bank funding did not start (Stripe status: ${fundingBankChargeStatus}).`);
       await releaseWalletTransferQuoteReservation({
         quoteId: params.quoteId,
         senderId: params.senderId,
@@ -20546,6 +20858,43 @@ export const sendToAppUser = functions.runWith({enforceAppCheck: true})
         sendLane: "APP_USER",
       }, context)
     );
+  });
+
+// Free-text payout fields the sender can read. Protocol values such as
+// processor, providerName and source are queried by the backend and stay as-is.
+const CUSTOMER_READABLE_PAYOUT_TEXT_FIELDS = [
+  "providerMessage",
+  "errorMessage",
+  "failureReason",
+  "fundingFailureReason",
+  "deliveryProviderMessage",
+  "refundReason",
+  "refundSkipReason",
+  "providerAttentionMessage",
+  "fundingReconciliationReason",
+  "ignoredProviderMessage",
+  "providerReversalMessage",
+  "providerApiEndpoint",
+];
+
+/**
+ * Payout documents are written by many current and legacy paths with provider
+ * text in their messages; remove the payout partner's name after every write.
+ */
+export const scrubPartnerNameFromPayoutRequest = functions.firestore
+  .document("payout_requests/{payoutRequestId}")
+  .onWrite(async (change) => {
+    if (!change.after.exists) return null;
+    const data = change.after.data() || {};
+    const patch: Record<string, string> = {};
+    for (const field of CUSTOMER_READABLE_PAYOUT_TEXT_FIELDS) {
+      const value = data[field];
+      if (typeof value !== "string" || !/afriex/i.test(value)) continue;
+      patch[field] = scrubPartnerNameFromCustomerText(value);
+    }
+    if (Object.keys(patch).length === 0) return null;
+    await change.after.ref.set(patch, {merge: true});
+    return null;
   });
 
 /**
@@ -22974,7 +23323,10 @@ export const mobileMoneyProviderWebhook = functions.https.onRequest(async (req, 
     bodyData["state"],
     bodyData["result"]
   );
-  const normalizedStatus = normalizeMobileMoneyProviderResultStatus(rawStatus);
+  const webhookEventType = asNonEmptyString(body["event"], body["eventType"], body["topic"]);
+  const normalizedStatus = isAfriexTransactionCreatedEvent(webhookEventType) ?
+    normalizeAfriexSubmissionResultStatus(rawStatus) :
+    normalizeMobileMoneyProviderResultStatus(rawStatus);
   const providerMessage = asNonEmptyString(
     body["message"],
     body["detail"],
