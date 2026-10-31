@@ -7203,7 +7203,18 @@ export const onChatMessageCreatedNotifyRecipients = functions.firestore
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, {merge: true});
 
-    const recipients = participants.filter((uid) => uid && uid !== senderId && !exited.has(uid));
+    const candidateRecipients = participants.filter((uid) => uid && uid !== senderId && !exited.has(uid));
+    // Group chats skip the direct-chat block check above, so filter each pair here.
+    const blockChecks = await Promise.all(candidateRecipients.map(async (uid) => {
+      const checks = await Promise.all([
+        userHasBlocked(uid, senderId),
+        userHasBlocked(senderId, uid),
+        userHasPrivacyBlocked(uid, senderId),
+        userHasPrivacyBlocked(senderId, uid),
+      ]);
+      return checks.some(Boolean);
+    }));
+    const recipients = candidateRecipients.filter((_uid, index) => !blockChecks[index]);
     if (recipients.length === 0) {
       return undefined;
     }

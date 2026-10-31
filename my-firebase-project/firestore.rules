@@ -930,6 +930,21 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']);
     }
 
+    // Both apps write chat times with serverTimestamp(); a client-chosen time could pin a
+    // chat to the top of every inbox or backdate a message.
+    function changedChatTimestampsAreServerTime() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return (!changed.hasAny(['lastMessageTimestamp']) || request.resource.data.lastMessageTimestamp == request.time)
+        && (!changed.hasAny(['updatedAt']) || request.resource.data.updatedAt == request.time);
+    }
+
+    function chatCreateTimestampsAreServerTime() {
+      let data = request.resource.data;
+      return (!('lastMessageTimestamp' in data) || data.lastMessageTimestamp == request.time)
+        && (!('createdAt' in data) || data.createdAt == request.time)
+        && (!('updatedAt' in data) || data.updatedAt == request.time);
+    }
+
     function isStandardSelfServiceRole(role) {
       return role in ['user', 'volunteer', 'organizer', 'employer'];
     }
@@ -1279,6 +1294,7 @@ service cloud.firestore {
         && (request.resource.data.messageText.size() > 0 || isCompleteChatMedia(request.resource.data, chatId))
         && (!('text' in request.resource.data) || request.resource.data.text is string)
         && (!('isDeleted' in request.resource.data) || request.resource.data.isDeleted == false)
+        && (!('timestamp' in request.resource.data) || request.resource.data.timestamp == request.time)
         && (isEmptyChatMedia(request.resource.data) || isCompleteChatMedia(request.resource.data, chatId))
         && (!('messageType' in request.resource.data) ||
           request.resource.data.messageType in ['TEXT', 'IMAGE', 'VIDEO', 'AUDIO'])
@@ -1980,6 +1996,7 @@ service cloud.firestore {
         && request.resource.data.participants is list
         && request.resource.data.participants.size() >= 2
         && request.auth.uid in request.resource.data.participants
+        && chatCreateTimestampsAreServerTime()
         && (
           canCreateDirectChatFromInvitation() ||
           canCreateGroupChat()
@@ -1996,6 +2013,7 @@ service cloud.firestore {
         && (inferredDirectChat(resource.data) || !(request.auth.uid in exitedParticipantIdsFrom(resource.data)))
         && !isDirectChatBlocked(resource.data)
         && request.resource.data.participants == resource.data.participants
+        && changedChatTimestampsAreServerTime()
         && (
           isSafeChatPreviewPatch() ||
           isOwnChatExitPatch() ||
