@@ -118,6 +118,9 @@ const USER_PRIVATE_PROFILE_FIELDS = [
   "ownerBootstrappedAt",
   "staffAssignedRole",
   "staffPreviousRole",
+  "isStaff",
+  "supportAccess",
+  "staffAccessScope",
 ] as const;
 type UserPrivateProfileField = typeof USER_PRIVATE_PROFILE_FIELDS[number];
 
@@ -161,6 +164,27 @@ const mirrorPayoutAccountIdsToPrivate = async (
 ): Promise<void> => {
   if (Object.keys(patch).length === 0) return;
   await userPrivateProfileRef(uid).set({...patch, updatedAt: admin.firestore.Timestamp.now()}, {merge: true});
+};
+
+/**
+ * Keeps the private staffOnboardingStatus in step with the root copy, which
+ * stays member-readable because clients gate staff login on it; legacy staff
+ * management reads the private copy first.
+ * @param {string} uid User id.
+ * @param {string} status Onboarding status.
+ * @return {Promise<void>}
+ */
+const mirrorStaffOnboardingStatusToPrivate = async (uid: string, status: string): Promise<void> => {
+  await userPrivateProfileRef(uid).set({
+    staffOnboardingStatus: status,
+    updatedAt: admin.firestore.Timestamp.now(),
+  }, {merge: true});
+};
+
+const previousNonStaffRole = (role: unknown): string | null => {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (!normalized || normalized === "owner" || normalized === "admin" || normalized === "associate") return null;
+  return normalized;
 };
 
 /**
@@ -26336,14 +26360,17 @@ export const bootstrapOwnerSelf = functions.runWith({enforceAppCheck: true})
       email: callerEmail,
       role: "owner",
       userType: "owner",
-      isStaff: true,
-      supportAccess: true,
-      staffAccessScope: "SUPPORT_CONSOLE",
       staffOnboardingStatus: "ACTIVE",
       profileStatus: "active",
       updatedAt: now,
     }, {merge: true});
-    await setUserPrivateProfileFields(uid, {ownerBootstrappedAt: now});
+    await setUserPrivateProfileFields(uid, {
+      ownerBootstrappedAt: now,
+      isStaff: true,
+      supportAccess: true,
+      staffAccessScope: "SUPPORT_CONSOLE",
+    });
+    await mirrorStaffOnboardingStatusToPrivate(uid, "ACTIVE");
 
     try {
       const authUser = await admin.auth().getUser(uid);
@@ -26451,7 +26478,17 @@ export const ownerGrantAdminByEmail = functions.runWith({enforceAppCheck: true})
       staffOnboardingStatus: "ACTIVE",
       updatedAt: now,
     }, {merge: true});
-    await setUserPrivateProfileFields(targetUid, {grantedByOwnerId: callerUid, grantedAdminAt: now});
+    const adminPreviousRole = previousNonStaffRole(targetData.role);
+    await setUserPrivateProfileFields(targetUid, {
+      grantedByOwnerId: callerUid,
+      grantedAdminAt: now,
+      isStaff: true,
+      supportAccess: true,
+      staffAccessScope: "ADMIN_CONSOLE",
+      staffAssignedRole: "admin",
+      ...(adminPreviousRole ? {staffPreviousRole: adminPreviousRole} : {}),
+    });
+    await mirrorStaffOnboardingStatusToPrivate(targetUid, "ACTIVE");
 
     try {
       const authUser = await admin.auth().getUser(targetUid);
@@ -26531,14 +26568,21 @@ export const adminAddSupportAssociate = functions.runWith({enforceAppCheck: true
     await targetRef.set({
       email: associateEmail || targetData.email || null,
       role: "associate",
-      supportAccess: true,
+      staffOnboardingStatus: "ACTIVE",
       updatedAt: now,
     }, {merge: true});
+    const associatePreviousRole = previousNonStaffRole(existingRole);
     await setUserPrivateProfileFields(targetUid, {
       supportNote: asNonEmptyString(payload.note) || null,
       supportGrantedAt: now,
       supportGrantedBy: adminUid,
+      isStaff: true,
+      supportAccess: true,
+      staffAccessScope: "SUPPORT_CONSOLE",
+      staffAssignedRole: "associate",
+      ...(associatePreviousRole ? {staffPreviousRole: associatePreviousRole} : {}),
     });
+    await mirrorStaffOnboardingStatusToPrivate(targetUid, "ACTIVE");
 
     try {
       const authUser = await admin.auth().getUser(targetUid);
@@ -26573,7 +26617,9 @@ export const adminAddSupportAssociate = functions.runWith({enforceAppCheck: true
 /**
  * Copies server-only profile fields from one page of root users docs into
  * user_private and removes them from the member-readable root. A root value
- * that is still present is newer than the private copy, so it replaces it. Afriex wallet customer ids leave the root
+ * that is still present is newer than the private copy, so it replaces it.
+ * staffOnboardingStatus stays on both copies: clients gate staff login on the
+ * root value and legacy staff management reads the private one. Afriex wallet customer ids leave the root
  * only when the owner-only wallets doc already holds the same id.
  * @param {object} params Page cursor and size.
  * @return {Promise<object>} Page counts and the next cursor.
@@ -26600,21 +26646,26 @@ const migrateUserPrivateProfilePage = async (params: {
     const walletProvider = String(rootWallet.provider || root.walletProvider || "").trim().toUpperCase();
     const hasRootAfriexIds = walletProvider === "AFRIEX" &&
       (root.providerCustomerId !== undefined || rootWallet.providerCustomerId !== undefined);
-    if (presentFields.length === 0 && !hasRootAfriexIds) continue;
-
     const [privateSnap, walletSnap] = await Promise.all([
       userPrivateProfileRef(userDoc.id).get(),
       hasRootAfriexIds ? db.collection("wallets").doc(userDoc.id).get() : Promise.resolve(null),
     ]);
     const privateData = privateSnap.data() || {};
     const privatePatch: Record<string, unknown> = {};
-    const rootCleanup: Record<string, admin.firestore.FieldValue> = {};
+    const rootCleanup: Record<string, admin.firestore.FieldValue | string> = {};
     presentFields.forEach((field) => {
       if (!isEmptyProfileValue(root[field])) {
         privatePatch[field] = root[field];
       }
       rootCleanup[field] = admin.firestore.FieldValue.delete();
     });
+    const rootStaffStatus = asNonEmptyString(root.staffOnboardingStatus);
+    const privateStaffStatus = asNonEmptyString(privateData.staffOnboardingStatus);
+    if (rootStaffStatus && rootStaffStatus !== privateStaffStatus) {
+      privatePatch.staffOnboardingStatus = rootStaffStatus;
+    } else if (!rootStaffStatus && privateStaffStatus) {
+      rootCleanup.staffOnboardingStatus = privateStaffStatus;
+    }
     if (hasRootAfriexIds) {
       const rootAfriexId = asNonEmptyString(root.providerCustomerId, rootWallet.providerCustomerId);
       const walletAfriexId = asNonEmptyString(walletSnap?.get("providerCustomerId"));
@@ -26627,7 +26678,7 @@ const migrateUserPrivateProfilePage = async (params: {
         afriexRootIdsRemoved += 1;
       }
     }
-    if (Object.keys(rootCleanup).length === 0) continue;
+    if (Object.keys(rootCleanup).length === 0 && Object.keys(privatePatch).length === 0) continue;
 
     usersChanged += 1;
     fieldsMoved += Object.keys(privatePatch).length;
@@ -26639,7 +26690,7 @@ const migrateUserPrivateProfilePage = async (params: {
         updatedAt: admin.firestore.Timestamp.now(),
       }, {merge: true});
     }
-    batch.update(userDoc.ref, rootCleanup);
+    if (Object.keys(rootCleanup).length > 0) batch.update(userDoc.ref, rootCleanup);
     await batch.commit();
   }
 
@@ -26660,7 +26711,7 @@ export const migrateUserPrivateProfileFieldsJob = functions.runWith({
 }).pubsub
   .schedule("every 10 minutes")
   .onRun(async () => {
-    const stateRef = db.collection("system").doc("user_private_profile_migration");
+    const stateRef = db.collection("system").doc("user_private_profile_migration_v2");
     const state = (await stateRef.get()).data() || {};
     if (state.completedAt) return null;
     const result = await migrateUserPrivateProfilePage({

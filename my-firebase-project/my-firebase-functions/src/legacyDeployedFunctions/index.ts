@@ -43074,6 +43074,8 @@ export const adminUpdateStaffAccountStatus = functions.runWith({enforceAppCheck:
       userRole: nextRole,
       userType: nextRole,
       profileStatus: nextProfileStatus,
+      // Clients gate staff login on the root status; the private copy serves legacy reads.
+      staffOnboardingStatus: nextStaffStatus,
       updatedAt: now,
     }, {merge: true});
 
