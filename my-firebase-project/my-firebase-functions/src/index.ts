@@ -17067,6 +17067,24 @@ const markExternalFundingReconciliationRequired = async (params: {
   });
 };
 
+/**
+ * Error for a send locked for funding reconciliation. The details carry the
+ * payout id so clients can show the payment reference the message asks for.
+ * @param {functions.https.FunctionsErrorCode} code Callable error code.
+ * @param {string} message Customer-facing message.
+ * @param {unknown} payoutRequestId Payout request the sender should quote.
+ * @return {functions.https.HttpsError} The error to throw.
+ */
+const fundingReconciliationError = (
+  code: functions.https.FunctionsErrorCode,
+  message: string,
+  payoutRequestId: unknown
+): functions.https.HttpsError => new functions.https.HttpsError(code, message, {
+  message,
+  reasonCode: "FUNDING_RECONCILIATION_REQUIRED",
+  payoutRequestId: asNonEmptyString(payoutRequestId) || null,
+});
+
 // Transfer callables time out after 60 seconds, so an attempt older than this
 // stopped between charging and recording its outcome.
 const ORPHANED_FUNDING_ATTEMPT_MS = 10 * 60 * 1000;
@@ -17074,9 +17092,10 @@ const ORPHANED_FUNDING_ATTEMPT_MS = 10 * 60 * 1000;
 const assertNoExternalFundingReconciliationLock = async (senderId: string): Promise<void> => {
   const lockSnap = await db.collection("external_funding_reconciliation_locks").doc(senderId).get();
   if (lockSnap.exists && lockSnap.get("active") === true) {
-    throw new functions.https.HttpsError(
+    throw fundingReconciliationError(
       "failed-precondition",
-      "A previous external funding attempt is still being reconciled. Do not retry this transfer; contact support with your payment reference."
+      "A previous external funding attempt is still being reconciled. Do not retry this transfer; contact support with your payment reference.",
+      lockSnap.get("payoutRequestId")
     );
   }
 
@@ -17103,9 +17122,10 @@ const assertNoExternalFundingReconciliationLock = async (senderId: string): Prom
       fundingBankChargeId: asNonEmptyString(doc.get("fundingBankChargeId")) || null,
     });
   }
-  throw new functions.https.HttpsError(
+  throw fundingReconciliationError(
     "failed-precondition",
-    "A previous payment is still being confirmed. Do not retry; check Activity or contact support with your payment reference."
+    "A previous payment is still being confirmed. Do not retry; check Activity or contact support with your payment reference.",
+    inFlightSnap.docs[0]?.id
   );
 };
 
@@ -17882,9 +17902,10 @@ const initiateExternallyFundedAppUserTransfer = async (params: {
           quoteId: params.quoteId,
           reason: stripeError?.message || parseProviderErrorMessage(error),
         });
-        throw new functions.https.HttpsError(
+        throw fundingReconciliationError(
           "unavailable",
-          "Card funding is being reconciled. Do not retry; contact support with your payment reference."
+          "Card funding is being reconciled. Do not retry; contact support with your payment reference.",
+          payoutRef.id
         );
       }
       await payoutRef.set({
@@ -17914,9 +17935,10 @@ const initiateExternallyFundedAppUserTransfer = async (params: {
           reason: "Card funding is still processing. Do not retry this transfer.",
           fundingPaymentIntentId: fundingIntent.id,
         });
-        throw new functions.https.HttpsError(
+        throw fundingReconciliationError(
           "unavailable",
-          "Card funding is still processing. Do not retry; contact support with your payment reference."
+          "Card funding is still processing. Do not retry; contact support with your payment reference.",
+          payoutRef.id
         );
       }
       await payoutRef.set({
@@ -18038,9 +18060,10 @@ const initiateExternallyFundedAppUserTransfer = async (params: {
         quoteId: params.quoteId,
         reason: stripeError?.message || parseProviderErrorMessage(error),
       });
-      throw new functions.https.HttpsError(
+      throw fundingReconciliationError(
         "unavailable",
-        "Bank funding is being reconciled. Do not retry; contact support with your payment reference."
+        "Bank funding is being reconciled. Do not retry; contact support with your payment reference.",
+        payoutRef.id
       );
     }
     await payoutRef.set({
@@ -18281,9 +18304,10 @@ const initiateAfriexBankSwiftTransfer = async (params: {
   const fundingLockRef = db.collection("external_funding_reconciliation_locks").doc(params.senderId);
   const fundingLockSnap = await fundingLockRef.get();
   if (fundingLockSnap.exists && fundingLockSnap.get("active") === true) {
-    throw new functions.https.HttpsError(
+    throw fundingReconciliationError(
       "failed-precondition",
-      "A previous external funding attempt is still being reconciled. Do not retry this transfer; contact support with your payment reference."
+      "A previous external funding attempt is still being reconciled. Do not retry this transfer; contact support with your payment reference.",
+      fundingLockSnap.get("payoutRequestId")
     );
   }
 
@@ -18440,9 +18464,10 @@ const initiateAfriexBankSwiftTransfer = async (params: {
         await markFundingReconciliationRequired(
           stripeError?.message || parseProviderErrorMessage(error)
         );
-        throw new functions.https.HttpsError(
+        throw fundingReconciliationError(
           "unavailable",
-          "Funding confirmation is still in progress. Do not retry; contact support with your payment reference."
+          "Funding confirmation is still in progress. Do not retry; contact support with your payment reference.",
+          payoutRef.id
         );
       }
       if (stripeError?.code === "authentication_required") {
@@ -18451,7 +18476,10 @@ const initiateAfriexBankSwiftTransfer = async (params: {
       if (stripeError?.code === "insufficient_funds") {
         throw new functions.https.HttpsError("failed-precondition", "Insufficient funds on the selected card.");
       }
-      throw new functions.https.HttpsError("unavailable", stripeError?.message || "Card funding could not be completed.");
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        stripeError?.message || "Card funding was declined. Use another card."
+      );
     }
     if (fundingIntent.status === "processing") {
       // The charge may still succeed; keep the quote and sender locked until
@@ -18460,9 +18488,10 @@ const initiateAfriexBankSwiftTransfer = async (params: {
       await markFundingReconciliationRequired(
         "Card funding is still processing. Do not retry this transfer until Stripe reconciliation completes."
       );
-      throw new functions.https.HttpsError(
+      throw fundingReconciliationError(
         "unavailable",
-        "Card funding is still processing. Do not retry; contact support with your payment reference."
+        "Card funding is still processing. Do not retry; contact support with your payment reference.",
+        payoutRef.id
       );
     }
     if (fundingIntent.status !== "succeeded") {
@@ -18527,9 +18556,10 @@ const initiateAfriexBankSwiftTransfer = async (params: {
         await markFundingReconciliationRequired(
           stripeError?.message || parseProviderErrorMessage(error)
         );
-        throw new functions.https.HttpsError(
+        throw fundingReconciliationError(
           "unavailable",
-          "Funding confirmation is still in progress. Do not retry; contact support with your payment reference."
+          "Funding confirmation is still in progress. Do not retry; contact support with your payment reference.",
+          payoutRef.id
         );
       }
       throw new functions.https.HttpsError(
@@ -18605,9 +18635,10 @@ const initiateAfriexBankSwiftTransfer = async (params: {
     });
   } catch (error) {
     await markFundingReconciliationRequired(parseProviderErrorMessage(error));
-    throw new functions.https.HttpsError(
+    throw fundingReconciliationError(
       "unavailable",
-      "Funding was started, but the transfer could not be recorded safely. Do not retry; contact support with your payment reference."
+      "Funding was started, but the transfer could not be recorded safely. Do not retry; contact support with your payment reference.",
+      payoutRef.id
     );
   }
   if (params.quoteId) {
@@ -20027,9 +20058,10 @@ const initiateTransferHandlerWithQuoteHold = async (
             reason: "Card funding is still processing. Do not retry this transfer until Stripe reconciliation completes.",
             fundingPaymentIntentId,
           });
-          throw new functions.https.HttpsError(
+          throw fundingReconciliationError(
             "unavailable",
-            "Card funding is still processing. Do not retry; contact support with your payment reference."
+            "Card funding is still processing. Do not retry; contact support with your payment reference.",
+            payoutRequestRef.id
           );
         }
         if (fundingIntent.status !== "succeeded") {
@@ -20075,9 +20107,10 @@ const initiateTransferHandlerWithQuoteHold = async (
             reason: stripeError?.message || parseProviderErrorMessage(error),
             fundingPaymentIntentId,
           });
-          throw new functions.https.HttpsError(
+          throw fundingReconciliationError(
             "unavailable",
-            "Funding confirmation is still in progress. Do not retry; contact support with your payment reference."
+            "Funding confirmation is still in progress. Do not retry; contact support with your payment reference.",
+            payoutRequestRef.id
           );
         }
         await payoutRequestRef.set({
@@ -20204,9 +20237,10 @@ const initiateTransferHandlerWithQuoteHold = async (
             reason: `Card funding succeeded but the payout could not be recorded safely: ${parseProviderErrorMessage(error)}`,
             fundingPaymentIntentId,
           });
-          throw new functions.https.HttpsError(
+          throw fundingReconciliationError(
             "unavailable",
-            "Funding was confirmed, but the transfer could not be recorded safely. Do not retry; contact support with your payment reference."
+            "Funding was confirmed, but the transfer could not be recorded safely. Do not retry; contact support with your payment reference.",
+            payoutRequestRef.id
           );
         }
         throw error;
@@ -20244,9 +20278,10 @@ const initiateTransferHandlerWithQuoteHold = async (
           reason: `Card funding succeeded but provider dispatch could not start: ${parseProviderErrorMessage(error)}`,
           fundingPaymentIntentId,
         });
-        throw new functions.https.HttpsError(
+        throw fundingReconciliationError(
           "unavailable",
-          "Funding was confirmed, but payout dispatch requires reconciliation. Do not retry; contact support with your payment reference."
+          "Funding was confirmed, but payout dispatch requires reconciliation. Do not retry; contact support with your payment reference.",
+          payoutRequestRef.id
         );
       }
       if (ownerFeeUsd > 0) {
@@ -20485,9 +20520,10 @@ const initiateTransferHandlerWithQuoteHold = async (
           quoteId: consumedQuoteId,
           reason: stripeError?.message || parseProviderErrorMessage(error),
         });
-        throw new functions.https.HttpsError(
+        throw fundingReconciliationError(
           "unavailable",
-          "Bank funding confirmation is still in progress. Do not retry; contact support with your payment reference."
+          "Bank funding confirmation is still in progress. Do not retry; contact support with your payment reference.",
+          payoutRequestRef.id
         );
       }
       await payoutRequestRef.set({
@@ -20613,9 +20649,10 @@ const initiateTransferHandlerWithQuoteHold = async (
         reason: `Bank funding was created but the payout could not be recorded safely: ${parseProviderErrorMessage(error)}`,
         fundingBankChargeId: bankCharge.id,
       });
-      throw new functions.https.HttpsError(
+      throw fundingReconciliationError(
         "unavailable",
-        "Bank funding was confirmed, but the transfer could not be recorded safely. Do not retry; contact support with your payment reference."
+        "Bank funding was confirmed, but the transfer could not be recorded safely. Do not retry; contact support with your payment reference.",
+        payoutRequestRef.id
       );
     }
 
@@ -20651,9 +20688,10 @@ const initiateTransferHandlerWithQuoteHold = async (
           reason: `Bank funding succeeded but provider dispatch could not start: ${parseProviderErrorMessage(error)}`,
           fundingBankChargeId: bankCharge.id,
         });
-        throw new functions.https.HttpsError(
+        throw fundingReconciliationError(
           "unavailable",
-          "Bank funding was confirmed, but payout dispatch requires reconciliation. Do not retry; contact support with your payment reference."
+          "Bank funding was confirmed, but payout dispatch requires reconciliation. Do not retry; contact support with your payment reference.",
+          payoutRequestRef.id
         );
       }
     }
