@@ -4175,6 +4175,58 @@ export const onDatingProfileWriteSyncAge = functions.firestore
     return undefined;
   });
 
+const DATING_MEDIA_LIST_FIELDS = ["imageUrls", "images", "photos", "mediaUrls", "media"];
+const DATING_MEDIA_COVER_FIELDS = ["imageUrl", "profilePictureUrl", "profileImageUrl"];
+
+// Profile photo links are client-written and every profile is readable, so without this a member could
+// show another member's photos as their own (and pass the invite/comment photo-match rules with them).
+const foreignDatingMediaPatch = (userId: string, data: Record<string, unknown>): Record<string, unknown> => {
+  const patch: Record<string, unknown> = {};
+  let firstOwned = "";
+  for (const field of DATING_MEDIA_LIST_FIELDS) {
+    const value = data[field];
+    if (!Array.isArray(value)) continue;
+    const kept = value.filter((entry) => isUserOwnedDatingMediaUrl(userId, entry));
+    if (!firstOwned && kept.length > 0) firstOwned = String(kept[0]).trim();
+    if (kept.length !== value.length) patch[field] = kept;
+  }
+  for (const field of DATING_MEDIA_COVER_FIELDS) {
+    const value = data[field];
+    if (typeof value !== "string" || value.trim() === "" || isUserOwnedDatingMediaUrl(userId, value)) continue;
+    patch[field] = firstOwned;
+  }
+  return patch;
+};
+
+export const onDatingProfileWriteDropForeignMedia = functions.firestore
+  .document("dating_profiles/{userId}")
+  .onWrite(async (change, context) => {
+    if (!change.after.exists) return undefined;
+    const {userId} = context.params as {userId: string};
+    const patch = foreignDatingMediaPatch(userId, (change.after.data() || {}) as Record<string, unknown>);
+    if (Object.keys(patch).length === 0) return undefined;
+    functions.logger.warn("Removed photo links the member does not own from a Dating Loop profile.", {
+      userId, fields: Object.keys(patch),
+    });
+    await change.after.ref.set(patch, {merge: true});
+    return undefined;
+  });
+
+export const onBlindDateProfileWriteDropForeignMedia = functions.firestore
+  .document("blindDateProfiles/{userId}")
+  .onWrite(async (change, context) => {
+    if (!change.after.exists) return undefined;
+    const {userId} = context.params as {userId: string};
+    const data = (change.after.data() || {}) as Record<string, unknown>;
+    const patch = foreignDatingMediaPatch(userId, data);
+    for (const key of BLIND_DATE_PRIVATE_RECEIPT_FIELDS) {
+      if (key in data) patch[key] = admin.firestore.FieldValue.delete();
+    }
+    if (Object.keys(patch).length === 0) return undefined;
+    await change.after.ref.set(patch, {merge: true});
+    return undefined;
+  });
+
 // =============================================================================
 //  2A. GARAGE SALE PAYMENTS (NEW)
 // =============================================================================
@@ -7108,6 +7160,49 @@ const assertBlindDateEnabled = async (): Promise<void> => {
   }
 };
 
+const DATING_MEDIA_OWNER_FOLDERS = new Set(["blind_date_media", "dating_images", "profile_images"]);
+
+const projectStorageBucketNames = (): Set<string> => {
+  const names = new Set<string>();
+  try {
+    names.add(admin.storage().bucket().name);
+  } catch {
+    // No default bucket configured; fall back to the project's standard bucket names.
+  }
+  const projectId = process.env.GCLOUD_PROJECT || "";
+  if (projectId) {
+    names.add(`${projectId}.appspot.com`);
+    names.add(`${projectId}.firebasestorage.app`);
+  }
+  return names;
+};
+
+// Storage rules only let a user write under {folder}/{their uid}/, so a download link is theirs only when
+// the object path itself (not the query string) sits there. Anything else may be another member's photo.
+const isUserOwnedDatingMediaUrl = (userId: string, value: unknown): value is string => {
+  if (!userId || typeof value !== "string") return false;
+  const raw = value.trim();
+  if (raw.length === 0 || raw.length > 2048) return false;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.hostname !== "firebasestorage.googleapis.com") return false;
+  const match = url.pathname.match(/^\/v0\/b\/([^/]+)\/o\/([^/]+)$/);
+  if (!match || !projectStorageBucketNames().has(match[1])) return false;
+  let objectPath: string;
+  try {
+    objectPath = decodeURIComponent(match[2]);
+  } catch {
+    return false;
+  }
+  const segments = objectPath.split("/");
+  return segments.length >= 3 && DATING_MEDIA_OWNER_FOLDERS.has(segments[0]) && segments[1] === userId &&
+    !segments.includes("..");
+};
+
 // Media must come from the caller's own Blind Date or Dating Loop storage folders.
 const normalizeOwnedBlindDateMediaUrls = (userId: string, value: unknown): string[] => {
   if (!Array.isArray(value) || value.length === 0) {
@@ -7116,18 +7211,10 @@ const normalizeOwnedBlindDateMediaUrls = (userId: string, value: unknown): strin
   if (value.length > BLIND_DATE_MAX_MEDIA) {
     throw new functions.https.HttpsError("invalid-argument", `You can add up to ${BLIND_DATE_MAX_MEDIA} photos or videos.`);
   }
-  const ownedPrefixes = [`blind_date_media/${userId}/`, `dating_images/${userId}/`];
   // Drop stale or foreign links instead of failing the whole join over one photo.
-  const owned = value.filter((raw): raw is string => {
-    const url = typeof raw === "string" ? raw.trim() : "";
-    let decoded = url;
-    try {
-      decoded = decodeURIComponent(url);
-    } catch {
-      decoded = url;
-    }
-    return url.startsWith("https://") && url.length <= 2048 && ownedPrefixes.some((prefix) => decoded.includes(prefix));
-  }).map((url) => url.trim());
+  const owned = value
+    .filter((raw): raw is string => isUserOwnedDatingMediaUrl(userId, raw))
+    .map((url) => url.trim());
   if (owned.length === 0) {
     throw new functions.https.HttpsError("invalid-argument", "Add a photo to your dating profile from the app, then join again.");
   }
@@ -7171,6 +7258,23 @@ const blindDateUsersBlockedInTransaction = async (
     transaction.get(db.collection("users").doc(secondUid).collection("blockedUsers").doc(firstUid)),
   ]);
   return blockDocs.some((doc) => doc.exists);
+};
+
+// blindDateProfiles is readable by every dating member, so provider transaction references stay on the
+// order and receipt docs only; deleting them here also clears copies left by older fulfillments.
+const BLIND_DATE_PRIVATE_RECEIPT_FIELDS = [
+  "stripeCheckoutSessionId",
+  "stripePaymentIntentId",
+  "providerTransferId",
+  "mobileMoneyFeePayoutRequestId",
+];
+
+const publicBlindDateReceipt = (receipt: Record<string, unknown>): Record<string, unknown> => {
+  const fields: Record<string, unknown> = {...receipt};
+  for (const key of BLIND_DATE_PRIVATE_RECEIPT_FIELDS) {
+    fields[key] = admin.firestore.FieldValue.delete();
+  }
+  return fields;
 };
 
 // After a paid rejoin the user goes back to the pool with a 3-day invite hold on the old pair
@@ -23383,7 +23487,7 @@ const settleFirstPartyMobileMoneyFeeCollection = async (
       }
       transaction.set(profileRef, {
         ...profile,
-        ...receipt,
+        ...publicBlindDateReceipt(receipt),
         status: "active",
         paymentCollectionStatus: "PAID",
         paymentDetail: null,
@@ -23402,7 +23506,9 @@ const settleFirstPartyMobileMoneyFeeCollection = async (
       if (!profileRef || !profileDoc?.exists || !isBlindDateRejoinableStatus(profileDoc.data()?.status)) {
         return reconcile("Blind Date profile was not eligible to rejoin at payment completion.");
       }
-      finalizeBlindDateRejoin(transaction, buyerId, (profileDoc?.data() || {}) as Record<string, unknown>, now, receipt);
+      finalizeBlindDateRejoin(
+        transaction, buyerId, (profileDoc?.data() || {}) as Record<string, unknown>, now, publicBlindDateReceipt(receipt)
+      );
       recordBuyerReceipt("Blind Date re-join");
       if (platformFeeUsd > 0) {
         recordPlatformRevenue(transaction, {
@@ -25008,7 +25114,7 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
       }
       transaction.set(profileRef, {
         ...profile,
-        ...receipt,
+        ...publicBlindDateReceipt(receipt),
         status: "active",
         paymentCollectionStatus: "PAID",
         paymentDetail: null,
@@ -25032,7 +25138,9 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
       if (!profile.exists || !isBlindDateRejoinableStatus(profile.data()?.status)) {
         return reconcile("Blind Date profile was not eligible to rejoin at payment completion.");
       }
-      finalizeBlindDateRejoin(transaction, buyerId, (profile.data() || {}) as Record<string, unknown>, now, receipt);
+      finalizeBlindDateRejoin(
+        transaction, buyerId, (profile.data() || {}) as Record<string, unknown>, now, publicBlindDateReceipt(receipt)
+      );
       recordBuyerReceipt("Blind Date re-join");
       if (platformFeeUsd > 0) {
         recordPlatformRevenue(transaction, {

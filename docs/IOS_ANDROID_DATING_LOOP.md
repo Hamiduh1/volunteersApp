@@ -303,5 +303,25 @@ matches pane.
   - Before this change, all of these failed with "You already have an active Blind Date profile."
   - An open payment now says "Your earlier Blind Date payment is still processing...".
   - An active pass says "Your Blind Date pass is already active."
-- Photo links that aren't under the user's own `blind_date_media/` or `dating_images/` folder are dropped instead of
-  failing the whole join. The join fails only when no valid photo remains.
+- Photo links the user doesn't own (see item 7) are dropped instead of failing the whole join. The join fails only when no valid photo remains.
+
+### 7. Members can't show someone else's photos, and payment IDs stay private
+
+- **Photo ownership.** A photo link counts as the user's own only when its storage object path is
+  `blind_date_media/{uid}/…`, `dating_images/{uid}/…` or `profile_images/{uid}/…` in this project's bucket. The
+  check parses the object path, so text in the query string can't fake it.
+  - `onDatingProfileWriteDropForeignMedia` (`dating_profiles/{uid}` writes) removes any other link from `imageUrls`,
+    `images`, `photos`, `mediaUrls` and `media`. It replaces a foreign `imageUrl`, `profilePictureUrl` or
+    `profileImageUrl` with the first photo the user owns, or `""`.
+  - `onBlindDateProfileWriteDropForeignMedia` does the same for `blindDateProfiles/{uid}`. Without these triggers, a
+    member could paste another member's photo links into their profile and pass the invite and comment photo rules
+    in item 3.
+  - Android already uploads to these folders, so it needs no change. A link from any other folder or site (an old
+    upload path, a Google profile photo) disappears from the profile on its next write.
+- **Payment IDs.** `blindDateProfiles` is readable by every dating member. Stripe and mobile money fulfillment no
+  longer copy `stripeCheckoutSessionId`, `stripePaymentIntentId`, `providerTransferId` or
+  `mobileMoneyFeePayoutRequestId` onto it. Those IDs stay on the order and on `users/{uid}/transactions`. The trigger
+  above deletes old copies the next time a profile is written. No client reads them from the profile.
+- **Suggested for Android (not enforced):** `chat/InvitationsViewModel.kt` shows the invitation's own
+  `senderProfilePicUrl`, which the sender writes. Prefer the sender's live `users/{uid}` photo, as iOS does, so a
+  forged invite photo isn't displayed.
