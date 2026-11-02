@@ -2077,7 +2077,10 @@ export const getCurrentUserPrivateFlags = functions.runWith({enforceAppCheck: tr
     const rootData = (rootSnap.data() || {}) as Record<string, unknown>;
     const mergedUserData = await withPrivateUserFields(uid, rootData);
     const privateFlags = await getUserPrivateFlags(uid, rootData);
+    const privateData = await loadPrivateUserData(uid);
+    const birthDate = rootData.birthDate ?? privateData.birthDate ?? rootData.dateOfBirth ?? privateData.dateOfBirth;
     return {
+      birthDateMs: birthDate instanceof admin.firestore.Timestamp ? birthDate.toMillis() : null,
       success: true,
       role: trimStringValue(mergedUserData.role) || trimStringValue(mergedUserData.userRole) || null,
       supportAccess: privateFlags.supportAccess,

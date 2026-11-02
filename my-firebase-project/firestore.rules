@@ -514,12 +514,14 @@ service cloud.firestore {
         && data.birthDate <= request.time - duration.value(6570, 'd');
     }
 
+    // The server moves the birth date to user_private and leaves birthDateOnFile plus
+    // flags derived from it; a root birthDate only remains until that move runs.
     function userCanAccessDating(uid) {
       let userPath = /databases/$(database)/documents/users/$(uid);
       let userData = exists(userPath) ? get(userPath).data : {};
       return exists(userPath)
-        && ('birthDate' in userData)
-        && (!(userData.birthDate is timestamp) || birthDateIsAdult(userData))
+        && (('birthDate' in userData) || userData.get('birthDateOnFile', false) == true)
+        && (!('birthDate' in userData) || !(userData.birthDate is timestamp) || birthDateIsAdult(userData))
         && userData.get('canAccessDating', true) != false
         && userData.get('isMinor', false) != true
         && userData.get('requiresParentalConsent', false) != true;
@@ -580,6 +582,48 @@ service cloud.firestore {
         && (!('relationshipGoal' in data) || (data.relationshipGoal is string && data.relationshipGoal.size() <= 40))
         && (!('jobTitle' in data) || (data.jobTitle is string && data.jobTitle.size() <= 80))
         && (!('school' in data) || (data.school is string && data.school.size() <= 80));
+    }
+
+    // Invite names and photos are shown to the other person, so they must be the profiles' own
+    // values. iOS writes "Anonymous User"/"Unknown User" for a blank name; Android writes it blank.
+    function blindDateInvitePeopleMatchProfiles(senderUid, recipientUid) {
+      let data = request.resource.data;
+      let sender = get(/databases/$(database)/documents/blindDateProfiles/$(senderUid)).data;
+      let recipient = get(/databases/$(database)/documents/blindDateProfiles/$(recipientUid)).data;
+      let senderName = sender.get('name', '');
+      let recipientName = recipient.get('name', '');
+      return data.diff(resource == null ? {} : resource.data).affectedKeys().hasOnly([
+          'senderId', 'senderName', 'senderProfilePictureUrl', 'recipientId', 'recipientName',
+          'recipientProfilePictureUrl', 'status', 'matchedChatId', 'sentAt', 'updatedAt', 'respondedAt'
+        ])
+        && data.get('matchedChatId', '') == ''
+        && (data.get('senderName', '') == senderName
+          || (senderName == '' && data.get('senderName', '') in ['', 'Anonymous User']))
+        && data.get('senderProfilePictureUrl', '') in ['', sender.get('profilePictureUrl', '')]
+        && (data.get('recipientName', '') == recipientName
+          || (recipientName == '' && data.get('recipientName', '') in ['', 'Unknown User']))
+        && data.get('recipientProfilePictureUrl', '') in ['', recipient.get('profilePictureUrl', '')];
+    }
+
+    // Comment cards show the sender's name and photo: they must come from the sender's dating profile.
+    // iOS shows a blank name as "Member"; Android may take the photo from legacy image fields.
+    function datingCommentSenderMatchesProfile(senderUid) {
+      let data = request.resource.data;
+      let profile = get(/databases/$(database)/documents/dating_profiles/$(senderUid)).data;
+      let profileName = profile.get('name', '');
+      let photo = data.senderPhotoUrl;
+      return profileName is string
+        && (data.senderName == profileName
+          || data.senderName == profileName.trim()
+          || (profileName.trim() == '' && data.senderName in ['', 'Member']))
+        && (
+          photo == ''
+          || profile.get('imageUrl', '') == photo
+          || (profile.get('imageUrls', []) is list && photo in profile.get('imageUrls', []))
+          || (profile.get('images', []) is list && photo in profile.get('images', []))
+          || (profile.get('photos', []) is list && photo in profile.get('photos', []))
+          || (profile.get('mediaUrls', []) is list && photo in profile.get('mediaUrls', []))
+        );
     }
 
     function isSafeBlindDateInvitationResend(senderUid, recipientUid) {
@@ -1178,6 +1222,8 @@ service cloud.firestore {
         'supportNote',
         'birthDate',
         'dateOfBirth',
+        'birthDateOnFile',
+        'datingEligibilityVerifiedAt',
         'isMinor',
         'requiresParentalConsent',
         'canAccessDating',
@@ -1646,12 +1692,14 @@ service cloud.firestore {
           && blindDateProfileIsActive(request.auth.uid)
           && blindDateProfileIsActive(userId)
           && blindDateSenderCanInvite(request.auth.uid)
+          && blindDateInvitePeopleMatchProfiles(request.auth.uid, userId)
           && !hasAnyUserBlock(userId, invitationId)
           && !hasAnyUserBlock(invitationId, userId);
         allow read: if request.auth.uid == userId;
         // Accept/decline must go through Cloud Functions (Admin SDK). Sender may re-send after decline.
         allow update: if request.auth.uid == invitationId
-          && isSafeBlindDateInvitationResend(invitationId, userId);
+          && isSafeBlindDateInvitationResend(invitationId, userId)
+          && blindDateInvitePeopleMatchProfiles(invitationId, userId);
         allow delete: if false;
       }
 
@@ -1976,6 +2024,7 @@ service cloud.firestore {
           && request.resource.data.senderName.size() <= 80
           && request.resource.data.senderPhotoUrl is string
           && request.resource.data.senderPhotoUrl.size() <= 2048
+          && datingCommentSenderMatchesProfile(senderId)
           && request.resource.data.createdAt == request.time
           && request.resource.data.updatedAt == request.time;
         allow delete: if isSignedIn() && request.auth.uid == userId;

@@ -205,10 +205,103 @@ route taps and show the settings toggle.
 | `dating_comment` | the profile owner | comment created, or text changed more than 1 hour after the last edit | `onDatingCommentWriteNotify` |
 | `blind_date_invite` | the invited user | `blindDateInvitations` doc becomes `pending` | `onBlindDateInvitationWriteNotify` |
 | `blind_date_match` | the inviter | that invite becomes `accepted` | `onBlindDateInvitationWriteNotify` |
+| `blind_date_match` | the other match | `startBlindDateMatchChat` opened their chat | `startBlindDateMatchChat` |
+| `blind_date_partner_joined` | each Dating Loop match | a Blind Date profile becomes `active` (join or rejoin) | `onBlindDateProfileActivatedNotifyMatches` |
 
 - Payload `data`: `type`, `actorId`, `referenceId` (actor uid; `matchedChatId` for `blind_date_match`), `receiverId`.
 - Invitation pushes only fire when `context` contains "dating loop", so other chat invitations are untouched.
 - Skipped when either user blocked the other (`settings/chat_privacy.blockedUserIds`) or when the recipient set
   `users/{uid}/settings/notifications.datingActivity` to `false` (missing means on).
-- Tap routing on iOS: `dating_*` opens Dating Loop, `blind_date_*` opens Blind Date
-  (`Core/Services/DatingPushRoute.swift`).
+- Tap routing on iOS: `dating_like`, `dating_super_like` and `dating_comment` open Dating Loop; `dating_match` and
+  every `blind_date_*` type open Blind Date, because a match chats there (`Core/Services/DatingPushRoute.swift`).
+
+## 7) Match to chat, private birth date, safer names (Nov 2026)
+
+Server and rules changes are in the backend repo. Functions need an Android-side deploy; the Firestore rules deploy
+after the owner approves. Old Android builds keep working, apart from the login age check in item 2.
+
+**Deploy order matters.** Deploy `firestore.rules` before these functions. The functions move `birthDate` off the root
+doc, and the old `userCanAccessDating` rule requires a root `birthDate`, so migrated users would lose dating access
+under the old rules. iOS builds before this change also gate dating on a root `birthDate`, so ship the new iOS build
+before (or close to) the functions deploy.
+
+### 1. Liking each other is enough to open the Blind Date chat
+
+- New callable `startBlindDateMatchChat({partnerId})` returns `{success, chatId, otherUserId}`.
+  - It requires an accepted Dating Loop like in either direction, an active pass for both people, no block, and dating
+    eligibility for both.
+  - It respects the 3-day rejoin hold on both sides.
+  - It creates the same `source: "blind_date"` direct chat that `acceptBlindDateInvitation` creates, marks both
+    profiles `matched`, closes any pending Blind Date invite between them, and pushes `blind_date_match` to the partner.
+  - Calling it again for the same pair returns the existing chat.
+- iOS calls it from "Start chat" (the ready-to-start stage) and from "Start chatting" on the match screen. If the
+  function isn't deployed yet (`NOT_FOUND`), iOS falls back to the old invite. Suggested for Android `startPairChat`:
+  in the ready-to-start stage, call this instead of `sendInvitation(uid)` when the partner is a Dating Loop match, and
+  open the returned chat.
+
+### 2. The account birth date leaves the public `users/{uid}` doc
+
+- `birthDate` and `dateOfBirth` are now private profile fields in `user_private/{uid}`.
+  - `moveNewUserBirthDateToPrivate` (users onCreate) moves them right after sign-up.
+  - `migrateUserPrivateProfileFieldsJob` (state doc `system/user_private_profile_migration_v3`) moves existing users.
+  - `ensureDatingEligibility` also moves any root copy it finds.
+- In their place the root doc gets `birthDateOnFile: true` plus `canAccessDating`, `isMinor` and
+  `requiresParentalConsent` derived from the real date. Clients can't write `birthDateOnFile` or
+  `datingEligibilityVerifiedAt`.
+- Rules: `userCanAccessDating` accepts `birthDateOnFile == true` in place of a root `birthDate`.
+- `getCurrentUserPrivateFlags` now returns `birthDateMs` (the caller's own birth date in milliseconds, or `null`).
+- **Android action, needed before the migration runs:** `general/LoginViewModel.kt` around line 162 computes `isMinor`
+  from `userDoc.getTimestamp("birthDate")`. With the root copy gone that becomes `false`, so a minor would not be age
+  restricted at login. Read the server-derived `isMinor` / `requiresParentalConsent` flags when `birthDate` is absent,
+  or call `getCurrentUserPrivateFlags` for `birthDateMs`.
+- `DateViewModel.loadPrivateDatingState` falls back to `users/{uid}.birthDate` when `dating_private/contact` has none.
+  After the move, use `getCurrentUserPrivateFlags.birthDateMs` for that fallback.
+- The dating access resolver already reads the flags, so it needs no change.
+
+### 3. Names and photos must match the sender's real profile (rules)
+
+- **Blind Date invites** (`users/{recipient}/blindDateInvitations/{sender}`, create and resend):
+  - Only these keys may be written: `senderId`, `senderName`, `senderProfilePictureUrl`, `recipientId`,
+    `recipientName`, `recipientProfilePictureUrl`, `status`, `matchedChatId`, `sentAt`, `updatedAt`, `respondedAt`.
+  - `matchedChatId` must be blank.
+  - `senderName` must equal `blindDateProfiles/{sender}.name`. A blank profile name allows `""` or "Anonymous User".
+  - `senderProfilePictureUrl` must be blank or equal that profile's `profilePictureUrl`.
+  - Recipient fields follow the same pattern; a blank name allows `""` or "Unknown User".
+  - Android's current payload passes these checks.
+- **Dating comments:**
+  - `senderName` must equal the sender's `dating_profiles` name (trimmed is fine). A blank name allows `""` or
+    "Member".
+  - `senderPhotoUrl` must be blank or one of that profile's photos (`imageUrls`, `images`, `photos`, `mediaUrls`
+    or `imageUrl`).
+  - Android's current payload passes these checks.
+- The Dating Loop like push no longer uses the invitation's client-written `senderName`; it reads `users/{uid}`.
+
+### 4. Group chats can't include someone with a block against the creator
+
+- `removeBlockedMembersFromNewGroupChat` (chats onCreate, `chatType == "group"`) removes every participant who blocked
+  the creator or whom the creator blocked. It deletes the chat if fewer than two people remain.
+- No client change is needed. Android's contact picker could also hide people who blocked the user.
+
+### 5. Messages that walk both people to the chat
+
+| Moment | Who | Message |
+|---|---|---|
+| Like received | owner with an active pass | "Like them back to accept, then start chatting on Blind Date." |
+| Like received | owner without a pass | "Like them back to accept, then join Blind Date to start chatting." ("get a new Blind Date pass" if their pass is used) |
+| Like accepted | liker; owner has a pass and liker has one | "{owner} accepted your like. Open Blind Date to start chatting." |
+| Like accepted | liker; owner has a pass, liker doesn't | "{owner} accepted your like. Join Blind Date to start chatting with {owner}." |
+| Like accepted | liker; owner has no pass | "You and {owner} liked each other. We'll tell you when {owner} is on Blind Date so you can chat." |
+| A match joins or rejoins Blind Date | each match | "{name} joined Blind Date" / "Open Blind Date to start chatting with {name}." or "Join Blind Date to start chatting with {name}." |
+
+Android should route the new `blind_date_partner_joined` type, and preferably `dating_match`, to the Blind Date
+matches pane.
+
+### 6. Joining Blind Date no longer dead-ends
+
+- A leftover profile no longer blocks a new join. This covers expired, unknown or legacy statuses, and an
+  abandoned payment that has no open checkout or collection.
+  - Before this change, all of these failed with "You already have an active Blind Date profile."
+  - An open payment now says "Your earlier Blind Date payment is still processing...".
+  - An active pass says "Your Blind Date pass is already active."
+- Photo links that aren't under the user's own `blind_date_media/` or `dating_images/` folder are dropped instead of
+  failing the whole join. The join fails only when no valid photo remains.

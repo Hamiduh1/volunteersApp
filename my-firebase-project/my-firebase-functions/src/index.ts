@@ -97,9 +97,11 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 // Root user profiles are readable by every signed-in member (directory, chat,
-// dating). Payment, verified-phone and staff-grant fields live in the
+// dating). Birth date, payment, verified-phone and staff-grant fields live in the
 // server-only user_private doc instead; legacy functions read the same doc.
 const USER_PRIVATE_PROFILE_FIELDS = [
+  "birthDate",
+  "dateOfBirth",
   "paymentCustomerId",
   "stripeConnectPurpose",
   "stripeConnectCommerceServices",
@@ -1649,6 +1651,48 @@ const isAdultFromBirthDate = (userData: Record<string, unknown>): boolean | null
   return birthDate.toDate().getTime() <= adultCutoff.getTime();
 };
 
+// Rules gate dating on these root flags once the birth date itself is private.
+const birthDateRootFlags = (birthDate: unknown): Record<string, unknown> => {
+  const flags: Record<string, unknown> = {birthDateOnFile: true};
+  const isAdult = isAdultFromBirthDate({birthDate});
+  if (isAdult !== null) {
+    flags.canAccessDating = isAdult;
+    flags.isMinor = !isAdult;
+    flags.requiresParentalConsent = !isAdult;
+  }
+  return flags;
+};
+
+const moveRootBirthDateToPrivate = async (uid: string, root: Record<string, unknown>): Promise<boolean> => {
+  const privatePatch: Record<string, unknown> = {};
+  if (!isEmptyProfileValue(root.birthDate)) privatePatch.birthDate = root.birthDate;
+  if (!isEmptyProfileValue(root.dateOfBirth)) privatePatch.dateOfBirth = root.dateOfBirth;
+  if (root.birthDate === undefined && root.dateOfBirth === undefined) return false;
+  const now = admin.firestore.Timestamp.now();
+  const batch = db.batch();
+  if (Object.keys(privatePatch).length > 0) {
+    batch.set(userPrivateProfileRef(uid), {...privatePatch, updatedAt: now}, {merge: true});
+  }
+  batch.set(db.collection("users").doc(uid), {
+    birthDate: admin.firestore.FieldValue.delete(),
+    dateOfBirth: admin.firestore.FieldValue.delete(),
+    ...(Object.keys(privatePatch).length > 0 ?
+      birthDateRootFlags(privatePatch.birthDate ?? privatePatch.dateOfBirth) :
+      {}),
+  }, {merge: true});
+  await batch.commit();
+  return true;
+};
+
+// Sign-up is the only client write that may carry a birth date (rules block later edits).
+export const moveNewUserBirthDateToPrivate = functions.firestore
+  .document("users/{userId}")
+  .onCreate(async (snap, context) => {
+    const {userId} = context.params as {userId: string};
+    await moveRootBirthDateToPrivate(userId, (snap.data() || {}) as Record<string, unknown>);
+    return undefined;
+  });
+
 // The birthdate is authoritative; the stored flags were client-written at signup.
 const resolveDatingAccessForUserData = (
   userData: Record<string, unknown>
@@ -1695,13 +1739,18 @@ export const ensureDatingEligibility = functions.runWith({enforceAppCheck: true}
       throw new functions.https.HttpsError("not-found", "Your account profile could not be found.");
     }
 
-    const userData = (userSnap.data() || {}) as Record<string, unknown>;
+    const rootData = (userSnap.data() || {}) as Record<string, unknown>;
+    const userData = await withUserPrivateProfile(context.auth.uid, rootData);
     const profileStatus = normalizeProfileStatus(userData.profileStatus);
     if (profileStatus && profileStatus !== "active") {
       throw new functions.https.HttpsError(
         "failed-precondition",
         "This account is not active for dating features."
       );
+    }
+
+    if (rootData.birthDate !== undefined || rootData.dateOfBirth !== undefined) {
+      await moveRootBirthDateToPrivate(context.auth.uid, rootData);
     }
 
     const isAdult = isAdultFromBirthDate(userData);
@@ -1716,10 +1765,12 @@ export const ensureDatingEligibility = functions.runWith({enforceAppCheck: true}
     // users who have turned 18 since signup are unlocked.
     const flagsAlreadyMatch = userData.canAccessDating === isAdult &&
       userData.isMinor === !isAdult &&
-      userData.requiresParentalConsent === !isAdult;
+      userData.requiresParentalConsent === !isAdult &&
+      userData.birthDateOnFile === true;
     if (!flagsAlreadyMatch) {
       const now = admin.firestore.Timestamp.now();
       await userRef.set({
+        birthDateOnFile: true,
         canAccessDating: isAdult,
         isMinor: !isAdult,
         requiresParentalConsent: !isAdult,
@@ -3753,6 +3804,46 @@ export const removeExitedGroupMembersFromParticipants = functions.firestore
     return undefined;
   });
 
+// Rules cannot check blocks across a whole participant list, so a new group could
+// otherwise put someone in a thread with a person they blocked (or who blocked them).
+export const removeBlockedMembersFromNewGroupChat = functions.firestore
+  .document("chats/{chatId}")
+  .onCreate(async (snap) => {
+    const data = snap.data() || {};
+    const chatType = typeof data.chatType === "string" ? data.chatType.trim().toLowerCase() : "";
+    if (chatType !== "group") return undefined;
+    const creatorId = asNonEmptyString(data.groupCreatorId);
+    const participants: string[] = Array.isArray(data.participants) ?
+      data.participants.filter((value: unknown): value is string => typeof value === "string" && value.length > 0) :
+      [];
+    if (!creatorId || !participants.includes(creatorId)) return undefined;
+
+    const creatorBlocked = new Set(await readBlockedUserIds(creatorId));
+    const others = participants.filter((uid) => uid !== creatorId);
+    const blockedBy = await Promise.all(others.map(async (uid) => ({
+      uid,
+      blocksCreator: (await readBlockedUserIds(uid)).includes(creatorId),
+    })));
+    const removed = blockedBy
+      .filter(({uid, blocksCreator}) => blocksCreator || creatorBlocked.has(uid))
+      .map(({uid}) => uid);
+    if (removed.length === 0) return undefined;
+
+    const remaining = participants.filter((uid) => !removed.includes(uid));
+    if (remaining.length < 2) {
+      await db.recursiveDelete(snap.ref);
+      functions.logger.info("Deleted a new group chat whose members all had a block with the creator.", {
+        chatId: snap.id,
+      });
+      return undefined;
+    }
+    await snap.ref.set({
+      participants: remaining,
+      blockedMembersRemovedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+    return undefined;
+  });
+
 
 // =============================================================================
 //  DATING LOOP + BLIND DATE ACTIVITY PUSH
@@ -3764,7 +3855,8 @@ type DatingActivityPushType =
   "dating_match" |
   "dating_comment" |
   "blind_date_invite" |
-  "blind_date_match";
+  "blind_date_match" |
+  "blind_date_partner_joined";
 
 const datingPushString = (value: unknown, maxLength = 120): string =>
   typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -3785,6 +3877,13 @@ const readBlindDateDisplayName = async (uid: string, fallback: string): Promise<
   const profileDoc = await db.collection("blindDateProfiles").doc(uid).get();
   return datingPushString(profileDoc.get("name"), 80) || fallback;
 };
+
+const readBlindDatePassStatus = async (uid: string): Promise<string> =>
+  normalizeProfileStatus((await db.collection("blindDateProfiles").doc(uid).get()).get("status"));
+
+// What someone without an active pass must do before a Blind Date chat can open.
+const blindDatePassStep = (status: string): string =>
+  ["matched", "awaiting_rejoin_payment"].includes(status) ? "get a new Blind Date pass" : "join Blind Date";
 
 const sendDatingActivityPush = async (params: {
   recipientId: string;
@@ -3876,38 +3975,106 @@ export const onDatingLoopInvitationWriteNotify = functions.firestore
     const afterStatus = datingPushStatus(after);
 
     if (afterStatus === "pending" && beforeStatus !== "pending") {
-      const senderName = datingPushString(after.senderName, 80) ||
-        await readDatingDisplayName(senderId, "Someone");
+      // The invitation's senderName is client-written; never put it in a push title.
+      const [senderName, ownerPass] = await Promise.all([
+        readDatingDisplayName(senderId, "Someone"),
+        readBlindDatePassStatus(userId),
+      ]);
       const requestedSuperLike = datingPushString(after.context, 80).toLowerCase().includes("super like");
       const isSuperLike = requestedSuperLike && await claimDailyDatingSuperLike(senderId, userId);
       if (requestedSuperLike && !isSuperLike) {
         // Over the daily allowance (modified client): keep the like, drop the Super Like.
         await change.after.ref.set({context: DATING_LOOP_LIKE_CONTEXT}, {merge: true});
       }
+      const nextStep = ownerPass === "active" ?
+        "Like them back to accept, then start chatting on Blind Date." :
+        `Like them back to accept, then ${blindDatePassStep(ownerPass)} to start chatting.`;
       await sendDatingActivityPush({
         recipientId: userId,
         actorId: senderId,
         type: isSuperLike ? "dating_super_like" : "dating_like",
         title: isSuperLike ? `${senderName} Super Liked you` : `${senderName} liked you`,
-        body: isSuperLike ?
-          "You stood out to them on Dating Loop. Like back to match." :
-          "Open Dating Loop to see who liked you and like back to match.",
+        body: isSuperLike ? `You stood out to them on Dating Loop. ${nextStep}` : nextStep,
         referenceId: senderId,
       });
       return undefined;
     }
 
     if (afterStatus === "accepted" && beforeStatus !== "accepted") {
-      const matchName = await readDatingDisplayName(userId, "Someone");
+      const [matchName, ownerPass, senderPass] = await Promise.all([
+        readDatingDisplayName(userId, "Someone"),
+        readBlindDatePassStatus(userId),
+        readBlindDatePassStatus(senderId),
+      ]);
+      let body: string;
+      if (ownerPass !== "active") {
+        body = `You and ${matchName} liked each other. We'll tell you when ${matchName} is on Blind Date so you can chat.`;
+      } else if (senderPass === "active") {
+        body = `${matchName} accepted your like. Open Blind Date to start chatting.`;
+      } else {
+        const step = blindDatePassStep(senderPass);
+        body = `${matchName} accepted your like. ${step.charAt(0).toUpperCase()}${step.slice(1)} to start chatting with ${matchName}.`;
+      }
       await sendDatingActivityPush({
         recipientId: senderId,
         actorId: userId,
         type: "dating_match",
         title: "It's a match!",
-        body: `You and ${matchName} liked each other. Continue on Blind Date to chat.`,
+        body,
         referenceId: userId,
       });
     }
+    return undefined;
+  });
+
+// Up to 50 people the user matched with on Dating Loop, from either side of the like.
+const readDatingLoopMatchIds = async (uid: string): Promise<string[]> => {
+  const [received, sent] = await Promise.all([
+    db.collection("users").doc(uid).collection("invitations").where("status", "==", "accepted").limit(200).get(),
+    db.collectionGroup("invitations").where("senderId", "==", uid).limit(500).get(),
+  ]);
+  const ids = new Set<string>();
+  received.docs.forEach((doc) => {
+    if (isDatingLoopInvitationData(doc.data())) ids.add(doc.id);
+  });
+  sent.docs.forEach((doc) => {
+    const recipientId = doc.ref.parent.parent?.id;
+    if (recipientId && isDatingLoopInvitationData(doc.data()) && datingPushStatus(doc.data()) === "accepted") {
+      ids.add(recipientId);
+    }
+  });
+  ids.delete(uid);
+  return [...ids].slice(0, 50);
+};
+
+// Someone who matched on Dating Loop before holding a pass hears when the other person can chat.
+export const onBlindDateProfileActivatedNotifyMatches = functions.firestore
+  .document("blindDateProfiles/{userId}")
+  .onWrite(async (change, context) => {
+    if (!change.after.exists) return undefined;
+    const {userId} = context.params as {userId: string};
+    const afterStatus = normalizeProfileStatus(change.after.get("status"));
+    const beforeStatus = change.before.exists ? normalizeProfileStatus(change.before.get("status")) : "";
+    if (afterStatus !== "active" || beforeStatus === "active") return undefined;
+
+    const formerPartnerId = asNonEmptyString(change.after.get("formerMatchedPartnerId"));
+    const partnerIds = (await readDatingLoopMatchIds(userId)).filter((id) => id !== formerPartnerId);
+    if (partnerIds.length === 0) return undefined;
+    const name = await readDatingDisplayName(userId, "Your match");
+    await Promise.all(partnerIds.map(async (partnerId) => {
+      const partnerPass = await readBlindDatePassStatus(partnerId);
+      const step = blindDatePassStep(partnerPass);
+      await sendDatingActivityPush({
+        recipientId: partnerId,
+        actorId: userId,
+        type: "blind_date_partner_joined",
+        title: `${name} joined Blind Date`,
+        body: partnerPass === "active" ?
+          `Open Blind Date to start chatting with ${name}.` :
+          `${step.charAt(0).toUpperCase()}${step.slice(1)} to start chatting with ${name}.`,
+        referenceId: userId,
+      }).catch((error) => functions.logger.warn("Blind Date join push failed", {partnerId, error}));
+    }));
     return undefined;
   });
 
@@ -3998,7 +4165,8 @@ export const onDatingProfileWriteSyncAge = functions.firestore
   .onWrite(async (change, context) => {
     if (!change.after.exists) return undefined;
     const {userId} = context.params as {userId: string};
-    const userData = ((await db.collection("users").doc(userId).get()).data() || {}) as Record<string, unknown>;
+    const rootData = ((await db.collection("users").doc(userId).get()).data() || {}) as Record<string, unknown>;
+    const userData = await withUserPrivateProfile(userId, rootData);
     const birthDate = userData.birthDate ?? userData.dateOfBirth;
     if (!(birthDate instanceof admin.firestore.Timestamp)) return undefined;
     const age = calendarAgeFromBirthDate(birthDate.toDate());
@@ -6949,7 +7117,8 @@ const normalizeOwnedBlindDateMediaUrls = (userId: string, value: unknown): strin
     throw new functions.https.HttpsError("invalid-argument", `You can add up to ${BLIND_DATE_MAX_MEDIA} photos or videos.`);
   }
   const ownedPrefixes = [`blind_date_media/${userId}/`, `dating_images/${userId}/`];
-  return value.map((raw) => {
+  // Drop stale or foreign links instead of failing the whole join over one photo.
+  const owned = value.filter((raw): raw is string => {
     const url = typeof raw === "string" ? raw.trim() : "";
     let decoded = url;
     try {
@@ -6957,11 +7126,37 @@ const normalizeOwnedBlindDateMediaUrls = (userId: string, value: unknown): strin
     } catch {
       decoded = url;
     }
-    if (!url.startsWith("https://") || url.length > 2048 || !ownedPrefixes.some((prefix) => decoded.includes(prefix))) {
-      throw new functions.https.HttpsError("invalid-argument", "Upload your Blind Date photos from the app and try again.");
-    }
-    return url;
-  });
+    return url.startsWith("https://") && url.length <= 2048 && ownedPrefixes.some((prefix) => decoded.includes(prefix));
+  }).map((url) => url.trim());
+  if (owned.length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Add a photo to your dating profile from the app, then join again.");
+  }
+  return owned;
+};
+
+// A profile left behind by a finished match, an expired pass or an abandoned
+// payment must not block a new join; only a live pass or open payment does.
+const assertBlindDateProfileJoinable = (
+  profileDoc: FirebaseFirestore.DocumentSnapshot,
+  paymentHoldReleasable: boolean
+): void => {
+  if (!profileDoc.exists) return;
+  const status = normalizeProfileStatus(profileDoc.data()?.status);
+  if (status === "active") {
+    throw new functions.https.HttpsError("failed-precondition", "Your Blind Date pass is already active.");
+  }
+  if (isBlindDateRejoinableStatus(status)) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "You're matched right now. Get a new pass from Blind Date to meet someone else."
+    );
+  }
+  if (status === "awaiting_payment" && !paymentHoldReleasable) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Your earlier Blind Date payment is still processing. Check its status before paying again."
+    );
+  }
 };
 
 const blindDateUsersBlockedInTransaction = async (
@@ -7078,16 +7273,29 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
       (context.auth?.token || {}) as Record<string, unknown>
     );
 
+    const stripeJoinOrderRef = stripeCommerceOrders.doc(stripeCommerceOrderId("BLIND_DATE_JOIN", userId, userId));
     if (isStaffOrOwner || blindDateFee <= 0) {
+      const mobileMoneyJoinOrderRef = firstPartyMobileMoneyFeeOrders.doc(
+        firstPartyMobileMoneyFeeOrderId("BLIND_DATE_JOIN", userId, userId)
+      );
       await db.runTransaction(async (transaction) => {
-        const [userDoc, profileDoc] = await Promise.all([transaction.get(userRef), transaction.get(blindDateProfileRef)]);
+        const [userDoc, profileDoc, stripeOrder, mobileMoneyOrder] = await Promise.all([
+          transaction.get(userRef),
+          transaction.get(blindDateProfileRef),
+          transaction.get(stripeJoinOrderRef),
+          transaction.get(mobileMoneyJoinOrderRef),
+        ]);
         if (!userDoc.exists) throw new functions.https.HttpsError("not-found", "User profile not found.");
         assertDatingEligibleAccount((userDoc.data() || {}) as Record<string, unknown>);
-        if (profileDoc.exists) {
-          const status = normalizeProfileStatus(profileDoc.data()?.status);
-          if (status === "matched") throw new functions.https.HttpsError("failed-precondition", "You are already matched. Use rejoin after ending the current match.");
-          throw new functions.https.HttpsError("failed-precondition", "You already have an active Blind Date profile.");
-        }
+        const stripeData = (stripeOrder.data() || {}) as Record<string, unknown>;
+        const stripeStatus = String(stripeData.status || "").trim().toUpperCase();
+        assertBlindDateProfileJoinable(
+          profileDoc,
+          !isPendingStripeCommerceOrder(stripeData) &&
+            stripeStatus !== "PAID" &&
+            stripeStatus !== "FULFILLED" &&
+            !isBlockingFirstPartyMobileMoneyFeeOrder(mobileMoneyOrder.data()?.status)
+        );
         const now = admin.firestore.Timestamp.now();
         transaction.set(blindDateProfileRef, {...profilePayload, status: "active", postedAt: now, createdAt: now, updatedAt: now});
         transaction.set(userRef.collection("transactions").doc(), {
@@ -7111,21 +7319,24 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
         resourceId: userId,
         paymentMethodId,
         prepare: async (transaction, orderRef) => {
-          const [userDoc, profileDoc] = await Promise.all([transaction.get(userRef), transaction.get(blindDateProfileRef)]);
+          const [userDoc, profileDoc, stripeOrder] = await Promise.all([
+            transaction.get(userRef),
+            transaction.get(blindDateProfileRef),
+            transaction.get(stripeJoinOrderRef),
+          ]);
           if (!userDoc.exists) throw new functions.https.HttpsError("not-found", "User profile not found.");
           const userData = (userDoc.data() || {}) as Record<string, unknown>;
           assertDatingEligibleAccount(userData);
           if (isStaffFeeExempt(userData, (context.auth?.token || {}) as Record<string, unknown>)) {
             throw new functions.https.HttpsError("failed-precondition", "Your fee exemption changed. Join again without payment.");
           }
-          if (profileDoc.exists) {
-            const status = normalizeProfileStatus(profileDoc.data()?.status);
-            if (status === "matched") throw new functions.https.HttpsError("failed-precondition", "You are already matched. Use rejoin after ending the current match.");
-            if (status !== "awaiting_payment" ||
-              asNonEmptyString(profileDoc.data()?.mobileMoneyFeeCollectionOrderId) !== orderRef.id) {
-              throw new functions.https.HttpsError("failed-precondition", "You already have an active Blind Date profile.");
-            }
-          }
+          // The caller already refused a pending checkout; a paid one means the pass is being activated.
+          const stripeStatus = String(stripeOrder.data()?.status || "").trim().toUpperCase();
+          assertBlindDateProfileJoinable(
+            profileDoc,
+            asNonEmptyString(profileDoc.data()?.mobileMoneyFeeCollectionOrderId) === orderRef.id ||
+              (stripeStatus !== "PAID" && stripeStatus !== "FULFILLED")
+          );
           const now = admin.firestore.Timestamp.now();
           transaction.set(blindDateProfileRef, {
             ...profilePayload,
@@ -7164,13 +7375,8 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
         if (isStaffFeeExempt(userData, (context.auth?.token || {}) as Record<string, unknown>)) {
           throw new functions.https.HttpsError("failed-precondition", "Your fee exemption changed. Join again without checkout.");
         }
-        if (profileDoc.exists) {
-          const status = normalizeProfileStatus(profileDoc.data()?.status);
-          if (status === "matched") throw new functions.https.HttpsError("failed-precondition", "You are already matched. Use rejoin after ending the current match.");
-          if (status !== "awaiting_payment" || asNonEmptyString(profileDoc.data()?.stripeCommerceOrderId) !== orderRef.id) {
-            throw new functions.https.HttpsError("failed-precondition", "You already have an active Blind Date profile.");
-          }
-        }
+        // Checkout already refused an open mobile money collection and reused a live session.
+        assertBlindDateProfileJoinable(profileDoc, true);
         const now = admin.firestore.Timestamp.now();
         transaction.set(blindDateProfileRef, {
           ...profilePayload,
@@ -7203,6 +7409,196 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
 interface AcceptInvitationRequest {
   senderId: string;
 }
+
+// A pass covers one chat, so both profiles leave the pool with the new chat.
+const writeBlindDatePairChat = (
+  transaction: FirebaseFirestore.Transaction,
+  params: {
+    chatRef: FirebaseFirestore.DocumentReference;
+    initiatorId: string;
+    partnerId: string;
+    initiatorName: string;
+    partnerName: string;
+    now: admin.firestore.Timestamp;
+  }
+): void => {
+  const {chatRef, initiatorId, partnerId, now} = params;
+  const seedPreview = "Blind Date match! Say hi.";
+  transaction.set(chatRef, {
+    chatId: chatRef.id,
+    chatType: "direct",
+    source: "blind_date",
+    participants: [initiatorId, partnerId],
+    participantPairKey: [initiatorId, partnerId].sort().join("_"),
+    participantDisplayNames: {
+      [initiatorId]: params.initiatorName.trim() || "Blind Date match",
+      [partnerId]: params.partnerName.trim() || "Blind Date match",
+    },
+    exitedParticipantIds: [],
+    lastMessage: seedPreview,
+    lastMessageText: seedPreview,
+    lastMessageTimestamp: now,
+    lastMessageSenderId: initiatorId,
+    lastMessageType: "TEXT",
+    createdAt: now,
+    updatedAt: now,
+  });
+  [[initiatorId, partnerId], [partnerId, initiatorId]].forEach(([uid, otherId]) => {
+    transaction.update(db.collection("blindDateProfiles").doc(uid), {
+      status: "matched",
+      matchedChatId: chatRef.id,
+      matchedPartnerId: otherId,
+      matchedAt: now,
+      updatedAt: now,
+    });
+  });
+};
+
+const BLIND_DATE_MATCH_HOLD_MS = 3 * 24 * 60 * 60 * 1000;
+
+// Mirrors blindDateSenderCanInvite: after a rejoin the old pair keeps first claim for 3 days.
+const blindDateHoldBlocksPartner = (profile: Record<string, unknown>, partnerId: string, nowMs: number): boolean => {
+  const formerPartnerId = asNonEmptyString(profile.formerMatchedPartnerId);
+  if (!formerPartnerId || formerPartnerId === partnerId) return false;
+  const releasedAt = profile.matchReleasedAt;
+  if (!(releasedAt instanceof admin.firestore.Timestamp)) return true;
+  return nowMs < releasedAt.toMillis() + BLIND_DATE_MATCH_HOLD_MS;
+};
+
+const isAcceptedDatingLoopLike = (snap: FirebaseFirestore.DocumentSnapshot): boolean =>
+  snap.exists && isDatingLoopInvitationData(snap.data()) && datingPushStatus(snap.data()) === "accepted";
+
+// Liking each other on Dating Loop is the consent; this opens their Blind Date chat
+// without a second invite/accept round once both hold an active pass.
+export const startBlindDateMatchChat = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    const callerId = context.auth.uid;
+    const partnerId = asNonEmptyString((data as {partnerId?: unknown})?.partnerId);
+    if (!partnerId || partnerId === callerId) {
+      throw new functions.https.HttpsError("invalid-argument", "Choose a match to chat with.");
+    }
+    await assertBlindDateEnabled();
+
+    const users = db.collection("users");
+    const callerProfileRef = db.collection("blindDateProfiles").doc(callerId);
+    const partnerProfileRef = db.collection("blindDateProfiles").doc(partnerId);
+    const callerReceivedLikeRef = users.doc(callerId).collection("invitations").doc(partnerId);
+    const partnerReceivedLikeRef = users.doc(partnerId).collection("invitations").doc(callerId);
+    const callerBlindInviteRef = users.doc(callerId).collection("blindDateInvitations").doc(partnerId);
+    const partnerBlindInviteRef = users.doc(partnerId).collection("blindDateInvitations").doc(callerId);
+    const newChatRef = db.collection("chats").doc();
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [
+        callerAccount, partnerAccount, callerProfile, partnerProfile,
+        callerReceivedLike, partnerReceivedLike, callerBlindInvite, partnerBlindInvite,
+        callerPrivacy, partnerPrivacy,
+      ] = await Promise.all([
+        transaction.get(users.doc(callerId)),
+        transaction.get(users.doc(partnerId)),
+        transaction.get(callerProfileRef),
+        transaction.get(partnerProfileRef),
+        transaction.get(callerReceivedLikeRef),
+        transaction.get(partnerReceivedLikeRef),
+        transaction.get(callerBlindInviteRef),
+        transaction.get(partnerBlindInviteRef),
+        transaction.get(users.doc(callerId).collection("settings").doc("chat_privacy")),
+        transaction.get(users.doc(partnerId).collection("settings").doc("chat_privacy")),
+      ]);
+      const blocked = await blindDateUsersBlockedInTransaction(transaction, callerId, partnerId);
+
+      const callerData = (callerProfile.data() || {}) as Record<string, unknown>;
+      const partnerData = (partnerProfile.data() || {}) as Record<string, unknown>;
+      const partnerName = String(partnerData.name || "").trim() || "Your match";
+      const existingChatId = asNonEmptyString(callerData.matchedChatId);
+      if (normalizeProfileStatus(callerData.status) === "matched" &&
+        asNonEmptyString(callerData.matchedPartnerId) === partnerId && existingChatId) {
+        return {chatId: existingChatId, created: false, callerName: ""};
+      }
+
+      if (!callerAccount.exists || !partnerAccount.exists) {
+        throw new functions.https.HttpsError("not-found", "This match is no longer available.");
+      }
+      assertDatingEligibleAccount(
+        (callerAccount.data() || {}) as Record<string, unknown>,
+        "Your account is not eligible for dating features."
+      );
+      assertDatingEligibleAccount(
+        (partnerAccount.data() || {}) as Record<string, unknown>,
+        "This match is no longer available."
+      );
+      if (blocked ||
+        isUserBlockedInPrivacySettings(callerPrivacy.data(), partnerId) ||
+        isUserBlockedInPrivacySettings(partnerPrivacy.data(), callerId)) {
+        throw new functions.https.HttpsError("failed-precondition", "This match is no longer available.");
+      }
+      if (!isAcceptedDatingLoopLike(callerReceivedLike) && !isAcceptedDatingLoopLike(partnerReceivedLike)) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "You can start a chat once you've both liked each other on Dating Loop."
+        );
+      }
+      if (normalizeProfileStatus(callerData.status) !== "active") {
+        throw new functions.https.HttpsError("failed-precondition", `Get a Blind Date pass to chat with ${partnerName}.`);
+      }
+      if (normalizeProfileStatus(partnerData.status) !== "active") {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          `${partnerName} isn't on Blind Date yet. We'll let you know when they join.`
+        );
+      }
+      const nowMs = Date.now();
+      if (blindDateHoldBlocksPartner(callerData, partnerId, nowMs)) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Your previous match has first claim for 3 days after your new pass. Try again once that hold ends."
+        );
+      }
+      if (blindDateHoldBlocksPartner(partnerData, callerId, nowMs)) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          `${partnerName} can start a new chat once their 3-day hold ends.`
+        );
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      const callerName = String(callerData.name || "");
+      writeBlindDatePairChat(transaction, {
+        chatRef: newChatRef,
+        initiatorId: callerId,
+        partnerId,
+        initiatorName: callerName,
+        partnerName: String(partnerData.name || ""),
+        now,
+      });
+      // Close any Blind Date invite either of them already sent the other.
+      [
+        {invite: callerBlindInvite, senderId: partnerId, recipientId: callerId},
+        {invite: partnerBlindInvite, senderId: callerId, recipientId: partnerId},
+      ].forEach(({invite, senderId, recipientId}) => {
+        if (!invite.exists || datingPushStatus(invite.data()) !== "pending") return;
+        transaction.update(invite.ref, {status: "accepted", updatedAt: now, respondedAt: now, matchedChatId: newChatRef.id});
+        transaction.set(users.doc(senderId).collection("blindDateSentInvitations").doc(recipientId), {
+          status: "matched", updatedAt: now, respondedAt: now, matchedChatId: newChatRef.id,
+        }, {merge: true});
+      });
+      return {chatId: newChatRef.id, created: true, callerName: callerName.trim()};
+    });
+
+    if (result.created) {
+      const name = result.callerName || await readDatingDisplayName(callerId, "Your match");
+      await sendDatingActivityPush({
+        recipientId: partnerId,
+        actorId: callerId,
+        type: "blind_date_match",
+        title: "Your Blind Date chat is open",
+        body: `${name} started your chat. Say hi!`,
+        referenceId: result.chatId,
+      }).catch((error) => functions.logger.warn("Blind Date match push failed", {error}));
+    }
+    return {success: true, chatId: result.chatId, otherUserId: partnerId};
+  });
 
 export const acceptBlindDateInvitation = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
@@ -7264,39 +7660,13 @@ export const acceptBlindDateInvitation = functions.runWith({enforceAppCheck: tru
         if (invitationStatus !== "pending") throw new functions.https.HttpsError("failed-precondition", "This invitation is no longer pending.");
 
         const now = admin.firestore.Timestamp.now();
-        const seedPreview = "Blind Date match! Say hi.";
-        const acceptorName = String(acceptorProfile.data()?.name || "").trim() || "Blind Date match";
-        const senderName = String(senderProfile.data()?.name || "").trim() || "Blind Date match";
-        const chatData = {
-          chatId: newChatRef.id,
-          chatType: "direct",
-          source: "blind_date",
-          participants: [acceptorId, senderId],
-          participantPairKey: [acceptorId, senderId].sort().join("_"),
-          participantDisplayNames: {[acceptorId]: acceptorName, [senderId]: senderName},
-          exitedParticipantIds: [],
-          lastMessage: seedPreview,
-          lastMessageText: seedPreview,
-          lastMessageTimestamp: now,
-          lastMessageSenderId: acceptorId,
-          lastMessageType: "TEXT",
-          createdAt: now,
-          updatedAt: now,
-        };
-        transaction.set(newChatRef, chatData);
-        transaction.update(acceptorProfileRef, {
-          status: "matched",
-          matchedChatId: newChatRef.id,
-          matchedPartnerId: senderId,
-          matchedAt: now,
-          updatedAt: now,
-        });
-        transaction.update(senderProfileRef, {
-          status: "matched",
-          matchedChatId: newChatRef.id,
-          matchedPartnerId: acceptorId,
-          matchedAt: now,
-          updatedAt: now,
+        writeBlindDatePairChat(transaction, {
+          chatRef: newChatRef,
+          initiatorId: acceptorId,
+          partnerId: senderId,
+          initiatorName: String(acceptorProfile.data()?.name || ""),
+          partnerName: String(senderProfile.data()?.name || ""),
+          now,
         });
         transaction.update(acceptorInviteRef, {
           status: "accepted",
@@ -27105,13 +27475,16 @@ const migrateUserPrivateProfilePage = async (params: {
     ]);
     const privateData = privateSnap.data() || {};
     const privatePatch: Record<string, unknown> = {};
-    const rootCleanup: Record<string, admin.firestore.FieldValue | string> = {};
+    const rootCleanup: FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData> = {};
     presentFields.forEach((field) => {
       if (!isEmptyProfileValue(root[field])) {
         privatePatch[field] = root[field];
       }
       rootCleanup[field] = admin.firestore.FieldValue.delete();
     });
+    if (privatePatch.birthDate !== undefined || privatePatch.dateOfBirth !== undefined) {
+      Object.assign(rootCleanup, birthDateRootFlags(privatePatch.birthDate ?? privatePatch.dateOfBirth));
+    }
     const rootStaffStatus = asNonEmptyString(root.staffOnboardingStatus);
     const privateStaffStatus = asNonEmptyString(privateData.staffOnboardingStatus);
     if (rootStaffStatus && rootStaffStatus !== privateStaffStatus) {
@@ -27164,7 +27537,7 @@ export const migrateUserPrivateProfileFieldsJob = functions.runWith({
 }).pubsub
   .schedule("every 10 minutes")
   .onRun(async () => {
-    const stateRef = db.collection("system").doc("user_private_profile_migration_v2");
+    const stateRef = db.collection("system").doc("user_private_profile_migration_v3");
     const state = (await stateRef.get()).data() || {};
     if (state.completedAt) return null;
     const result = await migrateUserPrivateProfilePage({
