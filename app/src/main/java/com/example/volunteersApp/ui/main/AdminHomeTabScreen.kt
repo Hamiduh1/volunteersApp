@@ -389,7 +389,8 @@ fun AdminHomeTabScreen(
             )
             composable("browse_users") {
                 UserDirectoryScreen(
-                    viewModel = viewModel()
+                    viewModel = viewModel(),
+                    embedded = true
                 )
             }
             composable("ai_assistant") {

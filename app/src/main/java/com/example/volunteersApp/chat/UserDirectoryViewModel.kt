@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.Locale
 
 class UserDirectoryViewModel : ViewModel() {
 
@@ -62,20 +63,14 @@ class UserDirectoryViewModel : ViewModel() {
                     }
                 val users = fetchDirectoryUsers(currentUid)
                 val sentInvitations = fetchSentInvitationRecipientIds()
-                val visibleCount = users.count { user -> user.uid !in blockedUsers }
-                val status = if (blockedUsers.isEmpty()) {
-                    "Loaded $visibleCount users."
-                } else {
-                    "Loaded $visibleCount users. ${blockedUsers.size} blocked hidden."
-                }
                 _uiState.update {
                     it.copy(
                         allUsers = users,
                         blockedUsers = blockedUsers,
-                        sentInvitationUserIds = sentInvitations,
+                        sentInvitationUserIds = it.sentInvitationUserIds + sentInvitations,
                         isLoading = false,
                         errorMessage = null,
-                        statusMessage = status
+                        statusMessage = null
                     )
                 }
             } catch (error: Exception) {
@@ -97,6 +92,10 @@ class UserDirectoryViewModel : ViewModel() {
 
     fun clearSearch() {
         _uiState.update { it.copy(searchQuery = "") }
+    }
+
+    fun onFilterChanged(filter: DirectoryFilter) {
+        _uiState.update { it.copy(filter = filter) }
     }
 
     fun clearStatusMessage() {
@@ -158,6 +157,16 @@ class UserDirectoryViewModel : ViewModel() {
                 }
             } catch (error: Exception) {
                 Log.e(TAG, "Failed to send directory invitation", error)
+                if (isAlreadyInvitedError(error)) {
+                    _uiState.update {
+                        it.copy(
+                            sendingInvitationUserIds = it.sendingInvitationUserIds - recipientUid,
+                            sentInvitationUserIds = it.sentInvitationUserIds + recipientUid,
+                            statusMessage = "You already invited ${recipient.name}."
+                        )
+                    }
+                    return@launch
+                }
                 val friendly = mapDirectoryInviteError(error)
                 _uiState.update {
                     it.copy(
@@ -270,9 +279,14 @@ class UserDirectoryViewModel : ViewModel() {
             .get()
             .await()
 
-        return snapshot.documents
+        val users = snapshot.documents
             .mapNotNull { document -> document.toDirectoryUser(currentUid) }
+            .sortedByDescending { it.id == it.uid }
+            .distinctBy { it.uid }
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        val skipped = snapshot.size() - users.size - (if (snapshot.documents.any { it.id == currentUid }) 1 else 0)
+        if (skipped > 0) Log.i(TAG, "Directory skipped $skipped user docs without an active member profile.")
+        return users
     }
 
     private suspend fun fetchSentInvitationRecipientIds(): Set<String> {
@@ -378,11 +392,25 @@ class UserDirectoryViewModel : ViewModel() {
         ).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty()
         if (uid.isBlank() || uid == currentUid) return null
 
+        // Push-token, location, and role-repair writes merge into users/{uid}, so accounts that never
+        // finished sign-up (or were removed) leave docs with no profile. Those showed up as "Anonymous".
+        val profileStatus = (data["profileStatus"] as? String)?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        if (profileStatus.isNotEmpty() && profileStatus != "active") return null
+
+        val firstLast = listOf(data["firstName"] as? String, data["lastName"] as? String)
+            .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+            .joinToString(" ")
         val name = listOf(
             data["name"] as? String,
             data["displayName"] as? String,
-            data["username"] as? String
-        ).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty().ifBlank { "Anonymous" }
+            data["fullName"] as? String,
+            firstLast,
+            data["username"] as? String,
+            data["organizationName"] as? String,
+            data["companyName"] as? String
+        ).mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+            .firstOrNull { it.lowercase(Locale.ROOT) !in PLACEHOLDER_NAMES }
+            ?: return null
 
         val username = (data["username"] as? String).orEmpty().trim()
         val profileImageUrl = listOf(
@@ -397,8 +425,25 @@ class UserDirectoryViewModel : ViewModel() {
             uid = uid,
             name = name,
             username = username,
-            profileImageUrl = profileImageUrl
+            profileImageUrl = profileImageUrl,
+            role = directoryRoleOf(data),
+            country = (data["country"] as? String).orEmpty().trim(),
+            joinedAtMillis = (data["createdAt"] as? com.google.firebase.Timestamp)?.toDate()?.time
         )
+    }
+
+    private fun directoryRoleOf(data: Map<String, Any?>): DirectoryRole {
+        val role = listOf(data["role"], data["userType"], data["userRole"])
+            .mapNotNull { (it as? String)?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank) }
+            .firstOrNull()
+        return when (role) {
+            null -> DirectoryRole.Member
+            "volunteer", "user" -> DirectoryRole.Volunteer
+            "organizer", "host" -> DirectoryRole.Organizer
+            "employer" -> DirectoryRole.Employer
+            in STAFF_ROLES -> DirectoryRole.Team
+            else -> DirectoryRole.Member
+        }
     }
 
     private fun mapDirectoryInviteError(error: Throwable): String {
@@ -435,7 +480,17 @@ class UserDirectoryViewModel : ViewModel() {
         raw.contains("yourself", ignoreCase = true) ||
             raw.contains("cannot invite yourself", ignoreCase = true)
 
+    private fun isAlreadyInvitedError(error: Throwable): Boolean {
+        val raw = error.message.orEmpty()
+        return raw.contains("Invitation already", ignoreCase = true) ||
+            raw.contains("already sent", ignoreCase = true)
+    }
+
     companion object {
         private const val TAG = "UserDirectoryVM"
+        private val PLACEHOLDER_NAMES = setOf(
+            "anonymous", "anonymous user", "unknown", "unknown user", "a user", "user", "member", "null"
+        )
+        private val STAFF_ROLES = setOf("owner", "admin", "associate", "support", "support_associate", "staff")
     }
 }

@@ -56,7 +56,8 @@ fun NavGraphBuilder.addMirroredLoopDestinations(
 
     composable("browse_users") {
         UserDirectoryScreen(
-            viewModel = viewModel()
+            viewModel = viewModel(),
+            embedded = true
         )
     }
 
