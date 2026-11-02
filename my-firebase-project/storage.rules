@@ -38,7 +38,9 @@ service firebase.storage {
     // --- BLIND DATE MEDIA ---
     // Path: blind_date_media/{userId}/{fileName}
     match /blind_date_media/{userId}/{fileName} {
-      allow read: if request.auth != null;
+      // Open a photo by its link only; listing a folder would expose every upload, including removed ones.
+      allow get: if request.auth != null;
+      allow list: if request.auth != null && request.auth.uid == userId;
       allow write: if request.auth != null &&
                       request.auth.uid == userId &&
                       request.resource.size < 10 * 1024 * 1024 &&
@@ -49,7 +51,9 @@ service firebase.storage {
     // --- LEGACY DATING PROFILE IMAGES ---
     // Path: dating_images/{userId}/{fileName}
     match /dating_images/{userId}/{fileName} {
-      allow read: if request.auth != null;
+      // Open a photo by its link only; listing a folder would expose every upload, including removed ones.
+      allow get: if request.auth != null;
+      allow list: if request.auth != null && request.auth.uid == userId;
       allow write: if request.auth != null &&
                       request.auth.uid == userId &&
                       request.resource.size < 10 * 1024 * 1024 &&
@@ -141,7 +145,9 @@ service firebase.storage {
     // --- CHAT MEDIA ---
     // Path: chat_media/{userId}/{fileName}
     match /chat_media/{userId}/{fileName} {
-      allow read: if request.auth != null;
+      // Open a file by its link only; listing a folder would expose every chat upload.
+      allow get: if request.auth != null;
+      allow list: if request.auth != null && request.auth.uid == userId;
       allow write: if request.auth != null &&
                       request.auth.uid == userId &&
                       (

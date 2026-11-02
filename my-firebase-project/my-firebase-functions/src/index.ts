@@ -3781,6 +3781,11 @@ const readDatingDisplayName = async (uid: string, fallback: string): Promise<str
   return datingPushString(data.name, 80) || datingPushString(data.username, 80) || fallback;
 };
 
+const readBlindDateDisplayName = async (uid: string, fallback: string): Promise<string> => {
+  const profileDoc = await db.collection("blindDateProfiles").doc(uid).get();
+  return datingPushString(profileDoc.get("name"), 80) || fallback;
+};
+
 const sendDatingActivityPush = async (params: {
   recipientId: string;
   actorId: string;
@@ -3926,8 +3931,8 @@ export const onDatingCommentWriteNotify = functions.firestore
       if (Date.now() - previous < datingCommentRenotifyCooldownMs) return undefined;
     }
 
-    const senderName = datingPushString(after.senderName, 80) ||
-      await readDatingDisplayName(senderId, "Someone");
+    // Comment docs carry a client-written senderName; never put it in a push title.
+    const senderName = await readDatingDisplayName(senderId, "Someone");
     await sendDatingActivityPush({
       recipientId: userId,
       actorId: senderId,
@@ -3949,8 +3954,9 @@ export const onBlindDateInvitationWriteNotify = functions.firestore
     const beforeStatus = datingPushStatus(before);
     const afterStatus = datingPushStatus(after);
 
+    // Invite docs carry client-written names; push text uses the Blind Date profiles instead.
     if (afterStatus === "pending" && beforeStatus !== "pending") {
-      const senderName = datingPushString(after.senderName, 80) || "Someone";
+      const senderName = await readBlindDateDisplayName(senderId, "Someone");
       await sendDatingActivityPush({
         recipientId: userId,
         actorId: senderId,
@@ -3963,7 +3969,7 @@ export const onBlindDateInvitationWriteNotify = functions.firestore
     }
 
     if (afterStatus === "accepted" && beforeStatus !== "accepted") {
-      const recipientName = datingPushString(after.recipientName, 80) || "Your match";
+      const recipientName = await readBlindDateDisplayName(userId, "Your match");
       await sendDatingActivityPush({
         recipientId: senderId,
         actorId: userId,
@@ -3973,6 +3979,31 @@ export const onBlindDateInvitationWriteNotify = functions.firestore
         referenceId: datingPushString(after.matchedChatId, 128) || userId,
       });
     }
+    return undefined;
+  });
+
+const calendarAgeFromBirthDate = (birthDate: Date, now: Date = new Date()): number => {
+  let age = now.getUTCFullYear() - birthDate.getUTCFullYear();
+  const monthDelta = now.getUTCMonth() - birthDate.getUTCMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < birthDate.getUTCDate())) age -= 1;
+  return age;
+};
+
+/**
+ * Keeps the public Dating Loop age equal to the account birthdate. Clients write
+ * `age` themselves, so without this a profile could show any age from 18 to 120.
+ */
+export const onDatingProfileWriteSyncAge = functions.firestore
+  .document("dating_profiles/{userId}")
+  .onWrite(async (change, context) => {
+    if (!change.after.exists) return undefined;
+    const {userId} = context.params as {userId: string};
+    const userData = ((await db.collection("users").doc(userId).get()).data() || {}) as Record<string, unknown>;
+    const birthDate = userData.birthDate ?? userData.dateOfBirth;
+    if (!(birthDate instanceof admin.firestore.Timestamp)) return undefined;
+    const age = calendarAgeFromBirthDate(birthDate.toDate());
+    if (age < 18 || change.after.get("age") === age) return undefined;
+    await change.after.ref.set({age}, {merge: true});
     return undefined;
   });
 
