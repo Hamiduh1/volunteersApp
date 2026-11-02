@@ -3327,6 +3327,9 @@ export const requestMarketplacePurchase = functions.runWith({enforceAppCheck: tr
         if (asNonEmptyString(liveItem.sellerId) !== sellerId) {
           throw new functions.https.HttpsError("failed-precondition", "The marketplace seller changed. Refresh and try again.");
         }
+        if (await blindDateUsersBlockedInTransaction(transaction, buyerId, sellerId)) {
+          throw new functions.https.HttpsError("permission-denied", "This listing isn't available to you.");
+        }
         const amountUsd = marketplaceItemPriceUsd(liveItem);
         if (amountUsd <= 0) {
           throw new functions.https.HttpsError("failed-precondition", "This marketplace listing has an invalid price.");

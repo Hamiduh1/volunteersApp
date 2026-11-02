@@ -3193,6 +3193,54 @@ service cloud.firestore {
       return !('condition' in data) || data.condition in ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR'];
     }
 
+    function isMarketplaceMediaEntryForSeller(entry, sellerId) {
+      return entry is map
+        && entry.keys().hasOnly(['url', 'type', 'name'])
+        && isMarketplaceStorageUrlForSeller(entry.url, sellerId)
+        && entry.get('type', 'image') in ['image', 'video']
+        && (!('name' in entry) || (entry.name is string && entry.name.size() <= 200));
+    }
+
+    function marketplaceMediaListValid(media, sellerId) {
+      return media is list
+        && media.size() > 0
+        && media.size() <= 20
+        && isMarketplaceMediaEntryForSeller(media[0], sellerId)
+        && (media.size() < 2 || isMarketplaceMediaEntryForSeller(media[1], sellerId))
+        && (media.size() < 3 || isMarketplaceMediaEntryForSeller(media[2], sellerId))
+        && (media.size() < 4 || isMarketplaceMediaEntryForSeller(media[3], sellerId))
+        && (media.size() < 5 || isMarketplaceMediaEntryForSeller(media[4], sellerId))
+        && (media.size() < 6 || isMarketplaceMediaEntryForSeller(media[5], sellerId))
+        && (media.size() < 7 || isMarketplaceMediaEntryForSeller(media[6], sellerId))
+        && (media.size() < 8 || isMarketplaceMediaEntryForSeller(media[7], sellerId))
+        && (media.size() < 9 || isMarketplaceMediaEntryForSeller(media[8], sellerId))
+        && (media.size() < 10 || isMarketplaceMediaEntryForSeller(media[9], sellerId))
+        && (media.size() < 11 || isMarketplaceMediaEntryForSeller(media[10], sellerId))
+        && (media.size() < 12 || isMarketplaceMediaEntryForSeller(media[11], sellerId))
+        && (media.size() < 13 || isMarketplaceMediaEntryForSeller(media[12], sellerId))
+        && (media.size() < 14 || isMarketplaceMediaEntryForSeller(media[13], sellerId))
+        && (media.size() < 15 || isMarketplaceMediaEntryForSeller(media[14], sellerId))
+        && (media.size() < 16 || isMarketplaceMediaEntryForSeller(media[15], sellerId))
+        && (media.size() < 17 || isMarketplaceMediaEntryForSeller(media[16], sellerId))
+        && (media.size() < 18 || isMarketplaceMediaEntryForSeller(media[17], sellerId))
+        && (media.size() < 19 || isMarketplaceMediaEntryForSeller(media[18], sellerId))
+        && (media.size() < 20 || isMarketplaceMediaEntryForSeller(media[19], sellerId));
+    }
+
+    function isOptionalNumber(data, key) {
+      return !(key in data) || data[key] == null || data[key] is number;
+    }
+
+    function marketplaceListingTextValid(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 8000
+        && data.get('category', '') is string && data.get('category', '').size() <= 60
+        && data.get('locationName', '') is string && data.get('locationName', '').size() <= 200
+        && data.get('sellerPhone', '') is string && data.get('sellerPhone', '').size() <= 40
+        && isOptionalNumber(data, 'latitude')
+        && isOptionalNumber(data, 'longitude');
+    }
+
     function marketplaceListingCreateMediaValid(data, sellerId) {
       return ('imageUrls' in data)
         && marketplaceImageUrlsListValid(data.imageUrls, sellerId);
@@ -3211,6 +3259,9 @@ service cloud.firestore {
         && request.resource.data.price <= 50000
         && marketplaceListingPatchMediaValid(request.resource.data, request.auth.uid)
         && marketplaceConditionValid(request.resource.data)
+        && marketplaceListingTextValid(request.resource.data)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['media'])
+            || marketplaceMediaListValid(request.resource.data.media, request.auth.uid))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'title',
           'description',
@@ -3268,14 +3319,26 @@ service cloud.firestore {
 
     match /marketplace_items/{itemId} {
       allow read: if isSignedIn();
+      // Commerce fields (buyerId, sold*, stripe*) and sort keys stay server-owned, so creates use an allowlist.
       allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          'title', 'description', 'price', 'category', 'condition', 'sellerName', 'sellerId', 'sellerPhone',
+          'imageUrls', 'media', 'locationName', 'countryCode', 'latitude', 'longitude', 'status', 'timestamp'
+        ])
         && request.resource.data.sellerId == request.auth.uid
         && request.resource.data.price is number
         && request.resource.data.price > 0
         && request.resource.data.price <= 50000
-        && marketplaceListingOpenStatus(request.resource.data.get('status', 'AVAILABLE'))
+        && request.resource.data.status == 'AVAILABLE'
+        && request.resource.data.timestamp == request.time
+        && request.resource.data.get('sellerName', '') is string
+        && request.resource.data.get('sellerName', '').size() <= 120
+        && request.resource.data.get('countryCode', '') is string
+        && request.resource.data.get('countryCode', '').size() <= 8
+        && marketplaceListingTextValid(request.resource.data)
         && marketplaceConditionValid(request.resource.data)
-        && marketplaceListingCreateMediaValid(request.resource.data, request.auth.uid);
+        && marketplaceListingCreateMediaValid(request.resource.data, request.auth.uid)
+        && marketplaceMediaListValid(request.resource.data.media, request.auth.uid);
       // Sellers may edit listing copy/media only while the listing is still open.
       // Commerce fields (status, sold*, reserved*) are server-owned via Cloud Functions.
       allow update: if isSignedIn()

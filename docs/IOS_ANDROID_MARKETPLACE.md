@@ -39,7 +39,29 @@ as shown. Listings with older category values still appear under "All". Android 
 iOS used to fill `sellerPhone` from the account phone number when the seller left it blank. Listings are readable by every
 signed-in member, so iOS now publishes only a phone the seller typed in. Please do the same on Android.
 
-## 5) Unchanged
+## 5) Stricter listing rules
+
+Both apps already write exactly these fields, so nothing should break. Keep new client code inside them.
+
+- **Create allowlist:** `title`, `description`, `price`, `category`, `condition`, `sellerName`, `sellerId`,
+  `sellerPhone`, `imageUrls`, `media`, `locationName`, `countryCode`, `latitude`, `longitude`, `status`, `timestamp`.
+  Commerce fields (`buyerId`, `soldAt`, `stripeCommerceOrderId`) stay server-owned.
+- **Create:** `status` must be `AVAILABLE` and `timestamp` must be the server timestamp, so a listing can't
+  backdate or future-date itself to stay at the top of "Newest".
+- **Size limits** (create and edit): title 1–200 characters, description up to 8000, category 60, location name 200,
+  seller phone 40, seller name 120. `latitude` and `longitude` must be numbers when present.
+- **`media`:** 1–20 entries, each `{url, type, name?}`. `type` is `image` or `video`, and `url` must be in the
+  seller's own `marketplace_images/{uid}/` folder (the same check `imageUrls` already had). It's checked on create,
+  and on edit whenever `media` changes.
+- **Storage:** `marketplace_images/{uid}/` now also accepts videos (`video/*`, under 100 MB). Images stay under 25 MB.
+
+## 6) Buying from someone who blocked you
+
+`requestMarketplacePurchase` now refuses checkout with `permission-denied` ("This listing isn't available to you.")
+when either the buyer or the seller has blocked the other. It checks both `blocked_users` and `blockedUsers`.
+**Needs a functions deploy from Android.**
+
+## 7) Unchanged
 
 - Purchases still go through the `requestMarketplacePurchase` callable.
 - Chat still uses the chat invitation flow.
@@ -49,5 +71,6 @@ signed-in member, so iOS now publishes only a phone the seller typed in. Please 
 
 ## Deploy order
 
-Deploy `my-firebase-project/firestore.rules` before the iOS release. Without it, condition edits and saves are rejected.
-iOS shows a friendly message for saves in that case. No functions deploy is needed.
+Deploy `my-firebase-project/firestore.rules` and `storage.rules` before the iOS release. Without them, condition edits,
+saves and listing videos are rejected. iOS shows a friendly message for saves in that case. The block check in section 6
+needs a functions deploy (Android).
