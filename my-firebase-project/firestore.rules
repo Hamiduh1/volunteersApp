@@ -1773,6 +1773,15 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      // Marketplace saved items (private bookmark list).
+      match /marketplace_saves/{itemId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['itemId', 'savedAt'])
+          && request.resource.data.itemId == itemId
+          && request.resource.data.savedAt == request.time;
+      }
+
       // Android MindLoom saved posts (private bookmark list).
       match /saved_jokes/{jokeId} {
         allow read: if isOwner(userId);
@@ -3180,6 +3189,10 @@ service cloud.firestore {
         && (urls.size() < 20 || isMarketplaceStorageUrlForSeller(urls[19], sellerId));
     }
 
+    function marketplaceConditionValid(data) {
+      return !('condition' in data) || data.condition in ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR'];
+    }
+
     function marketplaceListingCreateMediaValid(data, sellerId) {
       return ('imageUrls' in data)
         && marketplaceImageUrlsListValid(data.imageUrls, sellerId);
@@ -3197,10 +3210,12 @@ service cloud.firestore {
         && request.resource.data.price > 0
         && request.resource.data.price <= 50000
         && marketplaceListingPatchMediaValid(request.resource.data, request.auth.uid)
+        && marketplaceConditionValid(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'title',
           'description',
           'category',
+          'condition',
           'price',
           'sellerPhone',
           'locationName',
@@ -3259,6 +3274,7 @@ service cloud.firestore {
         && request.resource.data.price > 0
         && request.resource.data.price <= 50000
         && marketplaceListingOpenStatus(request.resource.data.get('status', 'AVAILABLE'))
+        && marketplaceConditionValid(request.resource.data)
         && marketplaceListingCreateMediaValid(request.resource.data, request.auth.uid);
       // Sellers may edit listing copy/media only while the listing is still open.
       // Commerce fields (status, sold*, reserved*) are server-owned via Cloud Functions.
