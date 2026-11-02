@@ -20,6 +20,7 @@ import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.firestore
+import com.google.firebase.functions.FirebaseFunctionsException
 import com.google.firebase.storage.storage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -112,25 +113,27 @@ class BlindDateViewModel : ViewModel() {
 
     /** Partner passes decide whether a Dating Loop match can start a Blind Date chat. */
     fun refreshPartnerStatuses(partnerIds: Collection<String>) {
+        viewModelScope.launch { loadPartnerStatuses(partnerIds) }
+    }
+
+    private suspend fun loadPartnerStatuses(partnerIds: Collection<String>) {
         val ids = partnerIds.filter { it.isNotBlank() && it != currentUserId }.distinct()
         if (ids.isEmpty()) return
-        viewModelScope.launch {
-            val statuses = mutableMapOf<String, BlindDateUserStatus>()
-            ids.chunked(10).forEach { chunk ->
-                runCatching {
-                    db.collection(FirestoreCollection.BLIND_DATE_PROFILES)
-                        .whereIn(FieldPath.documentId(), chunk)
-                        .get()
-                        .await()
-                }.onSuccess { snapshot ->
-                    snapshot.documents.forEach { doc ->
-                        statuses[doc.id] = normalizeBlindDateBackendStatus(doc.getString("status"))
-                    }
-                }.onFailure { Log.w("BlindDateVM", "Partner Blind Date status lookup failed.", it) }
-            }
-            ids.forEach { id -> if (id !in statuses) statuses[id] = BlindDateUserStatus.NotJoined }
-            _uiState.update { it.copy(partnerBlindStatuses = it.partnerBlindStatuses + statuses) }
+        val statuses = mutableMapOf<String, BlindDateUserStatus>()
+        ids.chunked(10).forEach { chunk ->
+            runCatching {
+                db.collection(FirestoreCollection.BLIND_DATE_PROFILES)
+                    .whereIn(FieldPath.documentId(), chunk)
+                    .get()
+                    .await()
+            }.onSuccess { snapshot ->
+                snapshot.documents.forEach { doc ->
+                    statuses[doc.id] = normalizeBlindDateBackendStatus(doc.getString("status"))
+                }
+            }.onFailure { Log.w("BlindDateVM", "Partner Blind Date status lookup failed.", it) }
         }
+        ids.forEach { id -> if (id !in statuses) statuses[id] = BlindDateUserStatus.NotJoined }
+        _uiState.update { it.copy(partnerBlindStatuses = it.partnerBlindStatuses + statuses) }
     }
 
     /**
@@ -177,17 +180,149 @@ class BlindDateViewModel : ViewModel() {
             BlindDatePairStage.PartnerInvitedYou -> {
                 state.receivedInvitations.firstOrNull { it.senderId == uid }?.let(::acceptInvitation)
             }
-            BlindDatePairStage.ReadyToStart -> {
-                sendInvitation(uid) {
-                    _events.value = BlindDateEvent.ShowToast(
-                        "Chat request sent. ${name.ifBlank { "Your match" }} opens it from Blind Date."
-                    )
-                }
-            }
+            BlindDatePairStage.ReadyToStart -> startMatchChat(uid, name)
             BlindDatePairStage.InvitedPartner,
             BlindDatePairStage.WaitingForPartnerPass,
             BlindDatePairStage.MyPaymentProcessing,
             BlindDatePairStage.NeedsMyPass -> Unit
+        }
+    }
+
+    /**
+     * Liking each other on Dating Loop is the consent, so once both hold a pass the server opens
+     * the chat directly. Calling it again for the same pair returns the existing chat.
+     */
+    private fun startMatchChat(uid: String, name: String) {
+        if (currentUserId == null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(startingChatIds = it.startingChatIds + uid) }
+            try {
+                when (val outcome = requestMatchChat(uid, name)) {
+                    is MatchChatOutcome.Opened ->
+                        _events.value = BlindDateEvent.NavigateToChat(outcome.chatId, outcome.otherUserId)
+                    MatchChatOutcome.NotDeployed -> sendInvitation(uid) {
+                        _events.value = BlindDateEvent.ShowToast(
+                            "Chat request sent. ${name.ifBlank { "Your match" }} opens it from Blind Date."
+                        )
+                    }
+                    is MatchChatOutcome.Failed ->
+                        _events.value = BlindDateEvent.ShowToast(outcome.message, DateHubBannerTone.Error)
+                }
+            } finally {
+                _uiState.update { it.copy(startingChatIds = it.startingChatIds - uid) }
+            }
+        }
+    }
+
+    private sealed interface MatchChatOutcome {
+        data class Opened(val chatId: String, val otherUserId: String) : MatchChatOutcome
+        /** The server doesn't have startBlindDateMatchChat yet; use the invite/accept round. */
+        data object NotDeployed : MatchChatOutcome
+        data class Failed(val message: String) : MatchChatOutcome
+    }
+
+    private suspend fun requestMatchChat(uid: String, name: String): MatchChatOutcome {
+        return try {
+            val result = FunctionsClient.callMap(
+                CallableFunction.START_BLIND_DATE_MATCH_CHAT,
+                hashMapOf("partnerId" to uid)
+            )
+            val chatId = (result?.get("chatId") as? String)?.takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException("The chat could not be opened. Please try again.")
+            val otherUserId = (result["otherUserId"] as? String).orEmpty().ifBlank { uid }
+            _uiState.update {
+                it.copy(
+                    status = BlindDateUserStatus.Matched,
+                    matchedChatId = chatId,
+                    matchedOtherUserId = otherUserId,
+                    matchedOtherUserName = name.ifBlank { "Your match" },
+                    chatIdsByPartner = it.chatIdsByPartner + (otherUserId to chatId),
+                    error = null
+                )
+            }
+            checkUserStatus()
+            MatchChatOutcome.Opened(chatId, otherUserId)
+        } catch (e: FirebaseFunctionsException) {
+            // The server's own not-found carries a sentence; an undeployed callable is a bare 404.
+            val bareMessage = e.message.orEmpty().replace('_', ' ')
+            if (e.code == FirebaseFunctionsException.Code.NOT_FOUND &&
+                (bareMessage.isBlank() || bareMessage.contains("not found", ignoreCase = true))) {
+                MatchChatOutcome.NotDeployed
+            } else {
+                Log.w("BlindDateVM", "startBlindDateMatchChat failed.", e)
+                refreshPartnerStatuses(listOf(uid))
+                MatchChatOutcome.Failed(
+                    e.message?.takeIf { it.isNotBlank() } ?: "Could not open the chat. Please try again."
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("BlindDateVM", "startBlindDateMatchChat failed.", e)
+            MatchChatOutcome.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Could not open the chat. Please try again.")
+        }
+    }
+
+    /**
+     * Match screen "Start chatting": with an active pass, re-checks the partner's pass, then starts
+     * the chat or accepts their invite. [onResult] gets null when the member still has to act on
+     * Blind Date (no pass, partner not there yet, or the request failed).
+     */
+    fun openMatchChatFromLoop(uid: String, name: String, onResult: (String?) -> Unit) {
+        val state = _uiState.value
+        state.chatIdsByPartner[uid]?.takeIf { it.isNotBlank() }?.let { return onResult(it) }
+        if (currentUserId == null || uid in state.startingChatIds || state.status != BlindDateUserStatus.Active) {
+            return onResult(null)
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(startingChatIds = it.startingChatIds + uid) }
+            val chatId = try {
+                loadPartnerStatuses(listOf(uid))
+                val current = _uiState.value
+                when (val stage = current.pairStage(uid, null)) {
+                    is BlindDatePairStage.ChatReady -> stage.chatId
+                    BlindDatePairStage.ReadyToStart -> when (val outcome = requestMatchChat(uid, name)) {
+                        is MatchChatOutcome.Opened -> outcome.chatId
+                        MatchChatOutcome.NotDeployed -> null
+                        is MatchChatOutcome.Failed -> {
+                            _events.value = BlindDateEvent.ShowToast(outcome.message, DateHubBannerTone.Error)
+                            null
+                        }
+                    }
+                    BlindDatePairStage.PartnerInvitedYou ->
+                        current.receivedInvitations.firstOrNull { it.senderId == uid }?.let { acceptInvitationForChat(it) }
+                    else -> null
+                }
+            } finally {
+                _uiState.update { it.copy(startingChatIds = it.startingChatIds - uid) }
+            }
+            onResult(chatId)
+        }
+    }
+
+    private suspend fun acceptInvitationForChat(invitation: BlindDateInvitation): String? {
+        val otherUserId = invitation.senderId
+        if (otherUserId in _uiState.value.blockedUserIds) return null
+        return try {
+            val resultMap = FunctionsClient.callMap(
+                CallableFunction.ACCEPT_BLIND_DATE_INVITATION,
+                hashMapOf("senderId" to otherUserId)
+            )
+            val chatId = (resultMap?.get("chatId") as? String)?.takeIf { it.isNotBlank() } ?: return null
+            val resolvedOtherUserId = (resultMap["otherUserId"] as? String).orEmpty().ifBlank { otherUserId }
+            _uiState.update {
+                it.copy(
+                    status = BlindDateUserStatus.Matched,
+                    matchedChatId = chatId,
+                    matchedOtherUserId = resolvedOtherUserId,
+                    matchedOtherUserName = invitation.senderName.ifBlank { "Your match" },
+                    chatIdsByPartner = it.chatIdsByPartner + (resolvedOtherUserId to chatId),
+                    error = null
+                )
+            }
+            chatId
+        } catch (e: Exception) {
+            Log.w("BlindDateVM", "Accepting the Blind Date invite from the match screen failed.", e)
+            _events.value = BlindDateEvent.ShowToast(e.message ?: "Failed to accept invitation.", DateHubBannerTone.Error)
+            null
         }
     }
 

@@ -79,14 +79,15 @@ fun blindDatePairings(matches: List<DatingMatch>, blindState: BlindDateUiState):
         .map { BlindDatePairing(it, blindState.pairStage(it.uid, it.chatId)) }
         .sortedBy { it.stage.sortRank }
 
-private fun stageMessage(stage: BlindDatePairStage, name: String): String = when (stage) {
+private fun stageMessage(stage: BlindDatePairStage, name: String, myPassUsed: Boolean = false): String = when (stage) {
     is BlindDatePairStage.ChatReady -> "Your chat is open"
     BlindDatePairStage.PartnerInvitedYou -> "$name is waiting to chat with you"
-    BlindDatePairStage.ReadyToStart -> "You both have a pass. Say hi!"
+    BlindDatePairStage.ReadyToStart -> "You both have a pass. Start chatting now"
     BlindDatePairStage.InvitedPartner -> "Chat request sent. Waiting for $name"
-    BlindDatePairStage.WaitingForPartnerPass -> "Waiting for $name to get a pass"
+    BlindDatePairStage.WaitingForPartnerPass -> "We'll let you know when $name joins Blind Date"
     BlindDatePairStage.MyPaymentProcessing -> "Your payment is processing"
-    BlindDatePairStage.NeedsMyPass -> "Get a pass to chat with $name"
+    BlindDatePairStage.NeedsMyPass ->
+        if (myPassUsed) "Get a new pass to start chatting with $name" else "Join Blind Date to start chatting with $name"
 }
 
 private fun stageBadge(stage: BlindDatePairStage): Pair<ImageVector, Color>? = when (stage) {
@@ -142,6 +143,7 @@ internal fun BlindDateMatchesPane(
                 unlockLabel = unlockLabel,
                 onAction = { onPairAction(pairing) },
                 onUnlock = { onUnlock(pairing) },
+                myPassUsed = blindState.status == BlindDateUserStatus.Matched,
             )
         }
         if (comments.isNotEmpty()) {
@@ -252,6 +254,7 @@ private fun PairingRow(
     unlockLabel: String,
     onAction: () -> Unit,
     onUnlock: () -> Unit,
+    myPassUsed: Boolean = false,
 ) {
     val match = pairing.match
     Surface(
@@ -280,7 +283,7 @@ private fun PairingRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    stageMessage(pairing.stage, match.name),
+                    stageMessage(pairing.stage, match.name, myPassUsed),
                     style = MaterialTheme.typography.bodySmall,
                     color = DateA11yPalette.textSecondary,
                     maxLines = 2
@@ -511,6 +514,7 @@ internal fun BlindDateHomePane(
                 unlockLabel = unlockLabel,
                 onAction = { onPairAction(pairing) },
                 onUnlock = { onUnlock(pairing) },
+                myPassUsed = blindState.status == BlindDateUserStatus.Matched,
             )
         }
         if (comments.isNotEmpty()) {

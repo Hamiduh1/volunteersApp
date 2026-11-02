@@ -11,9 +11,12 @@ object DateHubNav {
     const val EXTRA_OPEN_BLIND_DATE = "date_hub_open_blind_date"
     const val EXTRA_OPEN_DATING_LOOP = "date_hub_open_dating_loop"
 
-    /** Push `type` values sent by the dating push functions (iOS DatingPushRoute parity). */
-    val DATING_LOOP_PUSH_TYPES = setOf("dating_like", "dating_super_like", "dating_match", "dating_comment")
-    val BLIND_DATE_PUSH_TYPES = setOf("blind_date_invite", "blind_date_match")
+    /**
+     * Push `type` values sent by the dating push functions (iOS DatingPushRoute parity).
+     * Matches chat on Blind Date, so `dating_match` opens the Blind Date matches pane.
+     */
+    val DATING_LOOP_PUSH_TYPES = setOf("dating_like", "dating_super_like", "dating_comment")
+    val BLIND_DATE_PUSH_TYPES = setOf("blind_date_invite", "blind_date_match", "dating_match", "blind_date_partner_joined")
 
     private fun pushType(intent: Intent?): String =
         intent?.getStringExtra("type")?.trim()?.lowercase(Locale.ROOT).orEmpty()

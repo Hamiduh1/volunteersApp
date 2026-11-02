@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Comment
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.LiveTv
@@ -182,6 +183,7 @@ private fun notificationIcon(type: String): Pair<ImageVector, Color> = when (typ
     "dating_super_like" -> Icons.Default.Star to Color(0xFF2F80ED)
     "dating_comment" -> Icons.AutoMirrored.Filled.Comment to Color(0xFF7B3FC4)
     "blind_date_invite" -> Icons.Default.VisibilityOff to Color(0xFFB45309)
+    "blind_date_partner_joined" -> Icons.Default.AutoAwesome to Color(0xFFB45309)
     "livestream" -> Icons.Default.LiveTv to Color(0xFFD81B60)
     "jokespost" -> Icons.Default.TheaterComedy to Color(0xFF00897B)
     else -> Icons.Default.Notifications to Color(0xFF00897B)

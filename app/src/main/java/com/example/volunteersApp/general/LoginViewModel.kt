@@ -167,6 +167,9 @@ class LoginViewModel : ViewModel() {
                         calendar.add(Calendar.YEAR, -18)
                         birthDate.toDate().after(calendar.time)
                     } else false
+                    // Newer accounts keep the birthday in user_private; the root doc only has the server's age flags.
+                    val serverAgeRestricted = birthDate == null &&
+                        (userDoc.getBoolean("isMinor") == true || userDoc.getBoolean("requiresParentalConsent") == true)
 
                     if (firestoreUserType == null) {
                         auth.signOut()
@@ -267,7 +270,7 @@ class LoginViewModel : ViewModel() {
                             isResendingVerification = false,
                             loginSuccess = true,
                             userType = effectiveLoginRole,
-                            isAgeRestricted = isMinor
+                            isAgeRestricted = isMinor || serverAgeRestricted
                         )
                     }
                 }

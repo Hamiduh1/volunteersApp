@@ -274,6 +274,7 @@ fun DateEvaScreen(
     onOpenInbox: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val blindUiState by blindDateViewModel.uiState.collectAsState()
     val context = LocalContext.current
     val aiResponse by vertexViewModel.generatedResponse.collectAsState()
     var showAiResponseDialog by remember { mutableStateOf(false) }
@@ -448,6 +449,7 @@ fun DateEvaScreen(
 
             DateHubRoute.DATING_LOOP -> DatingLoopScreen(
                 uiState = uiState,
+                hasBlindDatePass = blindUiState.status == BlindDateUserStatus.Active,
                 onBack = viewModel::navigateBack,
                 onDismissBanner = viewModel::dismissBanner,
                 onOpenProfile = {
@@ -517,8 +519,7 @@ fun DateEvaScreen(
                 },
                 onPassIncoming = viewModel::passDatingProfile,
                 onOpenMatchChat = { match ->
-                    viewModel.resolveDatingMatchChat(match) { chatId ->
-                    if (!chatId.isNullOrBlank()) {
+                    val openMatchChat: (String) -> Unit = { chatId ->
                         val intent = Intent(context, MainActivity::class.java).apply {
                             putExtra(SocialInboxNav.EXTRA_PUSH_CHAT_ID, chatId)
                             putExtra(SocialInboxNav.EXTRA_PUSH_OTHER_USER_ID, match.uid)
@@ -527,8 +528,19 @@ fun DateEvaScreen(
                                 Intent.FLAG_ACTIVITY_SINGLE_TOP
                         }
                         context.startActivity(intent)
+                    }
+                    viewModel.resolveDatingMatchChat(match) { chatId ->
+                    if (!chatId.isNullOrBlank()) {
+                        openMatchChat(chatId)
                     } else {
-                        handleAccessResult(viewModel.openBlindDateForMatch(match.uid))
+                        blindDateViewModel.openMatchChatFromLoop(match.uid, match.name) { startedChatId ->
+                            if (!startedChatId.isNullOrBlank()) {
+                                viewModel.dismissMatchCelebration()
+                                openMatchChat(startedChatId)
+                            } else {
+                                handleAccessResult(viewModel.openBlindDateForMatch(match.uid))
+                            }
+                        }
                     }
                     }
                 },
@@ -1366,6 +1378,7 @@ private fun DatingLoopScreen(
     onSendComment: (DatingProfile, String, (Boolean, DateHubBannerMessage) -> Unit) -> Unit = { _, _, _ -> },
     onDismissComment: (DatingComment) -> Unit = {},
     onRefreshLoop: ((onDone: () -> Unit) -> Unit)? = null,
+    hasBlindDatePass: Boolean = false,
 ) {
     val discoverableProfiles = uiState.filteredLoopProfiles
     var peopleRefreshing by remember { mutableStateOf(false) }
@@ -1566,6 +1579,7 @@ private fun DatingLoopScreen(
                             onPass = { like -> onPassIncoming(like.senderId) },
                             modifier = Modifier.weight(1f),
                             commentsBySender = commentsBySender,
+                            hasBlindPass = hasBlindDatePass,
                         )
                     } else {
                         Column(
@@ -1794,6 +1808,15 @@ private fun DatingLoopScreen(
                     )
                 }
                 if (uiState.datingLoopTab == DatingLoopTab.LikesYou) {
+                    if (uiState.likesYou.isNotEmpty()) {
+                        item {
+                            Text(
+                                datingLikesYouHint(hasBlindDatePass),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = DateA11yPalette.textSecondary
+                            )
+                        }
+                    }
                     item {
                         DatingLikesYouPane(
                             likes = uiState.likesYou,
@@ -1949,6 +1972,7 @@ private fun DatingLoopScreen(
                 onOpenMatchChat(match)
             },
             onKeepSwiping = onDismissMatch,
+            hasBlindPass = hasBlindDatePass,
         )
     }
 
@@ -2977,7 +3001,7 @@ private fun DatingProfileEditorScreen(
 
             EditorSectionCard(
                 title = "About you",
-                subtitle = "Your birthday stays private; only your age is shown."
+                subtitle = "Only your age is shown. Your account birthday stays private."
             ) {
                 DatingProfileAboutEditor(
                     birthDate = birthDate,

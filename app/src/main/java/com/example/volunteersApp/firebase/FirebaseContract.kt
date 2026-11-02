@@ -108,6 +108,8 @@ object CallableFunction {
     const val ENSURE_DATING_ELIGIBILITY = "ensureDatingEligibility"
     const val JOIN_BLIND_DATE = "joinBlindDate"
     const val ACCEPT_BLIND_DATE_INVITATION = "acceptBlindDateInvitation"
+    const val START_BLIND_DATE_MATCH_CHAT = "startBlindDateMatchChat"
+    const val GET_CURRENT_USER_PRIVATE_FLAGS = "getCurrentUserPrivateFlags"
     const val DECLINE_BLIND_DATE_INVITATION = "declineBlindDateInvitation"
     const val REJOIN_BLIND_DATE = "rejoinBlindDate"
     const val GET_PLATFORM_FEE_MOBILE_MONEY_OPTIONS = "getPlatformFeeMobileMoneyOptions"

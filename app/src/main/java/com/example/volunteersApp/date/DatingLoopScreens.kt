@@ -132,6 +132,17 @@ internal fun datingInviteLabel(status: DatingRelationStatus, inFlight: Boolean):
 internal fun datingMatchChatLabel(chatId: String?): String =
     if (chatId.isNullOrBlank()) "Chat on Blind Date" else "Send a message"
 
+/** "It's a Match!" button: with a pass the server opens the Blind Date chat right away. */
+internal fun datingMatchCelebrationLabel(chatId: String?, hasBlindPass: Boolean): String = when {
+    !chatId.isNullOrBlank() -> "Send a message"
+    hasBlindPass -> "Start chatting"
+    else -> "Join Blind Date to chat"
+}
+
+internal fun datingLikesYouHint(hasBlindPass: Boolean): String =
+    if (hasBlindPass) "Like someone back to accept, then start chatting on Blind Date right away."
+    else "Like someone back to accept, then join Blind Date to start chatting."
+
 /** Widens a child past its parent's horizontal padding so it touches the screen edges. */
 private fun Modifier.bleedHorizontally(inset: Dp): Modifier = layout { measurable, constraints ->
     val extra = (inset * 2).roundToPx()
@@ -289,6 +300,7 @@ internal fun DatingLikesYouGrid(
     onPass: (DatingIncomingLike) -> Unit,
     modifier: Modifier = Modifier,
     commentsBySender: Map<String, DatingComment> = emptyMap(),
+    hasBlindPass: Boolean = false,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -309,6 +321,13 @@ internal fun DatingLikesYouGrid(
                         style = MaterialTheme.typography.bodySmall,
                         color = DateA11yPalette.textSecondary
                     )
+                    if (likes.isNotEmpty()) {
+                        Text(
+                            datingLikesYouHint(hasBlindPass),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = DateA11yPalette.textSecondary
+                        )
+                    }
                 }
             }
         }
@@ -1524,6 +1543,7 @@ internal fun DatingMatchFullScreen(
     myPhotoUrl: String,
     onMessage: () -> Unit,
     onKeepSwiping: () -> Unit,
+    hasBlindPass: Boolean = false,
 ) {
     Dialog(onDismissRequest = onKeepSwiping, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(
@@ -1555,7 +1575,7 @@ internal fun DatingMatchFullScreen(
                 if (match.chatId.isNullOrBlank()) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Chat on Blind Date. You both need a pass to start.",
+                        if (hasBlindPass) "Start chatting on Blind Date now." else "Join Blind Date to start chatting.",
                         color = Color.White.copy(alpha = 0.85f),
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center
@@ -1613,7 +1633,7 @@ internal fun DatingMatchFullScreen(
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text(datingMatchChatLabel(match.chatId), fontWeight = FontWeight.Bold)
+                    Text(datingMatchCelebrationLabel(match.chatId, hasBlindPass), fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(

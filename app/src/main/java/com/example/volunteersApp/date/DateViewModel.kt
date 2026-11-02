@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import com.example.volunteersApp.chat.CHAT_PRIVACY_SETTINGS_DOC
@@ -891,6 +892,11 @@ class DateEvaViewModel(
                 datingPrivateDoc(uid, DATING_PRIVATE_CONTACT_DOC).get().await().getTimestamp("birthDate")?.toDate()
             }.getOrNull() ?: runCatching {
                 db.collection(FirestoreCollection.USERS).document(uid).get().await().getTimestamp("birthDate")?.toDate()
+            }.getOrNull() ?: runCatching {
+                // New accounts keep the birthday in user_private, which only the server reads.
+                val millis = FunctionsClient.callMap(CallableFunction.GET_CURRENT_USER_PRIVATE_FLAGS)
+                    ?.get("birthDateMs") as? Number
+                millis?.toLong()?.takeIf { it > 0L }?.let { Date(it) }
             }.getOrNull()
             _uiState.update { recomputeLoopProfiles(it.copy(privateBirthDate = privateBirthDate)) }
             refreshOwnDatingAgeIfNeeded()
