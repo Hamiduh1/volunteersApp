@@ -122,8 +122,11 @@ class BlindDateViewModel : ViewModel() {
         val statuses = mutableMapOf<String, BlindDateUserStatus>()
         ids.chunked(10).forEach { chunk ->
             runCatching {
+                // Only active passes matter here; other members may not read matched profiles
+                // (they show who is paired with whom), so the query must ask for active ones only.
                 db.collection(FirestoreCollection.BLIND_DATE_PROFILES)
                     .whereIn(FieldPath.documentId(), chunk)
+                    .whereEqualTo("status", "active")
                     .get()
                     .await()
             }.onSuccess { snapshot ->
@@ -1062,8 +1065,15 @@ class BlindDateViewModel : ViewModel() {
                 val senderName = senderProfileDoc.getString("name") ?: "Anonymous User"
                 val senderProfilePic = senderProfileDoc.getString("profilePictureUrl") ?: ""
 
-                val recipientProfileDoc = db.collection(FirestoreCollection.BLIND_DATE_PROFILES).document(recipientId).get().await()
-                if (!recipientProfileDoc.exists() || recipientProfileDoc.getString("status") != "active") {
+                val recipientProfileDoc = db.collection(FirestoreCollection.BLIND_DATE_PROFILES)
+                    .whereEqualTo(FieldPath.documentId(), recipientId)
+                    .whereEqualTo("status", "active")
+                    .limit(1)
+                    .get()
+                    .await()
+                    .documents
+                    .firstOrNull()
+                if (recipientProfileDoc == null || recipientProfileDoc.getString("status") != "active") {
                     _events.value = BlindDateEvent.ShowToast("This user is not available for Blind Date right now.", DateHubBannerTone.Error)
                     return@launch
                 }

@@ -64,6 +64,14 @@ class InvitationsViewModel : ViewModel() {
     private var blindDateInvitations: List<Invitation> = emptyList()
     private var legacyInvitations: List<Invitation> = emptyList()
     private var blockedUserIds: Set<String> = emptySet()
+    /**
+     * Chat invite docs carry a photo link the sender wrote, which could be anyone's, so show the sender's
+     * own users/{uid} photo instead. Blind Date invites keep theirs: rules pin it to the sender's Blind
+     * Date profile, and the account photo would break the anonymity.
+     */
+    private val liveSenderPhotos = mutableMapOf<String, String?>()
+    private val liveSenderPhotoRequests = mutableSetOf<String>()
+    private val liveSenderPhotoFailures = mutableSetOf<String>()
 
     private val _uiState = MutableStateFlow<InvitationsUiState>(InvitationsUiState.Loading)
     val uiState = _uiState.asStateFlow()
@@ -267,9 +275,44 @@ class InvitationsViewModel : ViewModel() {
             .filter { it.senderId !in blockedUserIds }
             .distinctBy { "${it.source}:${it.senderId}" }
             .sortedByDescending { resolveTimestamp(it) }
+            .map(::withLiveSenderPhoto)
         _uiState.value = InvitationsUiState.Success(merged)
+        loadLiveSenderPhotos(merged)
         val pendingCount = merged.count { normalizeInvitationStatus(it.status) == "pending" }
         _statusMessage.value = null
+    }
+
+    private fun withLiveSenderPhoto(invitation: Invitation): Invitation {
+        if (invitation.source == "blind_date" || invitation.senderId.isBlank()) return invitation
+        val senderId = invitation.senderId
+        return when {
+            senderId in liveSenderPhotos -> invitation.copy(senderProfileImageUrl = liveSenderPhotos[senderId])
+            senderId in liveSenderPhotoFailures -> invitation
+            else -> invitation.copy(senderProfileImageUrl = null)
+        }
+    }
+
+    private fun loadLiveSenderPhotos(invitations: List<Invitation>) {
+        val senderIds = invitations
+            .filter { it.source != "blind_date" && it.senderId.isNotBlank() }
+            .map { it.senderId }
+            .distinct()
+            .filter { it !in liveSenderPhotoRequests }
+        if (senderIds.isEmpty()) return
+        liveSenderPhotoRequests += senderIds
+        viewModelScope.launch {
+            senderIds.forEach { senderId ->
+                runCatching {
+                    db.collection(FirestoreCollection.USERS).document(senderId).get().await()
+                }.onSuccess { doc ->
+                    liveSenderPhotos[senderId] = doc.resolveProfileImageUrl()
+                }.onFailure {
+                    Log.w(TAG, "Sender photo lookup failed for an invitation.", it)
+                    liveSenderPhotoFailures += senderId
+                }
+            }
+            if (boundInviteUid != null) emitMergedInvitations()
+        }
     }
 
     private fun resolveTimestamp(invitation: Invitation): Long {
