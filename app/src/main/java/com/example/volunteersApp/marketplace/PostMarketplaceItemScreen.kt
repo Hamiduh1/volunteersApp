@@ -90,6 +90,7 @@ typealias OnPostItemCallback = (
     locationName: String,
     latitude: Double,
     longitude: Double,
+    condition: MarketplaceCondition?,
     onResult: (success: Boolean, errorMessage: String?) -> Unit
 ) -> Unit
 
@@ -106,6 +107,7 @@ fun PostMarketplaceItemScreen(
     var sellerPhone by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("Other") }
     var categoryExpanded by remember { mutableStateOf(false) }
+    var condition by remember { mutableStateOf<MarketplaceCondition?>(null) }
     var selectedImageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var isPosting by remember { mutableStateOf(false) }
     var locationName by remember { mutableStateOf("") }
@@ -249,7 +251,8 @@ fun PostMarketplaceItemScreen(
                                 sellerPhone.trim(),
                                 locationName.trim().ifBlank { "Global" },
                                 latitudeText.toDoubleOrNull() ?: 0.0,
-                                longitudeText.toDoubleOrNull() ?: 0.0
+                                longitudeText.toDoubleOrNull() ?: 0.0,
+                                condition
                             ) { success, errorMessage ->
                                 if (!success) {
                                     isPosting = false
@@ -377,6 +380,11 @@ fun PostMarketplaceItemScreen(
                         }
                     }
                     Spacer(Modifier.height(10.dp))
+                    MarketplaceConditionPicker(
+                        selected = condition,
+                        onSelected = { condition = it }
+                    )
+                    Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = price,
                         onValueChange = { value ->
@@ -395,9 +403,10 @@ fun PostMarketplaceItemScreen(
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = sellerPhone,
-                        onValueChange = { sellerPhone = it },
+                        onValueChange = { sellerPhone = it.take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH) },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Seller Phone (optional)") },
+                        supportingText = { Text("Shown to all members. Leave blank to keep your number private.") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         colors = marketplaceFieldColors()
                     )

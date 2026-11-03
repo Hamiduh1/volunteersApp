@@ -88,6 +88,7 @@ object FirestoreSubcollection {
     const val BLOCKED_USERS = "blocked_users"
     /** Android jokes “saved” list; not declared on iOS starter contract — keep path stable. */
     const val SAVED_JOKES = "saved_jokes"
+    const val MARKETPLACE_SAVES = "marketplace_saves"
     /** Server-written in-app notification rows at `users/{uid}/notifications` (owner may only flip `read`). */
     const val USER_NOTIFICATIONS = "notifications"
 }

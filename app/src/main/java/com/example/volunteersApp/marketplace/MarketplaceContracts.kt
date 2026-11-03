@@ -26,6 +26,26 @@ const val MARKETPLACE_MIN_PRICE_USD = 0.01
 const val MARKETPLACE_MAX_MEDIA_ATTACHMENTS = 20
 const val MARKETPLACE_TITLE_MAX_LENGTH = 120
 const val MARKETPLACE_DESCRIPTION_MAX_LENGTH = 2_000
+const val MARKETPLACE_SELLER_PHONE_MAX_LENGTH = 40
+const val MARKETPLACE_SELLER_NAME_MAX_LENGTH = 120
+
+/** Pseudo-category chip that shows the member's private `marketplace_saves`; never stored on a listing. */
+const val MARKETPLACE_SAVED_FILTER = "Saved"
+
+/** Stored as [value] on `marketplace_items.condition`; Firestore rules reject anything else. */
+enum class MarketplaceCondition(val value: String, val label: String) {
+    NEW("NEW", "New"),
+    LIKE_NEW("LIKE_NEW", "Like new"),
+    GOOD("GOOD", "Good"),
+    FAIR("FAIR", "Fair");
+
+    companion object {
+        fun fromValue(raw: String?): MarketplaceCondition? {
+            val normalized = raw?.trim()?.uppercase(Locale.US) ?: return null
+            return entries.firstOrNull { it.value == normalized }
+        }
+    }
+}
 
 val MARKETPLACE_STAFF_ROLES = setOf(
     "owner",

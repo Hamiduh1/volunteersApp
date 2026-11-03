@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
@@ -141,6 +143,7 @@ fun MarketplaceScreen(
     val sellerReadiness by viewModel.sellerReadiness.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val savedItemIds by viewModel.savedItemIds.collectAsState()
     val context = LocalContext.current
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
     val listState = rememberLazyListState()
@@ -215,7 +218,7 @@ fun MarketplaceScreen(
     if (showCreateScreen) {
         PostMarketplaceItemScreen(
             sellerReadiness = sellerReadiness,
-            onPostItem = { title, description, price, category, imageUris, sellerPhone, locationName, latitude, longitude, onResult ->
+            onPostItem = { title, description, price, category, imageUris, sellerPhone, locationName, latitude, longitude, condition, onResult ->
                 viewModel.postNewItem(
                     title = title,
                     description = description,
@@ -225,7 +228,8 @@ fun MarketplaceScreen(
                     sellerPhone = sellerPhone,
                     locationName = locationName,
                     latitude = latitude,
-                    longitude = longitude
+                    longitude = longitude,
+                    condition = condition
                 ) { success, errorMessage ->
                     if (success) {
                         showCreateScreen = false
@@ -485,7 +489,13 @@ fun MarketplaceScreen(
                                                 onDeleteClicked = { itemToDelete = item },
                                                 onBuyClicked = { itemToBuy = item },
                                                 onChatClicked = { viewModel.sendChatInvitation(item) { _, _ -> } },
-                                                onOpenGallery = { page -> fullscreenGallery = item to page }
+                                                onOpenGallery = { page -> fullscreenGallery = item to page },
+                                                isSaved = item.id in savedItemIds,
+                                                onToggleSave = if (buyerActionsEnabled) {
+                                                    { viewModel.toggleSaved(item) }
+                                                } else {
+                                                    null
+                                                }
                                             )
                                         }
                                     } else {
@@ -506,6 +516,12 @@ fun MarketplaceScreen(
                                                 },
                                                 onOpenGallery = { item, page ->
                                                     fullscreenGallery = item to page
+                                                },
+                                                savedItemIds = savedItemIds,
+                                                onToggleSave = if (buyerActionsEnabled) {
+                                                    { item -> viewModel.toggleSaved(item) }
+                                                } else {
+                                                    null
                                                 }
                                             )
                                         }
@@ -537,7 +553,7 @@ fun MarketplaceScreen(
             item = item,
             isSaving = isSaving,
             onDismiss = { editingItem = null },
-            onConfirm = { title, description, category, price, sellerPhone, locationName, latitude, longitude, newImageUris, existingImageUrls, onResult ->
+            onConfirm = { title, description, category, price, sellerPhone, locationName, latitude, longitude, newImageUris, existingImageUrls, condition, onResult ->
                 viewModel.updateItem(
                     itemId = item.id,
                     title = title,
@@ -549,7 +565,8 @@ fun MarketplaceScreen(
                     latitude = latitude,
                     longitude = longitude,
                     newImageUris = newImageUris,
-                    existingImageUrls = existingImageUrls
+                    existingImageUrls = existingImageUrls,
+                    condition = condition
                 ) { success ->
                     if (success) {
                         editingItem = null
@@ -943,7 +960,9 @@ private fun SellerCollectionSection(
     onDeleteClicked: (MarketplaceItem) -> Unit,
     onBuyClicked: (MarketplaceItem) -> Unit,
     onChatClicked: (MarketplaceItem) -> Unit,
-    onOpenGallery: (MarketplaceItem, Int) -> Unit
+    onOpenGallery: (MarketplaceItem, Int) -> Unit,
+    savedItemIds: Set<String> = emptySet(),
+    onToggleSave: ((MarketplaceItem) -> Unit)? = null
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SellerCollectionHeader(
@@ -964,7 +983,9 @@ private fun SellerCollectionSection(
                 onDeleteClicked = { onDeleteClicked(item) },
                 onBuyClicked = { onBuyClicked(item) },
                 onChatClicked = { onChatClicked(item) },
-                onOpenGallery = { page -> onOpenGallery(item, page) }
+                onOpenGallery = { page -> onOpenGallery(item, page) },
+                isSaved = item.id in savedItemIds,
+                onToggleSave = onToggleSave?.let { toggle -> { toggle(item) } }
             )
         }
     }
@@ -1079,7 +1100,9 @@ internal fun MarketplaceListingCard(
     onDeleteClicked: () -> Unit,
     onBuyClicked: () -> Unit,
     onChatClicked: () -> Unit,
-    onOpenGallery: (Int) -> Unit
+    onOpenGallery: (Int) -> Unit,
+    isSaved: Boolean = false,
+    onToggleSave: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var expanded by remember(item.id) { mutableStateOf(false) }
@@ -1200,6 +1223,16 @@ internal fun MarketplaceListingCard(
 
                 Spacer(Modifier.width(8.dp))
 
+                if (!isOwner && onToggleSave != null) {
+                    IconButton(onClick = onToggleSave) {
+                        Icon(
+                            imageVector = if (isSaved) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = if (isSaved) "Remove from Saved" else "Save listing",
+                            tint = if (isSaved) scheme.error else MarketplaceA11yPalette.textSecondary
+                        )
+                    }
+                }
+
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MarketplaceA11yPalette.cardSurfaceSoft,
@@ -1253,6 +1286,7 @@ internal fun MarketplaceListingCard(
                         color = MarketplaceA11yPalette.categoryChipText
                     )
                 }
+                MarketplaceConditionBadge(condition = item.condition)
                 if (statusLabel != "AVAILABLE") {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
@@ -1915,10 +1949,12 @@ private fun MarketplaceEditDialog(
         longitude: Double,
         newImageUris: List<Uri>,
         existingImageUrls: List<String>,
+        condition: MarketplaceCondition?,
         onResult: (Boolean) -> Unit
     ) -> Unit
 ) {
     var title by remember(item.id) { mutableStateOf(item.title) }
+    var condition by remember(item.id) { mutableStateOf(MarketplaceCondition.fromValue(item.condition)) }
     var description by remember(item.id) { mutableStateOf(item.description) }
     var category by remember(item.id) { mutableStateOf(item.category.ifBlank { "Other" }) }
     var categoryExpanded by remember(item.id) { mutableStateOf(false) }
@@ -2050,6 +2086,11 @@ private fun MarketplaceEditDialog(
                                     }
                             }
                         }
+                        Spacer(Modifier.height(10.dp))
+                        MarketplaceConditionPicker(
+                            selected = condition,
+                            onSelected = { condition = it }
+                        )
                         Spacer(Modifier.height(10.dp))
                         OutlinedTextField(
                             value = price,
@@ -2209,7 +2250,8 @@ private fun MarketplaceEditDialog(
                                     latitudeText.toDoubleOrNull() ?: 0.0,
                                     longitudeText.toDoubleOrNull() ?: 0.0,
                                     newImageUris,
-                                    existingImageUrls.toList()
+                                    existingImageUrls.toList(),
+                                    condition
                                 ) { success ->
                                     if (!success) {
                                         localSaving = false

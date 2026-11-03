@@ -82,12 +82,19 @@ class MarketplaceViewModel : ViewModel() {
     private val _sellerReadiness = MutableStateFlow(MarketplaceSellerReadiness())
     val sellerReadiness = _sellerReadiness.asStateFlow()
 
+    private var savesListener: ListenerRegistration? = null
+    private val _savedItemIds = MutableStateFlow<Set<String>>(emptySet())
+    val savedItemIds = _savedItemIds.asStateFlow()
+    private val _savingItemIds = MutableStateFlow<Set<String>>(emptySet())
+    val savingItemIds = _savingItemIds.asStateFlow()
+
     /**
      * Attaches the Firestore listener when the Marketplace UI is shown.
      * Prefer this (from [androidx.compose.runtime.DisposableEffect]) over relying only on [onCleared].
      */
     fun attachMarketplaceFeed() {
         startMarketplaceListener(forceRestart = false, preserveListDuringReload = true)
+        startSavesListener()
         fetchCurrentUserLocation()
         refreshSellerReadiness()
         loadPublicFeeSettings()
@@ -97,6 +104,43 @@ class MarketplaceViewModel : ViewModel() {
     fun detachMarketplaceFeed() {
         itemsListener?.remove()
         itemsListener = null
+        savesListener?.remove()
+        savesListener = null
+    }
+
+    private fun startSavesListener() {
+        if (savesListener != null) return
+        val uid = auth.currentUser?.uid ?: return
+        savesListener = db.collection(FirestoreCollection.USERS)
+            .document(uid)
+            .collection(FirestoreSubcollection.MARKETPLACE_SAVES)
+            .addSnapshotListener { snapshots, error ->
+                if (error != null) {
+                    Log.w(TAG, "Marketplace saves listen failed", error)
+                    return@addSnapshotListener
+                }
+                _savedItemIds.value = snapshots?.documents?.map { it.id }?.toSet().orEmpty()
+                refilterIfShowingSaved()
+            }
+    }
+
+    private fun refilterIfShowingSaved() {
+        _uiState.update { current ->
+            if (current is MarketplaceUiState.Success &&
+                current.selectedCategory == MARKETPLACE_SAVED_FILTER
+            ) {
+                current.copy(
+                    filteredItems = applyFilters(
+                        current.items,
+                        current.selectedCategory,
+                        current.searchQuery,
+                        current.sortOption
+                    )
+                )
+            } else {
+                current
+            }
+        }
     }
 
     /**
@@ -123,6 +167,49 @@ class MarketplaceViewModel : ViewModel() {
     }
 
     fun getCurrentUserId(): String? = auth.currentUser?.uid
+
+    /** Saves are private bookmarks at `users/{uid}/marketplace_saves/{itemId}`; unsaving deletes the doc. */
+    fun toggleSaved(item: MarketplaceItem) {
+        val uid = auth.currentUser?.uid ?: run {
+            _errorMessage.value = "Please log in to save listings."
+            return
+        }
+        val itemId = item.id.trim()
+        if (itemId.isBlank() || item.sellerId == uid || itemId in _savingItemIds.value) return
+        val wasSaved = itemId in _savedItemIds.value
+        _savingItemIds.update { it + itemId }
+        _savedItemIds.update { if (wasSaved) it - itemId else it + itemId }
+        refilterIfShowingSaved()
+        viewModelScope.launch {
+            val saveRef = db.collection(FirestoreCollection.USERS)
+                .document(uid)
+                .collection(FirestoreSubcollection.MARKETPLACE_SAVES)
+                .document(itemId)
+            try {
+                if (wasSaved) {
+                    saveRef.delete().await()
+                } else {
+                    saveRef.set(
+                        mapOf(
+                            "itemId" to itemId,
+                            "savedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "toggleSaved failed", e)
+                _savedItemIds.update { if (wasSaved) it + itemId else it - itemId }
+                refilterIfShowingSaved()
+                _errorMessage.value = if (wasSaved) {
+                    "Couldn't remove this listing from Saved. Try again."
+                } else {
+                    "Couldn't save this listing. Try again."
+                }
+            } finally {
+                _savingItemIds.update { it - itemId }
+            }
+        }
+    }
 
     fun updateCurrentUserLocation(latitude: Double, longitude: Double) {
         _currentUserLocation.value = latitude to longitude
@@ -269,6 +356,7 @@ class MarketplaceViewModel : ViewModel() {
         locationName: String,
         latitude: Double,
         longitude: Double,
+        condition: MarketplaceCondition? = null,
         onResult: (success: Boolean, errorMessage: String?) -> Unit
     ) {
         viewModelScope.launch {
@@ -315,21 +403,20 @@ class MarketplaceViewModel : ViewModel() {
                         ?: userSnapshot.getString("username")?.takeIf { it.isNotBlank() }
                         ?: currentUser.email
                         ?: "Seller"
-                val resolvedPhone = sellerPhone.trim().ifBlank {
-                    userSnapshot.getString("phoneNumber").orEmpty()
-                }
+                // Listings are readable by every signed-in member, so only publish a phone the seller typed.
+                val resolvedPhone = sellerPhone.trim().take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH)
                 uploadedMedia = uploadImageUris(currentUser.uid, imageUris)
                 val uploadedImageUrls = uploadedMedia.map { it.url }
                 val mediaEntries = uploadedImageUrls.map { url ->
                     mapOf("url" to url, "type" to "image")
                 }
 
-                val payload = mapOf(
+                val payload = mutableMapOf<String, Any>(
                     "title" to cleanTitle,
                     "description" to cleanDescription,
                     "price" to price,
                     "category" to cleanCategory,
-                    "sellerName" to sellerName,
+                    "sellerName" to sellerName.trim().take(MARKETPLACE_SELLER_NAME_MAX_LENGTH),
                     "sellerId" to currentUser.uid,
                     "sellerPhone" to resolvedPhone,
                     "imageUrls" to uploadedImageUrls,
@@ -342,6 +429,7 @@ class MarketplaceViewModel : ViewModel() {
                     "timestamp" to FieldValue.serverTimestamp()
                 )
 
+                condition?.let { payload["condition"] = it.value }
                 itemsCollection.document().set(payload).await()
                 listingWritten = true
                 _statusMessage.value = "Item posted successfully."
@@ -433,7 +521,13 @@ class MarketplaceViewModel : ViewModel() {
                 onComplete(true, message, result?.get("checkoutUrl") as? String)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to submit purchase request", e)
-                val message = e.localizedMessage ?: "Could not start the purchase process."
+                val isBlockedPair = e is com.google.firebase.functions.FirebaseFunctionsException &&
+                    e.code == com.google.firebase.functions.FirebaseFunctionsException.Code.PERMISSION_DENIED
+                val message = if (isBlockedPair) {
+                    e.message?.takeIf { it.isNotBlank() } ?: "This listing isn't available to you."
+                } else {
+                    e.localizedMessage ?: "Could not start the purchase process."
+                }
                 _errorMessage.value = message
                 onComplete(false, message, null)
             } finally {
@@ -507,6 +601,7 @@ class MarketplaceViewModel : ViewModel() {
         longitude: Double,
         newImageUris: List<Uri>,
         existingImageUrls: List<String>,
+        condition: MarketplaceCondition? = null,
         onResult: (Boolean) -> Unit
     ) {
         viewModelScope.launch {
@@ -576,20 +671,25 @@ class MarketplaceViewModel : ViewModel() {
                     mapOf("url" to url, "type" to "image")
                 }
 
+                val conditionUpdate: Any? = when {
+                    condition != null -> condition.value
+                    currentItem.condition != null -> FieldValue.delete()
+                    else -> null
+                }
                 itemsCollection.document(itemId).update(
-                    mapOf(
+                    mutableMapOf<String, Any>(
                         "title" to cleanTitle,
                         "description" to cleanDescription,
                         "category" to cleanCategory,
                         "price" to price,
-                        "sellerPhone" to sellerPhone.trim(),
+                        "sellerPhone" to sellerPhone.trim().take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH),
                         "locationName" to cleanLocation,
                         "latitude" to latitude,
                         "longitude" to longitude,
                         "imageUrls" to uploadedUrls,
                         "media" to mediaEntries,
                         "updatedAt" to FieldValue.serverTimestamp(),
-                    )
+                    ).apply { conditionUpdate?.let { put("condition", it) } }
                 ).await()
                 listingUpdated = true
 
@@ -782,6 +882,7 @@ class MarketplaceViewModel : ViewModel() {
             latitude = readDoubleFromMap(data, "latitude"),
             longitude = readDoubleFromMap(data, "longitude"),
             status = status,
+            condition = MarketplaceCondition.fromValue(data["condition"] as? String)?.value,
             timestamp = doc.getDate("timestamp")
         )
     }
@@ -852,7 +953,7 @@ class MarketplaceViewModel : ViewModel() {
                     buyingItemIds = existingState?.buyingItemIds.orEmpty(),
                     deletingItemIds = existingState?.deletingItemIds.orEmpty(),
                     updatingItemIds = existingState?.updatingItemIds.orEmpty(),
-                    categories = MARKETPLACE_CATEGORIES
+                    categories = MARKETPLACE_CATEGORIES + MARKETPLACE_SAVED_FILTER
                 )
                 _syncEpoch.update { it + 1 }
             }
@@ -967,9 +1068,13 @@ class MarketplaceViewModel : ViewModel() {
         val normalizedQuery = searchQuery.trim().lowercase(Locale.getDefault())
 
         return items.filter { item ->
-            val matchesCategory =
-                normalizedCategory == DEFAULT_CATEGORY ||
-                    item.category.equals(normalizedCategory, ignoreCase = true)
+            val matchesCategory = when (normalizedCategory) {
+                DEFAULT_CATEGORY -> true
+                // A save can outlive its listing; only show saves that are still for sale.
+                MARKETPLACE_SAVED_FILTER ->
+                    item.id in _savedItemIds.value && item.status == STATUS_AVAILABLE
+                else -> item.category.equals(normalizedCategory, ignoreCase = true)
+            }
             val matchesQuery =
                 normalizedQuery.isBlank() ||
                     buildList {
@@ -1033,13 +1138,14 @@ class MarketplaceViewModel : ViewModel() {
         private const val STATUS_AVAILABLE = "AVAILABLE"
         private const val PURCHASE_STATUS_PENDING = "pending"
         private val ACTIVE_SELLER_STATUSES = setOf("AVAILABLE", "ACTIVE", "OPEN", "RESERVED")
+        /** Same stored labels and order as iOS; older category values still show under "All". */
         val MARKETPLACE_CATEGORIES = listOf(
             DEFAULT_CATEGORY,
             "Electronics",
             "Furniture",
+            "Home Goods",
             "Clothing",
             "Books",
-            "Home Goods",
             "Other"
         )
     }
@@ -1050,8 +1156,9 @@ private val DEFAULT_MARKETPLACE_CATEGORIES = listOf(
     DEFAULT_MARKETPLACE_CATEGORY,
     "Electronics",
     "Furniture",
+    "Home Goods",
     "Clothing",
     "Books",
-    "Home Goods",
-    "Other"
+    "Other",
+    MARKETPLACE_SAVED_FILTER
 )

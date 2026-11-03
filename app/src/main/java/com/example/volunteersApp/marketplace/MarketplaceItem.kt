@@ -52,6 +52,8 @@ data class MarketplaceItem(
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
     val status: String = "AVAILABLE",
+    /** One of [MarketplaceCondition] values, or null for listings posted before conditions existed. */
+    val condition: String? = null,
     @ServerTimestamp
     val timestamp: Date? = null
 ) {
