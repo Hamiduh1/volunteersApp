@@ -104,6 +104,21 @@ items sell. iOS now queries `where("status", "in", ["AVAILABLE","ACTIVE","OPEN"]
 uses the existing `status` + `timestamp` index (already deployed). Please do the same in
 `MarketplaceViewModel.kt` (around line 926).
 
+## 9b) Listings expire after 60 days — needs a functions deploy
+
+New scheduled function `expireOldMarketplaceListingsJob` (every 6 hours) deletes `marketplace_items` whose
+`timestamp` is more than 60 days old and whose status is `AVAILABLE`, `ACTIVE`, `OPEN` or `DELETED`, together with
+their photos and videos under `marketplace_images/{sellerId}/`. Sold listings are kept as purchase records. Each run
+writes a summary to `system/marketplace_listing_expiry`. Editing a listing does not reset its 60 days.
+
+If a buyer is mid-checkout when a listing is deleted, the existing auto-refund in section 7 refunds them.
+
+Because the job only runs every few hours, iOS also hides open listings older than 60 days, and shows the seller
+"Expires in N days" on their own listing (orange in the last 7 days). Please do the same on Android:
+
+- In the feed listener, skip open listings with `timestamp` older than 60 days (`MARKETPLACE_LISTING_MAX_AGE_DAYS`).
+- Optional: show the seller the days left, and tell them on the post screen that listings stay up for 60 days.
+
 ## 10) Unchanged
 
 - Purchases still go through the `requestMarketplacePurchase` callable.
@@ -115,5 +130,6 @@ uses the existing `status` + `timestamp` index (already deployed). Please do the
 ## Deploy order
 
 Deploy `my-firebase-project/firestore.rules` and `storage.rules` before the iOS release. Without them, condition edits,
-saves and listing videos are rejected. iOS shows a friendly message for saves in that case. Sections 6 and 7 need a
-functions deploy (Android). Until then, purchases work, but two buyers who both pay need a manual refund in Stripe.
+saves and listing videos are rejected. iOS shows a friendly message for saves in that case. Sections 6, 7 and 9b need
+a functions deploy (Android). Until then, purchases work, but two buyers who both pay need a manual refund in Stripe,
+and listings older than 60 days are hidden on iOS but stay in Firestore and Storage.

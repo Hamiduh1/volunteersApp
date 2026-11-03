@@ -3495,6 +3495,117 @@ export const processPurchaseRequest = functions.firestore
     return undefined;
   });
 
+const MARKETPLACE_LISTING_MAX_AGE_DAYS = 60;
+// Removed listings are purged on the same clock so their photos don't linger in Storage.
+const MARKETPLACE_EXPIRING_STATUSES = ["AVAILABLE", "ACTIVE", "OPEN", "DELETED"];
+
+/**
+ * @param {string} sellerId Listing owner.
+ * @param {unknown} value Download URL stored on the listing.
+ * @return {string | null} Object path when the file sits in the seller's own marketplace folder.
+ */
+const marketplaceOwnedObjectPath = (sellerId: string, value: unknown): string | null => {
+  if (!sellerId || typeof value !== "string") return null;
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.hostname !== "firebasestorage.googleapis.com") return null;
+  const match = url.pathname.match(/^\/v0\/b\/([^/]+)\/o\/([^/]+)$/);
+  if (!match || !projectStorageBucketNames().has(match[1])) return null;
+  let objectPath: string;
+  try {
+    objectPath = decodeURIComponent(match[2]);
+  } catch {
+    return null;
+  }
+  const segments = objectPath.split("/");
+  const owned = segments.length >= 3 && segments[0] === "marketplace_images" && segments[1] === sellerId &&
+    !segments.includes("..");
+  return owned ? objectPath : null;
+};
+
+/**
+ * Marketplace listings stay up for 60 days. Older unsold or removed listings are deleted with their photos and
+ * videos; sold listings stay because they are the buyer's and seller's purchase record.
+ */
+export const expireOldMarketplaceListingsJob = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
+  .schedule("every 6 hours")
+  .onRun(async () => {
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - MARKETPLACE_LISTING_MAX_AGE_DAYS * 24 * 60 * 60 * 1000
+    );
+    const bucket = admin.storage().bucket();
+    let listingsDeleted = 0;
+    let filesDeleted = 0;
+    let skipped = 0;
+
+    for (let page = 0; page < 25; page++) {
+      const snap = await db.collection("marketplace_items")
+        .where("status", "in", MARKETPLACE_EXPIRING_STATUSES)
+        .where("timestamp", "<", cutoff)
+        .orderBy("timestamp", "desc")
+        .limit(200)
+        .get();
+      if (snap.empty) break;
+
+      for (const doc of snap.docs) {
+        // Re-check inside a transaction so a sale that lands mid-run is never deleted.
+        const removed = await db.runTransaction(async (transaction) => {
+          const live = await transaction.get(doc.ref);
+          if (!live.exists) return null;
+          const data = (live.data() || {}) as Record<string, unknown>;
+          const status = String(data.status || "").trim().toUpperCase();
+          const postedAt = data.timestamp instanceof admin.firestore.Timestamp ? data.timestamp : null;
+          if (!MARKETPLACE_EXPIRING_STATUSES.includes(status) || !postedAt || postedAt.toMillis() >= cutoff.toMillis()) {
+            return null;
+          }
+          transaction.delete(doc.ref);
+          return data;
+        });
+        if (!removed) {
+          skipped += 1;
+          continue;
+        }
+        listingsDeleted += 1;
+
+        const sellerId = asNonEmptyString(removed.sellerId) || "";
+        const urls = [
+          ...(Array.isArray(removed.media) ?
+            removed.media.map((entry) => (entry as Record<string, unknown> | null)?.url) : []),
+          ...(Array.isArray(removed.imageUrls) ? removed.imageUrls : []),
+        ];
+        const paths = new Set(
+          urls.map((url) => marketplaceOwnedObjectPath(sellerId, url)).filter((path): path is string => !!path)
+        );
+        for (const path of paths) {
+          try {
+            await bucket.file(path).delete({ignoreNotFound: true});
+            filesDeleted += 1;
+          } catch (error) {
+            functions.logger.warn("Could not delete expired marketplace media.", {itemId: doc.id, path, error});
+          }
+        }
+      }
+      if (snap.size < 200) break;
+    }
+
+    await db.collection("system").doc("marketplace_listing_expiry").set({
+      lastRunAt: admin.firestore.Timestamp.now(),
+      cutoff,
+      listingsDeleted,
+      filesDeleted,
+      skipped,
+    }, {merge: true});
+    functions.logger.info("Expired marketplace listings removed.", {listingsDeleted, filesDeleted, skipped});
+    return null;
+  });
+
 
 // =============================================================================
 //  2A. CALL SESSION NOTIFICATIONS (NEW)
