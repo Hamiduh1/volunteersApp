@@ -2332,6 +2332,10 @@ const startStripeCommerceCheckout = async (params: {
   buyerId: string;
   resourceId: string;
   prepare: (transaction: admin.firestore.Transaction, orderRef: admin.firestore.DocumentReference) => Promise<StripeCommerceDraft>;
+  /** Re-run `prepare` before handing back an open checkout link; `prepare` must not write. */
+  revalidateBeforeReuse?: boolean;
+  /** Stripe requires at least 30 minutes. */
+  checkoutLifetimeSeconds?: number;
 }): Promise<StripeCommerceCheckoutResult> => {
   const orderId = stripeCommerceOrderId(params.kind, params.buyerId, params.resourceId);
   const orderRef = stripeCommerceOrders.doc(orderId);
@@ -2362,7 +2366,15 @@ const startStripeCommerceCheckout = async (params: {
     if (existingStatus === "PAID" || existingStatus === "FULFILLED") {
       return {kind: "complete" as const, existingData};
     }
-    if (existingStatus === "CHECKOUT_READY" && existingUrl) {
+    // Replacing the session now would orphan a payment Stripe may still confirm.
+    if (existingStatus === "PAYMENT_PROCESSING") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Your last payment for this is still processing. You'll see the result once Stripe confirms it."
+      );
+    }
+    const existingReusable = existingStatus === "CHECKOUT_READY" && !!existingUrl;
+    if (existingReusable && !params.revalidateBeforeReuse) {
       return {kind: "reuse" as const, existingData};
     }
     if (existingStatus === "CHECKOUT_CREATING") {
@@ -2381,6 +2393,16 @@ const startStripeCommerceCheckout = async (params: {
     if (platformFeeCents < 0 || platformFeeCents > amountCents) {
       throw new functions.https.HttpsError("failed-precondition", "The configured platform fee is invalid.");
     }
+    if (existingReusable) {
+      const expiresAtMs = checkoutCreatingAtMillis(existingData.checkoutExpiresAt);
+      const sameQuote = Number(existingData.amountCents || 0) === amountCents &&
+        Number(existingData.platformFeeCents || 0) === platformFeeCents &&
+        (asNonEmptyString(existingData.destinationAccountId) || null) === (draft.destinationAccountId || null);
+      if (sameQuote && (!expiresAtMs || expiresAtMs - Date.now() > 2 * 60 * 1000)) {
+        return {kind: "reuse" as const, existingData};
+      }
+    }
+    const supersededSessionId = existingReusable ? asNonEmptyString(existingData.stripeCheckoutSessionId) : undefined;
 
     const now = admin.firestore.Timestamp.now();
     transaction.set(orderRef, {
@@ -2407,7 +2429,7 @@ const startStripeCommerceCheckout = async (params: {
       updatedAt: now,
       createdAt: existing.exists ? existingData.createdAt || now : now,
     }, {merge: true});
-    return {kind: "create" as const, draft, amountCents, platformFeeCents};
+    return {kind: "create" as const, draft, amountCents, platformFeeCents, supersededSessionId};
   });
 
   if (prepared.kind === "complete") {
@@ -2434,6 +2456,19 @@ const startStripeCommerceCheckout = async (params: {
       charged: false,
       message: "Continue securely in Stripe Checkout.",
     };
+  }
+
+  if (prepared.supersededSessionId) {
+    // If the old link was already paid, the webhook refunds it as a superseded session.
+    try {
+      await getStripe().checkout.sessions.expire(prepared.supersededSessionId);
+    } catch (error) {
+      functions.logger.warn("Could not expire superseded Stripe Checkout session.", {
+        orderId,
+        sessionId: prepared.supersededSessionId,
+        error: parseProviderErrorMessage(error),
+      });
+    }
   }
 
   try {
@@ -2465,6 +2500,9 @@ const startStripeCommerceCheckout = async (params: {
       }],
       payment_intent_data: paymentIntentData,
       metadata: {stripeCommerceOrderId: orderId, kind: params.kind},
+      ...(params.checkoutLifetimeSeconds ?
+        {expires_at: Math.floor(Date.now() / 1000) + Math.max(params.checkoutLifetimeSeconds, 31 * 60)} :
+        {}),
     });
     if (!session.url) throw new Error("Stripe did not return a hosted checkout URL.");
 
@@ -3312,6 +3350,9 @@ export const requestMarketplacePurchase = functions.runWith({enforceAppCheck: tr
       kind: "MARKETPLACE",
       buyerId,
       resourceId: itemId,
+      revalidateBeforeReuse: true,
+      // Short links narrow the window where two buyers both pay; the loser is refunded automatically.
+      checkoutLifetimeSeconds: 31 * 60,
       prepare: async (transaction) => {
         const [itemDoc, sellerDoc] = await Promise.all([
           transaction.get(db.collection("marketplace_items").doc(itemId)),
@@ -24949,13 +24990,108 @@ const markStripeCommerceOrderTerminal = async (
  * debits an app-maintained wallet balance.
  * @param {Stripe.Checkout.Session} session Verified Stripe Checkout session.
  */
+const stripeCommerceRefunds = db.collection("stripe_commerce_refunds");
+
+type StripeCommerceRefundPlan = {
+  reason?: string;
+  /** False when the order itself was settled by a different session and must keep its status. */
+  updateOrder?: boolean;
+  order?: Record<string, unknown>;
+};
+
+/**
+ * Returns a marketplace payment that can't be fulfilled (sold to someone else first, removed, or paid through a
+ * replaced or duplicate checkout). Destination charges also pull the seller's share and the platform fee back.
+ * @param {Stripe.Checkout.Session} session Paid Stripe Checkout session.
+ * @param {string} orderId Commerce order id.
+ * @param {StripeCommerceRefundPlan} plan Why and how to refund.
+ */
+const refundStripeCommerceCheckout = async (
+  session: Stripe.Checkout.Session,
+  orderId: string,
+  plan: StripeCommerceRefundPlan
+): Promise<void> => {
+  const reason = plan.reason || "This order could not be fulfilled.";
+  const order = plan.order || {};
+  const refundRef = stripeCommerceRefunds.doc(session.id);
+  const prior = await refundRef.get();
+  if (prior.exists && ["pending", "succeeded", "requires_action"].includes(String(prior.data()?.status || ""))) return;
+
+  const paymentIntentId = stripeSessionPaymentIntentId(session);
+  const buyerId = asNonEmptyString(order.buyerId);
+  const now = admin.firestore.Timestamp.now();
+  const base = {
+    orderId,
+    kind: asNonEmptyString(order.kind) || null,
+    buyerId: buyerId || null,
+    stripeCheckoutSessionId: session.id,
+    stripePaymentIntentId: paymentIntentId,
+    amountCents: session.amount_total ?? null,
+    reason,
+    updatedAt: now,
+  };
+  const markForReview = async (failureReason: string) => {
+    await refundRef.set({...base, status: "RECONCILIATION_REQUIRED", failureReason, createdAt: now}, {merge: true});
+    if (plan.updateOrder) {
+      await stripeCommerceOrders.doc(orderId).set({
+        status: "RECONCILIATION_REQUIRED",
+        paymentFailureReason: `${reason} Automatic refund failed: ${failureReason}`,
+        updatedAt: now,
+      }, {merge: true});
+    }
+  };
+  if (!paymentIntentId) {
+    await markForReview("Stripe did not report a payment intent for this session.");
+    return;
+  }
+
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const refundParams: Stripe.RefundCreateParams = {
+      payment_intent: paymentIntentId,
+      metadata: {stripeCommerceOrderId: orderId, reason: reason.slice(0, 450)},
+    };
+    if (intent.transfer_data?.destination) refundParams.reverse_transfer = true;
+    if ((intent.application_fee_amount || 0) > 0) refundParams.refund_application_fee = true;
+    const refund = await stripe.refunds.create(refundParams, {idempotencyKey: `stripe-commerce-refund-${session.id}`});
+    await refundRef.set({...base, status: refund.status || "pending", stripeRefundId: refund.id, createdAt: now}, {merge: true});
+    if (plan.updateOrder) {
+      await stripeCommerceOrders.doc(orderId).set({
+        status: "REFUNDED",
+        stripeRefundId: refund.id,
+        refundedAt: now,
+        updatedAt: now,
+      }, {merge: true});
+    }
+    if (buyerId) {
+      await db.collection("users").doc(buyerId).collection("transactions").doc(`stripe-refund-${session.id}`).set({
+        title: `Refund: ${asNonEmptyString(order.title) || "Marketplace purchase"}`,
+        amount: roundMoney((session.amount_total || 0) / 100),
+        type: "INFO",
+        status: "REFUNDED",
+        timestamp: now,
+        source: "STRIPE_COMMERCE_REFUND",
+        note: "The item was no longer available, so your payment is going back to your card.",
+        stripeCommerceOrderId: orderId,
+        stripeRefundId: refund.id,
+      }, {merge: true});
+    }
+  } catch (error) {
+    functions.logger.error("Automatic Stripe commerce refund failed.", {orderId, sessionId: session.id, error});
+    await markForReview(parseProviderErrorMessage(error));
+  }
+};
+
 const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Promise<void> => {
   const orderId = asNonEmptyString(session.client_reference_id, session.metadata?.stripeCommerceOrderId);
   if (!orderId) {
     functions.logger.warn("Stripe Checkout event missing commerce order id.", {sessionId: session.id});
     return;
   }
+  const refundPlan: StripeCommerceRefundPlan = {};
   await db.runTransaction(async (transaction) => {
+    delete refundPlan.reason;
     const orderRef = stripeCommerceOrders.doc(orderId);
     const orderDoc = await transaction.get(orderRef);
     if (!orderDoc.exists) {
@@ -24964,9 +25100,24 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
     }
     const order = (orderDoc.data() || {}) as Record<string, unknown>;
     const currentStatus = String(order.status || "").toUpperCase();
-    if (currentStatus === "PAID" || currentStatus === "FULFILLED") return;
-    if (asNonEmptyString(order.stripeCheckoutSessionId) !== session.id) {
+    const isCurrentSession = asNonEmptyString(order.stripeCheckoutSessionId) === session.id;
+    // Only marketplace orders refund automatically; other kinds keep the manual review path.
+    const refundsAutomatically = String(order.kind || "").toUpperCase() === "MARKETPLACE";
+    const planRefund = (reason: string, updateOrder: boolean) => {
+      refundPlan.reason = reason;
+      refundPlan.updateOrder = updateOrder;
+      refundPlan.order = order;
+    };
+    if (currentStatus === "PAID" || currentStatus === "FULFILLED") {
+      if (refundsAutomatically && !isCurrentSession) {
+        planRefund("A second payment arrived for an order that was already paid.", false);
+      }
+      return;
+    }
+    if (refundsAutomatically && isCurrentSession && (currentStatus === "REFUNDED" || currentStatus === "REFUND_PENDING")) return;
+    if (!isCurrentSession) {
       functions.logger.warn("Stripe Checkout session does not match commerce order.", {orderId, sessionId: session.id});
+      if (refundsAutomatically) planRefund("Payment arrived through a checkout link that had been replaced.", false);
       return;
     }
     const amountCents = Number(order.amountCents || 0);
@@ -25038,10 +25189,16 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
       const itemRef = db.collection("marketplace_items").doc(itemId);
       const item = await transaction.get(itemRef);
       const itemData = (item.data() || {}) as Record<string, unknown>;
+      const refundUnfulfillable = (reason: string) => {
+        transaction.set(orderRef, {...receipt, status: "REFUND_PENDING", paymentFailureReason: reason}, {merge: true});
+        planRefund(reason, true);
+      };
       if (!item.exists || String(itemData.status || "").toUpperCase() !== "AVAILABLE" || itemData.isDeleted === true) {
-        return reconcile("Marketplace item was no longer available when payment completed.");
+        return refundUnfulfillable("Marketplace item was no longer available when payment completed.");
       }
-      if (asNonEmptyString(itemData.sellerId) !== sellerId) return reconcile("Marketplace seller changed before fulfillment.");
+      if (asNonEmptyString(itemData.sellerId) !== sellerId) {
+        return refundUnfulfillable("Marketplace seller changed before fulfillment.");
+      }
       transaction.update(itemRef, {status: "SOLD", buyerId, soldAt: now, stripeCommerceOrderId: orderId, updatedAt: now});
       recordBuyerReceipt(`Marketplace purchase: ${asNonEmptyString(itemData.title, itemData.name) || "Item"}`);
       recordSellerReceipt(`Marketplace sale: ${asNonEmptyString(itemData.title, itemData.name) || "Item"}`);
@@ -25193,6 +25350,9 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
 
     transaction.set(orderRef, {...receipt, status: "PAID", fulfilledAt: now}, {merge: true});
   });
+  if (refundPlan.reason) {
+    await refundStripeCommerceCheckout(session, orderId, refundPlan);
+  }
 };
 
 const isStripeCommerceCheckoutEvent = (eventType: string): boolean => (

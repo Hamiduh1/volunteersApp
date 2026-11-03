@@ -3357,28 +3357,9 @@ service cloud.firestore {
     }
 
     match /purchase_requests/{requestId} {
-      // Bind seller to the live listing so buyers cannot forge payouts to arbitrary users.
-      allow create: if isSignedIn()
-        && request.resource.data.buyerId == request.auth.uid
-        && request.resource.data.buyerId != request.resource.data.sellerId
-        && !hasUserBlocked(request.resource.data.sellerId, request.auth.uid)
-        && !hasUserBlocked(request.auth.uid, request.resource.data.sellerId)
-        && request.resource.data.status == 'pending'
-        // Legacy clients default to card checkout; newer clients may explicitly choose mobile money.
-        && request.resource.data.get('fundingPreference', 'STRIPE_CARD')
-          in ['STRIPE_CARD', 'AFRIEX_MOBILE_MONEY']
-        && request.resource.data.itemId is string
-        && request.resource.data.price is number
-        && request.resource.data.price > 0
-        && request.resource.data.price <= 50000
-        && request.resource.data.sellerId
-          == get(/databases/$(database)/documents/marketplace_items/$(request.resource.data.itemId)).data.sellerId
-        && get(/databases/$(database)/documents/marketplace_items/$(request.resource.data.itemId)).data.isDeleted != true
-        && marketplaceListingOpenStatus(
-          get(/databases/$(database)/documents/marketplace_items/$(request.resource.data.itemId)).data.get('status', 'AVAILABLE')
-        )
-        && request.resource.data.price
-          == get(/databases/$(database)/documents/marketplace_items/$(request.resource.data.itemId)).data.price;
+      // Retired: the server rejects every request because wallet custody is off. Purchases go through
+      // the requestMarketplacePurchase callable (Stripe Checkout) instead.
+      allow create: if false;
       allow read: if isSignedIn() && (request.auth.uid == resource.data.buyerId || request.auth.uid == resource.data.sellerId);
       allow update, delete: if false;
     }
