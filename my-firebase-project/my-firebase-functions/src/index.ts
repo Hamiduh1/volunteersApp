@@ -3285,6 +3285,156 @@ const marketplaceItemPriceUsd = (data: Record<string, unknown>): number => {
 };
 
 /**
+ * Expires an unpaid Stripe Checkout link and marks its order EXPIRED so the next request gets a fresh quote.
+ * A session that already completed is left alone for the webhook to fulfill or reconcile.
+ * @param {admin.firestore.DocumentReference} orderRef stripe_commerce_orders document.
+ * @param {string} reason Stored on the order for support.
+ * @return {Promise<void>} Resolves once the order is expired or confirmed already paid.
+ */
+const expireStripeCommerceCheckoutOrder = async (
+  orderRef: admin.firestore.DocumentReference,
+  reason: string
+): Promise<void> => {
+  const order = (await orderRef.get()).data() || {};
+  const sessionId = asNonEmptyString(order.stripeCheckoutSessionId);
+  if (String(order.status || "").trim().toUpperCase() !== "CHECKOUT_READY" || !sessionId) return;
+  try {
+    await getStripe().checkout.sessions.expire(sessionId);
+  } catch (error) {
+    const session = await getStripe().checkout.sessions.retrieve(sessionId).catch(() => null);
+    if (session?.status === "complete") return;
+    if (session?.status !== "expired") {
+      functions.logger.error("Could not expire Stripe Checkout session.", {orderId: orderRef.id, sessionId, error});
+      throw new functions.https.HttpsError("unavailable", "Checkout couldn't be refreshed. Please try again.");
+    }
+  }
+  await db.runTransaction(async (transaction) => {
+    const latest = (await transaction.get(orderRef)).data() || {};
+    if (
+      String(latest.status || "").trim().toUpperCase() !== "CHECKOUT_READY" ||
+      asNonEmptyString(latest.stripeCheckoutSessionId) !== sessionId
+    ) return;
+    transaction.set(orderRef, {
+      status: "EXPIRED",
+      paymentFailureReason: reason,
+      checkoutUrl: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+  });
+};
+
+/**
+ * Closes every open checkout link for a listing once it sells, closes, or changes price, title or seller,
+ * so no buyer can pay an old quote for an item that changed or is gone.
+ */
+export const onMarketplaceItemExpireStaleCheckouts = functions.firestore
+  .document("marketplace_items/{itemId}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    const isOpen = (data: admin.firestore.DocumentData): boolean =>
+      String(data.status || "AVAILABLE").trim().toUpperCase() === "AVAILABLE" && data.isDeleted !== true;
+    const closed = isOpen(before) && !isOpen(after);
+    const quoteChanged = marketplaceItemPriceUsd(before) !== marketplaceItemPriceUsd(after) ||
+      asNonEmptyString(before.title) !== asNonEmptyString(after.title) ||
+      asNonEmptyString(before.sellerId) !== asNonEmptyString(after.sellerId);
+    if (!closed && !quoteChanged) return;
+
+    const itemId = context.params.itemId;
+    const openOrders = await stripeCommerceOrders
+      .where("kind", "==", "MARKETPLACE")
+      .where("resourceId", "==", itemId)
+      .where("status", "==", "CHECKOUT_READY")
+      .limit(100)
+      .get();
+    const reason = closed ?
+      "This item is no longer available." :
+      "The seller changed this listing after checkout was opened.";
+    await Promise.all(openOrders.docs.map(async (orderDoc) => {
+      try {
+        await expireStripeCommerceCheckoutOrder(orderDoc.ref, reason);
+      } catch (error) {
+        functions.logger.error("Failed to expire stale marketplace checkout.", {itemId, orderId: orderDoc.id, error});
+      }
+    }));
+  });
+
+/**
+ * Patch that rounds listing coordinates to two decimals (about 1 km); 0 means "no location" and is left alone.
+ * @param {admin.firestore.DocumentData} data marketplace_items document data.
+ * @return {Record<string, number>} Fields to update, empty when already rounded.
+ */
+const marketplaceLocationRoundingPatch = (data: admin.firestore.DocumentData): Record<string, number> => {
+  const patch: Record<string, number> = {};
+  for (const key of ["latitude", "longitude"]) {
+    const value = data[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value === 0) continue;
+    const rounded = Math.round(value * 100) / 100;
+    if (rounded !== value) patch[key] = rounded;
+  }
+  return patch;
+};
+
+/** Listings are readable by every member, so older or third-party clients can't publish an exact address. */
+export const onMarketplaceItemRoundLocation = functions.firestore
+  .document("marketplace_items/{itemId}")
+  .onWrite(async (change) => {
+    if (!change.after.exists) return;
+    const patch = marketplaceLocationRoundingPatch(change.after.data() || {});
+    if (Object.keys(patch).length === 0) return;
+    await change.after.ref.update(patch);
+  });
+
+/**
+ * One-time pass over existing listings: rounds stored coordinates and removes buyer identifiers that sales
+ * used to write onto the public listing. Stops once its progress document records completion.
+ */
+export const marketplaceListingPrivacyBackfillJob = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
+  .schedule("every 10 minutes")
+  .onRun(async () => {
+    const stateRef = db.collection("system").doc("marketplace_listing_privacy_backfill_v1");
+    const state = (await stateRef.get()).data() || {};
+    if (state.completedAt) return null;
+    const pageSize = 300;
+    let query = db.collection("marketplace_items")
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(pageSize);
+    const startAfterId = asNonEmptyString(state.nextStartAfterId);
+    if (startAfterId) query = query.startAfter(startAfterId);
+    const page = await query.get();
+
+    const batch = db.batch();
+    let changed = 0;
+    page.docs.forEach((doc) => {
+      const data = doc.data() || {};
+      const patch: Record<string, number | admin.firestore.FieldValue> = {...marketplaceLocationRoundingPatch(data)};
+      if ("buyerId" in data) patch.buyerId = admin.firestore.FieldValue.delete();
+      if ("stripeCommerceOrderId" in data) patch.stripeCommerceOrderId = admin.firestore.FieldValue.delete();
+      if (Object.keys(patch).length === 0) return;
+      batch.update(doc.ref, patch);
+      changed++;
+    });
+    if (changed > 0) await batch.commit();
+
+    const lastDoc = page.docs[page.docs.length - 1];
+    const nextStartAfterId = page.size === pageSize && lastDoc ? lastDoc.id : null;
+    const now = admin.firestore.Timestamp.now();
+    const increment = admin.firestore.FieldValue.increment;
+    await stateRef.set({
+      nextStartAfterId,
+      scannedListings: increment(page.size),
+      listingsChanged: increment(changed),
+      lastRunAt: now,
+      ...(nextStartAfterId ? {} : {completedAt: now}),
+    }, {merge: true});
+    functions.logger.info("Marketplace listing privacy backfill page processed.", {scanned: page.size, changed});
+    return null;
+  });
+
+/**
  * Starts a platform-owned Stripe Checkout session. The item price and seller
  * are always re-read from Firestore; client supplied totals are never used.
  */
@@ -3307,6 +3457,26 @@ export const requestMarketplacePurchase = functions.runWith({enforceAppCheck: tr
       throw new functions.https.HttpsError("failed-precondition", "You cannot buy your own item.");
     }
     const destinationAccountId = await resolveVerifiedStripeConnectDestination(sellerId, "The seller", "MARKETPLACE");
+
+    // An open checkout link is reused as-is, so re-check it against the live listing before handing it back.
+    const existingOrderRef = stripeCommerceOrders.doc(stripeCommerceOrderId("MARKETPLACE", buyerId, itemId));
+    const existingOrder = (await existingOrderRef.get()).data() || {};
+    if (String(existingOrder.status || "").trim().toUpperCase() === "CHECKOUT_READY") {
+      const listingOpen = String(itemData.status || "").trim().toUpperCase() === "AVAILABLE" && itemData.isDeleted !== true;
+      const blocked = await db.runTransaction((transaction) =>
+        blindDateUsersBlockedInTransaction(transaction, buyerId, sellerId));
+      const quoteChanged = Number(existingOrder.amountCents || 0) !== toStripeCents(marketplaceItemPriceUsd(itemData)) ||
+        asNonEmptyString(existingOrder.destinationAccountId) !== destinationAccountId;
+      if (!listingOpen || blocked || quoteChanged) {
+        await expireStripeCommerceCheckoutOrder(existingOrderRef, "The listing changed after this checkout was opened.");
+      }
+      if (!listingOpen) {
+        throw new functions.https.HttpsError("failed-precondition", "This marketplace listing is no longer available.");
+      }
+      if (blocked) {
+        throw new functions.https.HttpsError("permission-denied", "This listing isn't available to you.");
+      }
+    }
 
     return startStripeCommerceCheckout({
       kind: "MARKETPLACE",
@@ -24964,7 +25134,7 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
     }
     const order = (orderDoc.data() || {}) as Record<string, unknown>;
     const currentStatus = String(order.status || "").toUpperCase();
-    if (currentStatus === "PAID" || currentStatus === "FULFILLED") return;
+    if (currentStatus === "PAID" || currentStatus === "FULFILLED" || currentStatus === "REFUNDED") return;
     if (asNonEmptyString(order.stripeCheckoutSessionId) !== session.id) {
       functions.logger.warn("Stripe Checkout session does not match commerce order.", {orderId, sessionId: session.id});
       return;
@@ -25039,10 +25209,17 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
       const item = await transaction.get(itemRef);
       const itemData = (item.data() || {}) as Record<string, unknown>;
       if (!item.exists || String(itemData.status || "").toUpperCase() !== "AVAILABLE" || itemData.isDeleted === true) {
-        return reconcile("Marketplace item was no longer available when payment completed.");
+        reconcile("Marketplace item was no longer available when payment completed.");
+        transaction.set(orderRef, {autoRefundStatus: "PENDING"}, {merge: true});
+        return;
       }
-      if (asNonEmptyString(itemData.sellerId) !== sellerId) return reconcile("Marketplace seller changed before fulfillment.");
-      transaction.update(itemRef, {status: "SOLD", buyerId, soldAt: now, stripeCommerceOrderId: orderId, updatedAt: now});
+      if (asNonEmptyString(itemData.sellerId) !== sellerId) {
+        reconcile("Marketplace seller changed before fulfillment.");
+        transaction.set(orderRef, {autoRefundStatus: "PENDING"}, {merge: true});
+        return;
+      }
+      // Listings are readable by every member; the buyer stays on the private order doc only.
+      transaction.update(itemRef, {status: "SOLD", soldAt: now, updatedAt: now});
       recordBuyerReceipt(`Marketplace purchase: ${asNonEmptyString(itemData.title, itemData.name) || "Item"}`);
       recordSellerReceipt(`Marketplace sale: ${asNonEmptyString(itemData.title, itemData.name) || "Item"}`);
       if (platformFeeUsd > 0) {
@@ -25193,6 +25370,67 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
 
     transaction.set(orderRef, {...receipt, status: "PAID", fulfilledAt: now}, {merge: true});
   });
+};
+
+/**
+ * Refunds a marketplace buyer whose payment arrived after the item sold or closed. Destination-charge
+ * funds and the platform fee are pulled back so neither the seller nor the platform keeps the money.
+ * @param {Stripe.Checkout.Session} session Verified Stripe Checkout session.
+ * @return {Promise<void>} Resolves once the refund is submitted or the failure is recorded.
+ */
+const refundUnfulfillableMarketplaceOrder = async (session: Stripe.Checkout.Session): Promise<void> => {
+  const orderId = asNonEmptyString(session.client_reference_id, session.metadata?.stripeCommerceOrderId);
+  if (!orderId) return;
+  const orderRef = stripeCommerceOrders.doc(orderId);
+  const order = (await orderRef.get()).data() || {};
+  if (
+    String(order.kind || "").toUpperCase() !== "MARKETPLACE" ||
+    order.autoRefundStatus !== "PENDING" ||
+    asNonEmptyString(order.stripeCheckoutSessionId) !== session.id
+  ) return;
+  const paymentIntentId = asNonEmptyString(order.stripePaymentIntentId) || stripeSessionPaymentIntentId(session);
+  const now = admin.firestore.Timestamp.now();
+  if (!paymentIntentId) {
+    await orderRef.set({autoRefundStatus: "FAILED", autoRefundError: "Missing payment intent.", updatedAt: now}, {merge: true});
+    functions.logger.error("Marketplace auto-refund skipped: no payment intent.", {orderId, sessionId: session.id});
+    return;
+  }
+  try {
+    const refund = await getStripe().refunds.create({
+      payment_intent: paymentIntentId,
+      reverse_transfer: true,
+      refund_application_fee: true,
+      metadata: {stripeCommerceOrderId: orderId, reason: "MARKETPLACE_ITEM_UNAVAILABLE"},
+    }, {idempotencyKey: `marketplace-unavailable-refund-${orderId}-${session.id}`});
+    await orderRef.set({
+      status: "REFUNDED",
+      autoRefundStatus: "SUBMITTED",
+      stripeRefundId: refund.id,
+      refundedAt: now,
+      updatedAt: now,
+    }, {merge: true});
+    const buyerId = asNonEmptyString(order.buyerId);
+    if (buyerId) {
+      await db.collection("users").doc(buyerId).collection("transactions").doc(`marketplace_refund_${orderId}`).set({
+        title: `Marketplace refund: ${asNonEmptyString(order.title) || "Item"}`,
+        amount: roundMoney(Number(order.amountUsd || 0)),
+        type: "INFO",
+        status: "REFUND_SUBMITTED",
+        timestamp: now,
+        source: "STRIPE_COMMERCE_REFUND",
+        note: "This item sold before your payment finished, so your payment is being refunded to your original payment method.",
+        stripeCommerceOrderId: orderId,
+        stripeRefundId: refund.id,
+      }, {merge: true});
+    }
+  } catch (error) {
+    await orderRef.set({
+      autoRefundStatus: "FAILED",
+      autoRefundError: parseProviderErrorMessage(error),
+      updatedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+    functions.logger.error("Marketplace auto-refund failed.", {orderId, sessionId: session.id, error});
+  }
 };
 
 const isStripeCommerceCheckoutEvent = (eventType: string): boolean => (
@@ -25427,6 +25665,7 @@ const processStripeWebhookEvent = async (event: Stripe.Event): Promise<void> => 
     if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
       if (session.payment_status === "paid") {
         await finalizeStripeCommerceOrder(session);
+        await refundUnfulfillableMarketplaceOrder(session);
       } else {
         const orderId = asNonEmptyString(session.client_reference_id, session.metadata?.stripeCommerceOrderId);
         if (orderId) {

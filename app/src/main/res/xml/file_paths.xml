@@ -9,4 +9,7 @@
     <cache-path
         name="mindloom_share"
         path="mindloom_share/" />
+    <cache-path
+        name="marketplace_camera"
+        path="marketplace_camera/" />
 </paths>

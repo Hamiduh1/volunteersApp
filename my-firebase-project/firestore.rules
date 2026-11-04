@@ -3153,14 +3153,14 @@ service cloud.firestore {
       return status == null || status in ['AVAILABLE', 'ACTIVE', 'OPEN'];
     }
 
+    // Pinned to this project's bucket and the seller's folder; an unanchored match let URLs from any
+    // Firebase project through as long as the path text appeared somewhere in them.
     function isMarketplaceStorageUrlForSeller(url, sellerId) {
       return url is string
         && url.size() > 0
         && url.size() <= 2000
-        && (url.matches('https://firebasestorage.googleapis.com/.*')
-            || url.matches('https://.*\\.firebasestorage\\.app/.*'))
-        && (url.matches('.*marketplace_images%2F' + sellerId + '%2F.*')
-            || url.matches('.*marketplace_images/' + sellerId + '/.*'));
+        && (url.matches('https://firebasestorage\\.googleapis\\.com(:443)?/v0/b/volunteersapp-968b2\\.(firebasestorage\\.app|appspot\\.com)/o/marketplace_images%2F' + sellerId + '%2F[^/?#]+([?].*)?')
+            || url.matches('https://volunteersapp-968b2\\.firebasestorage\\.app/marketplace_images/' + sellerId + '/[^/?#]+([?].*)?'));
     }
 
     function marketplaceImageUrlsListValid(urls, sellerId) {

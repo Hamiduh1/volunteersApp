@@ -55,8 +55,17 @@ data class MarketplaceItem(
     /** One of [MarketplaceCondition] values, or null for listings posted before conditions existed. */
     val condition: String? = null,
     @ServerTimestamp
-    val timestamp: Date? = null
+    val timestamp: Date? = null,
+    /** Raw `media[]` entries in stored order, so edits keep videos and the seller's photo order. */
+    val mediaEntries: List<MarketplaceMediaEntry> = emptyList(),
 ) {
+    fun mediaEntriesForEdit(): List<MarketplaceMediaEntry> =
+        mediaEntries.ifEmpty { imageUrls.map { MarketplaceMediaEntry(url = it) } }
+
+    fun coverImageUrl(): String? =
+        galleryForPager().firstOrNull { it.kind == MarketplaceMediaKind.IMAGE && it.previewUrl.isNotBlank() }?.previewUrl
+            ?: imageUrls.firstOrNull { it.isNotBlank() }
+
     fun galleryForPager(): List<MarketplaceGallerySlot> =
         if (gallerySlots.isNotEmpty()) {
             gallerySlots

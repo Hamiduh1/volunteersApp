@@ -4,6 +4,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.chat.resolveProfileImageUrl
 import com.example.volunteersApp.firebase.CallableFunction
 import com.example.volunteersApp.firebase.FirestoreAppConfigDocument
 import com.example.volunteersApp.firebase.FirestoreCollection
@@ -88,6 +89,265 @@ class MarketplaceViewModel : ViewModel() {
     private val _savingItemIds = MutableStateFlow<Set<String>>(emptySet())
     val savingItemIds = _savingItemIds.asStateFlow()
 
+    /** Saved listings older than the feed window, fetched by id so the Saved filter isn't capped at the feed size. */
+    private val _savedExtraItems = MutableStateFlow<Map<String, MarketplaceItem>>(emptyMap())
+    val savedExtraItems = _savedExtraItems.asStateFlow()
+    private val savedExtraRequested = mutableSetOf<String>()
+
+    private val _sellerProfiles = MutableStateFlow<Map<String, MarketplaceSellerProfile>>(emptyMap())
+    val sellerProfiles = _sellerProfiles.asStateFlow()
+    private val sellerProfileRequests = mutableSetOf<String>()
+
+    private val _isSavingListing = MutableStateFlow(false)
+    val isSavingListing = _isSavingListing.asStateFlow()
+
+    fun findListing(itemId: String): MarketplaceItem? {
+        val state = _uiState.value as? MarketplaceUiState.Success
+        return state?.items?.firstOrNull { it.id == itemId } ?: _savedExtraItems.value[itemId]
+    }
+
+    fun priceHintFor(category: String): MarketplacePriceHint? {
+        val items = (_uiState.value as? MarketplaceUiState.Success)?.items.orEmpty()
+        return marketplacePriceHint(items, category, auth.currentUser?.uid)
+    }
+
+    fun loadSellerProfile(sellerId: String) {
+        val id = sellerId.trim()
+        if (id.isBlank() || !sellerProfileRequests.add(id)) return
+        viewModelScope.launch {
+            runCatching {
+                val doc = db.collection(FirestoreCollection.USERS).document(id).get().await()
+                val name = listOf("name", "displayName", "username")
+                    .firstNotNullOfOrNull { key -> doc.getString(key)?.trim()?.takeIf { it.isNotBlank() } }
+                    .orEmpty()
+                val memberSince = (doc.get("createdAt") as? com.google.firebase.Timestamp)?.toDate()?.time
+                MarketplaceSellerProfile(
+                    name = name,
+                    photoUrl = doc.resolveProfileImageUrl(),
+                    memberSinceMillis = memberSince
+                )
+            }.onSuccess { profile ->
+                _sellerProfiles.update { it + (id to profile) }
+            }.onFailure {
+                sellerProfileRequests.remove(id)
+                Log.w(TAG, "loadSellerProfile failed", it)
+            }
+        }
+    }
+
+    private fun loadMissingSavedListings(savedIds: Set<String>) {
+        val loaded = (_uiState.value as? MarketplaceUiState.Success)?.items.orEmpty().map { it.id }.toSet()
+        _savedExtraItems.update { current -> current.filterKeys { it in savedIds } }
+        val missing = savedIds.filter { it !in loaded && it !in _savedExtraItems.value && savedExtraRequested.add(it) }
+        if (missing.isEmpty()) return
+        viewModelScope.launch {
+            missing.chunked(10).forEach { chunk ->
+                runCatching {
+                    itemsCollection
+                        .whereIn(com.google.firebase.firestore.FieldPath.documentId(), chunk)
+                        .get()
+                        .await()
+                }.onSuccess { snapshot ->
+                    val found = snapshot.documents.mapNotNull { parseMarketplaceFromDocument(it) }
+                    _savedExtraItems.update { current -> current + found.associateBy { it.id } }
+                    refilterIfShowingSaved()
+                }.onFailure {
+                    chunk.forEach(savedExtraRequested::remove)
+                    Log.w(TAG, "Loading saved listings failed", it)
+                }
+            }
+        }
+    }
+
+    /**
+     * Creates a listing ([editingItemId] null) or edits one. Media keeps the seller's order and index 0 is the cover,
+     * which must be a photo so feeds always have an image to show.
+     */
+    fun saveListingDraft(
+        draft: MarketplaceListingDraft,
+        editingItemId: String?,
+        onResult: (success: Boolean, errorMessage: String?) -> Unit
+    ) {
+        if (_isSavingListing.value) return
+        viewModelScope.launch {
+            val currentUser = auth.currentUser ?: run {
+                onResult(false, "Please log in.")
+                return@launch
+            }
+            val cleanTitle = draft.title.trim()
+            val cleanDescription = draft.description.trim()
+            val cleanCategory = draft.category.trim().ifBlank { FALLBACK_CATEGORY }
+            val cleanLocation = draft.locationName.trim().ifBlank { DEFAULT_LOCATION_NAME }.take(200)
+            val cleanPhone = draft.sellerPhone.trim().take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH)
+
+            val validationError = listingTextValidationError(cleanTitle, cleanDescription) ?: when {
+                draft.price < MARKETPLACE_MIN_PRICE_USD -> "Add a valid price."
+                draft.price > MARKETPLACE_MAX_PRICE_USD ->
+                    "Price cannot exceed ${"%,.0f".format(Locale.US, MARKETPLACE_MAX_PRICE_USD)}."
+                draft.media.isEmpty() -> "Add at least one photo."
+                draft.media.size > MARKETPLACE_MAX_MEDIA_ATTACHMENTS ->
+                    "You can attach up to $MARKETPLACE_MAX_MEDIA_ATTACHMENTS photos and videos."
+                draft.media.first().isVideo -> "The cover must be a photo. Move a photo to the front."
+                else -> null
+            }
+            if (validationError != null) {
+                onResult(false, validationError)
+                return@launch
+            }
+
+            _isSavingListing.value = true
+            if (editingItemId != null) {
+                _uiState.update { current ->
+                    if (current is MarketplaceUiState.Success) {
+                        current.copy(updatingItemIds = current.updatingItemIds + editingItemId)
+                    } else {
+                        current
+                    }
+                }
+            }
+            var newUploads = emptyList<MarketplaceUpload>()
+            var written = false
+            try {
+                _errorMessage.value = null
+                val existingItem = if (editingItemId != null) {
+                    val snapshot = itemsCollection.document(editingItemId).get().await()
+                    val live = snapshot.toObject(MarketplaceItem::class.java)
+                        ?: throw IllegalStateException("Listing not found.")
+                    if (live.sellerId != currentUser.uid) {
+                        throw IllegalStateException("You can only edit your own listing.")
+                    }
+                    if (!isMarketplaceEditableStatus(live.status)) {
+                        throw IllegalStateException("Only open listings can be edited.")
+                    }
+                    live
+                } else {
+                    resolveSellerReadinessForPublish(currentUser.uid).publishBlockReason?.let {
+                        throw IllegalStateException(it)
+                    }
+                    null
+                }
+
+                val locals = draft.media.filterIsInstance<MarketplaceDraftMedia.Local>()
+                newUploads = uploadDraftMedia(currentUser.uid, locals)
+                val uploadedByLocal = locals.zip(newUploads).toMap()
+                val entries = draft.media.map { slot ->
+                    when (slot) {
+                        is MarketplaceDraftMedia.Existing -> slot.entry
+                        is MarketplaceDraftMedia.Local -> MarketplaceMediaEntry(
+                            url = uploadedByLocal.getValue(slot).url,
+                            type = if (slot.isVideo) MarketplaceMediaEntry.TYPE_VIDEO else MarketplaceMediaEntry.TYPE_IMAGE
+                        )
+                    }
+                }
+                val imageUrls = entries.filterNot { it.isVideo }.map { it.url }
+                val mediaPayload = entries.map { it.toFirestore() }
+                val latitude = draft.latitude?.let(::roundMarketplaceCoordinate)
+                val longitude = draft.longitude?.let(::roundMarketplaceCoordinate)
+                val hasCoordinates = latitude != null && longitude != null
+
+                if (existingItem == null) {
+                    val userSnapshot = db.collection(FirestoreCollection.USERS).document(currentUser.uid).get().await()
+                    val sellerName = (
+                        userSnapshot.getString("name")?.takeIf { it.isNotBlank() }
+                            ?: userSnapshot.getString("username")?.takeIf { it.isNotBlank() }
+                            ?: currentUser.email
+                            ?: "Seller"
+                        ).trim().take(MARKETPLACE_SELLER_NAME_MAX_LENGTH)
+                    val payload = mutableMapOf<String, Any>(
+                        "title" to cleanTitle,
+                        "description" to cleanDescription,
+                        "price" to draft.price,
+                        "category" to cleanCategory,
+                        "sellerName" to sellerName,
+                        "sellerId" to currentUser.uid,
+                        "sellerPhone" to cleanPhone,
+                        "imageUrls" to imageUrls,
+                        "media" to mediaPayload,
+                        "locationName" to cleanLocation,
+                        "countryCode" to DEFAULT_COUNTRY_CODE,
+                        "status" to STATUS_AVAILABLE,
+                        "timestamp" to FieldValue.serverTimestamp()
+                    )
+                    if (hasCoordinates) {
+                        payload["latitude"] = latitude!!
+                        payload["longitude"] = longitude!!
+                    }
+                    draft.condition?.let { payload["condition"] = it.value }
+                    itemsCollection.document().set(payload).await()
+                    written = true
+                    _statusMessage.value = "Item posted successfully."
+                    refreshSellerReadiness()
+                } else {
+                    val updates = mutableMapOf<String, Any>(
+                        "title" to cleanTitle,
+                        "description" to cleanDescription,
+                        "category" to cleanCategory,
+                        "price" to draft.price,
+                        "sellerPhone" to cleanPhone,
+                        "locationName" to cleanLocation,
+                        "imageUrls" to imageUrls,
+                        "media" to mediaPayload,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    if (hasCoordinates) {
+                        updates["latitude"] = latitude!!
+                        updates["longitude"] = longitude!!
+                    } else {
+                        updates["latitude"] = FieldValue.delete()
+                        updates["longitude"] = FieldValue.delete()
+                    }
+                    when {
+                        draft.condition != null -> updates["condition"] = draft.condition.value
+                        existingItem.condition != null -> updates["condition"] = FieldValue.delete()
+                    }
+                    itemsCollection.document(editingItemId!!).update(updates).await()
+                    written = true
+                    _statusMessage.value = "Listing updated."
+                }
+                onResult(true, null)
+            } catch (e: Exception) {
+                if (!written) deleteUploadedMedia(newUploads)
+                Log.e(TAG, "saveListingDraft failed", e)
+                onResult(false, e.localizedMessage ?: "Couldn't save this listing.")
+            } finally {
+                _isSavingListing.value = false
+                if (editingItemId != null) {
+                    _uiState.update { current ->
+                        if (current is MarketplaceUiState.Success) {
+                            current.copy(updatingItemIds = current.updatingItemIds - editingItemId)
+                        } else {
+                            current
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun uploadDraftMedia(
+        ownerUid: String,
+        locals: List<MarketplaceDraftMedia.Local>
+    ): List<MarketplaceUpload> {
+        val uploads = mutableListOf<MarketplaceUpload>()
+        try {
+            for (local in locals) {
+                val extension = if (local.isVideo) "mp4" else "jpg"
+                val ref = storage.reference.child(
+                    StorageFolder.marketplaceImage(ownerUid, "${UUID.randomUUID()}.$extension")
+                )
+                val metadata = StorageMetadata.Builder()
+                    .setContentType(if (local.isVideo) "video/mp4" else "image/jpeg")
+                    .build()
+                ref.putFile(local.uri, metadata).await()
+                uploads += MarketplaceUpload(url = ref.downloadUrl.await().toString(), reference = ref)
+            }
+            return uploads
+        } catch (e: Exception) {
+            deleteUploadedMedia(uploads)
+            throw e
+        }
+    }
+
     /**
      * Attaches the Firestore listener when the Marketplace UI is shown.
      * Prefer this (from [androidx.compose.runtime.DisposableEffect]) over relying only on [onCleared].
@@ -120,6 +380,7 @@ class MarketplaceViewModel : ViewModel() {
                     return@addSnapshotListener
                 }
                 _savedItemIds.value = snapshots?.documents?.map { it.id }?.toSet().orEmpty()
+                loadMissingSavedListings(_savedItemIds.value)
                 refilterIfShowingSaved()
             }
     }
@@ -883,7 +1144,18 @@ class MarketplaceViewModel : ViewModel() {
             longitude = readDoubleFromMap(data, "longitude"),
             status = status,
             condition = MarketplaceCondition.fromValue(data["condition"] as? String)?.value,
-            timestamp = doc.getDate("timestamp")
+            timestamp = doc.getDate("timestamp"),
+            mediaEntries = mediaArray.orEmpty().mapNotNull { row ->
+                val m = row as? Map<*, *> ?: return@mapNotNull null
+                val url = (m["url"] as? String)?.trim().orEmpty()
+                if (url.isBlank()) return@mapNotNull null
+                val type = (m["type"] as? String)?.trim()?.lowercase(Locale.US)
+                MarketplaceMediaEntry(
+                    url = url,
+                    type = if (type == MarketplaceMediaEntry.TYPE_VIDEO) type else MarketplaceMediaEntry.TYPE_IMAGE,
+                    name = (m["name"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+                )
+            }
         )
     }
 
@@ -1041,7 +1313,12 @@ class MarketplaceViewModel : ViewModel() {
         searchQuery: String,
         sort: MarketplaceSortOption,
     ): List<MarketplaceItem> {
-        val filtered = filterItems(items, category, searchQuery)
+        val source = if (category.trim() == MARKETPLACE_SAVED_FILTER) {
+            (items + _savedExtraItems.value.values).distinctBy { it.id }
+        } else {
+            items
+        }
+        val filtered = filterItems(source, category, searchQuery)
         return sortMarketplaceItems(filtered, sort, _currentUserLocation.value)
     }
 

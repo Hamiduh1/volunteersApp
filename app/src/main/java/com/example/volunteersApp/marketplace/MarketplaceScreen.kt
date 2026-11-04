@@ -35,6 +35,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -135,8 +140,9 @@ fun MarketplaceScreen(
     var itemToBuy by remember { mutableStateOf<MarketplaceItem?>(null) }
     var hasRequestedLocation by remember { mutableStateOf(false) }
     var fullscreenGallery by remember { mutableStateOf<Pair<MarketplaceItem, Int>?>(null) }
-    var browseLayout by remember { mutableStateOf(MarketplaceBrowseLayout.Posts) }
+    var browseLayout by remember { mutableStateOf(MarketplaceBrowseLayout.Discover) }
     var sellerProfile by remember { mutableStateOf<SellerCollection?>(null) }
+    var detailItemId by remember { mutableStateOf<String?>(null) }
 
     val uiState by viewModel.uiState.collectAsState()
     val publicFees by viewModel.publicFees.collectAsState()
@@ -144,9 +150,13 @@ fun MarketplaceScreen(
     val statusMessage by viewModel.statusMessage.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val savedItemIds by viewModel.savedItemIds.collectAsState()
+    val savedExtraItems by viewModel.savedExtraItems.collectAsState()
+    val sellerProfiles by viewModel.sellerProfiles.collectAsState()
+    val isSavingListing by viewModel.isSavingListing.collectAsState()
+    val currentUserLocation by viewModel.currentUserLocation.collectAsState()
     val context = LocalContext.current
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
-    val listState = rememberLazyListState()
+    val listState = rememberLazyStaggeredGridState()
     var pullRefreshing by remember { mutableStateOf(false) }
     val syncEpoch by viewModel.syncEpoch.collectAsState()
 
@@ -215,29 +225,26 @@ fun MarketplaceScreen(
         pullRefreshing = false
     }
 
-    if (showCreateScreen) {
-        PostMarketplaceItemScreen(
+    val editorTarget = editingItem
+    if (showCreateScreen || editorTarget != null) {
+        MarketplaceListingEditorScreen(
+            editingItem = editorTarget,
             sellerReadiness = sellerReadiness,
-            onPostItem = { title, description, price, category, imageUris, sellerPhone, locationName, latitude, longitude, condition, onResult ->
-                viewModel.postNewItem(
-                    title = title,
-                    description = description,
-                    price = price,
-                    category = category,
-                    imageUris = imageUris,
-                    sellerPhone = sellerPhone,
-                    locationName = locationName,
-                    latitude = latitude,
-                    longitude = longitude,
-                    condition = condition
-                ) { success, errorMessage ->
+            isSaving = isSavingListing,
+            priceHintFor = viewModel::priceHintFor,
+            onSave = { draft, onResult ->
+                viewModel.saveListingDraft(draft, editorTarget?.id) { success, errorMessage ->
                     if (success) {
                         showCreateScreen = false
+                        editingItem = null
                     }
                     onResult(success, errorMessage)
                 }
             },
-            onNavigateUp = { showCreateScreen = false },
+            onNavigateUp = {
+                showCreateScreen = false
+                editingItem = null
+            },
             onOpenAiAssistant = { navigateSafe("ai_assistant") }
         )
         return
@@ -247,29 +254,33 @@ fun MarketplaceScreen(
     val uid = viewModel.getCurrentUserId()
     val buyerActionsEnabled = uid != null
 
-    sellerProfile?.let { profile ->
-        MarketplaceSellerProfileScreen(
-            sellerId = profile.sellerId,
-            sellerName = profile.displayName,
-            listings = successState?.filteredItems.orEmpty(),
-            currentUserId = uid,
-            buyerActionsEnabled = buyerActionsEnabled,
-            buyingItemIds = successState?.buyingItemIds.orEmpty(),
-            deletingItemIds = successState?.deletingItemIds.orEmpty(),
-            distanceForItem = { viewModel.distanceText(it) },
-            onNavigateUp = { sellerProfile = null },
-            onEditClicked = { editingItem = it },
-            onDeleteClicked = { itemToDelete = it },
-            onBuyClicked = { itemToBuy = it },
-            onChatClicked = { viewModel.sendChatInvitation(it) { _, _ -> } },
-            onOpenGallery = { item, page -> fullscreenGallery = item to page }
-        )
-        return
+    val detailItem = detailItemId?.let { id ->
+        successState?.items?.firstOrNull { it.id == id } ?: savedExtraItems[id]
+    }
+    val activeSeller = sellerProfile
+
+    LaunchedEffect(detailItem?.sellerId) {
+        detailItem?.sellerId?.takeIf { it.isNotBlank() }?.let(viewModel::loadSellerProfile)
+    }
+    LaunchedEffect(activeSeller?.sellerId) {
+        activeSeller?.sellerId?.takeIf { it.isNotBlank() }?.let(viewModel::loadSellerProfile)
     }
 
     val filteredForMetrics = successState?.filteredItems.orEmpty()
-    val sellerCollections = remember(filteredForMetrics, uid) {
+    // Listing copies of the seller name go stale after a profile rename, so prefer the live profile name.
+    val sellerCollections = remember(filteredForMetrics, uid, sellerProfiles) {
         groupSellerCollections(filteredForMetrics)
+            .map { collection ->
+                sellerProfiles[collection.sellerId]?.name?.takeIf { it.isNotBlank() }
+                    ?.let { collection.copy(displayName = it) }
+                    ?: collection
+            }
+            .sortedBy { it.displayName.lowercase(Locale.getDefault()) }
+    }
+    LaunchedEffect(browseLayout, sellerCollections.map { it.sellerId }) {
+        if (browseLayout == MarketplaceBrowseLayout.Posts) {
+            sellerCollections.forEach { viewModel.loadSellerProfile(it.sellerId) }
+        }
     }
     val collectionsCount = sellerCollections.size
 
@@ -281,7 +292,57 @@ fun MarketplaceScreen(
         )
     )
 
-    Box(
+    if (detailItem != null) {
+        MarketplaceListingDetailScreen(
+            item = detailItem,
+            sellerProfile = sellerProfiles[detailItem.sellerId],
+            isOwner = uid == detailItem.sellerId,
+            buyerActionsEnabled = buyerActionsEnabled,
+            isSaved = detailItem.id in savedItemIds,
+            isBuying = successState?.buyingItemIds?.contains(detailItem.id) == true,
+            isDeleting = successState?.deletingItemIds?.contains(detailItem.id) == true,
+            distanceText = viewModel.distanceText(detailItem),
+            onNavigateUp = { detailItemId = null },
+            onToggleSave = if (buyerActionsEnabled) {
+                { viewModel.toggleSaved(detailItem) }
+            } else {
+                null
+            },
+            onOpenGallery = { page -> fullscreenGallery = detailItem to page },
+            onSellerClicked = {
+                val sellerItems = successState?.items.orEmpty().filter { it.sellerId == detailItem.sellerId }
+                sellerProfile = SellerCollection(
+                    groupKey = detailItem.sellerId.ifBlank { detailItem.sellerName },
+                    sellerId = detailItem.sellerId,
+                    displayName = detailItem.sellerName.ifBlank { "Seller" },
+                    listings = sellerItems
+                )
+                detailItemId = null
+            },
+            onChatClicked = { viewModel.sendChatInvitation(detailItem) { _, _ -> } },
+            onBuyClicked = { itemToBuy = detailItem },
+            onEditClicked = { editingItem = detailItem },
+            onDeleteClicked = { itemToDelete = detailItem }
+        )
+    } else if (activeSeller != null) {
+        MarketplaceSellerStoreScreen(
+            sellerId = activeSeller.sellerId,
+            fallbackSellerName = activeSeller.displayName,
+            sellerProfile = sellerProfiles[activeSeller.sellerId],
+            listings = successState?.items.orEmpty(),
+            currentUserId = uid,
+            savedItemIds = savedItemIds,
+            userLocation = currentUserLocation,
+            distanceForItem = { viewModel.distanceText(it) },
+            onNavigateUp = { sellerProfile = null },
+            onToggleSave = if (buyerActionsEnabled) {
+                { item -> viewModel.toggleSaved(item) }
+            } else {
+                null
+            },
+            onOpenListing = { detailItemId = it.id }
+        )
+    } else Box(
         modifier = Modifier
             .fillMaxSize()
             .background(gradientBrush)
@@ -349,7 +410,7 @@ fun MarketplaceScreen(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
                         Text(
-                            text = "Create Listing",
+                            text = "Sell",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                             style = MaterialTheme.typography.labelLarge
@@ -368,17 +429,19 @@ fun MarketplaceScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                LazyColumn(
+                LazyVerticalStaggeredGrid(
+                    columns = StaggeredGridCells.Fixed(2),
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Transparent)
                         .navigationBarsPadding(),
                     contentPadding = PaddingValues(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 100.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalItemSpacing = 14.dp
                 ) {
                     statusMessage?.let { msg ->
-                        item {
+                        item(span = StaggeredGridItemSpan.FullLine) {
                             MarketplaceStatusBanner(
                                 message = msg,
                                 onDismiss = { viewModel.clearStatusMessage() }
@@ -386,7 +449,7 @@ fun MarketplaceScreen(
                         }
                     }
 
-                    item {
+                    item(span = StaggeredGridItemSpan.FullLine) {
                         MarketplaceHeroCard(
                             listingCount = filteredForMetrics.size,
                             sellerCount = collectionsCount,
@@ -394,7 +457,7 @@ fun MarketplaceScreen(
                         )
                     }
 
-                    item {
+                    item(span = StaggeredGridItemSpan.FullLine) {
                         MarketplaceControlsCard(
                             sellerCollectionCount = collectionsCount,
                             listingCount = filteredForMetrics.size,
@@ -420,11 +483,15 @@ fun MarketplaceScreen(
 
                     when (val state = uiState) {
                         is MarketplaceUiState.Loading -> {
-                            items(3) { MarketplaceSkeletonCard() }
+                            if (browseLayout == MarketplaceBrowseLayout.Discover) {
+                                items(6) { index -> MarketplaceGridSkeletonCard(index) }
+                            } else {
+                                items(3, span = { StaggeredGridItemSpan.FullLine }) { MarketplaceSkeletonCard() }
+                            }
                         }
 
                         is MarketplaceUiState.Error -> {
-                            item {
+                            item(span = StaggeredGridItemSpan.FullLine) {
                                 MarketplaceErrorCard(
                                     message = state.message,
                                     onTryAgain = {
@@ -437,7 +504,7 @@ fun MarketplaceScreen(
                         is MarketplaceUiState.Success -> {
                             when {
                                 state.items.isEmpty() -> {
-                                    item {
+                                    item(span = StaggeredGridItemSpan.FullLine) {
                                         EmptyMarketplacePlaceholder(
                                             onAddItemClicked = {
                                                 if (sellerReadiness.canPublishNewListing) {
@@ -456,7 +523,7 @@ fun MarketplaceScreen(
                                 }
 
                                 state.filteredItems.isEmpty() -> {
-                                    item {
+                                    item(span = StaggeredGridItemSpan.FullLine) {
                                         MarketplaceFilteredEmptyState(
                                             onCreateListing = {
                                                 if (sellerReadiness.canPublishNewListing) {
@@ -477,29 +544,25 @@ fun MarketplaceScreen(
                                 else -> {
                                     if (browseLayout == MarketplaceBrowseLayout.Discover) {
                                         items(state.filteredItems, key = { it.id }) { item ->
-                                            MarketplaceListingCard(
+                                            MarketplaceGridCard(
                                                 item = item,
                                                 isOwner = uid == item.sellerId,
-                                                buyerActionsEnabled = buyerActionsEnabled,
                                                 distanceText = viewModel.distanceText(item),
-                                                isBuying = item.id in state.buyingItemIds,
-                                                isDeleting = item.id in state.deletingItemIds,
-                                                canEdit = isMarketplaceEditableStatus(item.status),
-                                                onEditClicked = { editingItem = item },
-                                                onDeleteClicked = { itemToDelete = item },
-                                                onBuyClicked = { itemToBuy = item },
-                                                onChatClicked = { viewModel.sendChatInvitation(item) { _, _ -> } },
-                                                onOpenGallery = { page -> fullscreenGallery = item to page },
                                                 isSaved = item.id in savedItemIds,
                                                 onToggleSave = if (buyerActionsEnabled) {
                                                     { viewModel.toggleSaved(item) }
                                                 } else {
                                                     null
-                                                }
+                                                },
+                                                onClick = { detailItemId = item.id }
                                             )
                                         }
                                     } else {
-                                        items(sellerCollections, key = { it.groupKey }) { collection ->
+                                        items(
+                                            sellerCollections,
+                                            key = { it.groupKey },
+                                            span = { StaggeredGridItemSpan.FullLine }
+                                        ) { collection ->
                                             SellerCollectionSection(
                                                 collection = collection,
                                                 currentUserId = uid,
@@ -590,6 +653,7 @@ fun MarketplaceScreen(
                         viewModel.deleteItem(item.id) { success, _ ->
                             if (success) {
                                 itemToDelete = null
+                                if (detailItemId == item.id) detailItemId = null
                             }
                         }
                     },
