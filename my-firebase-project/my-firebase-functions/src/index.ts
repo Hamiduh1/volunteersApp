@@ -2332,6 +2332,10 @@ const startStripeCommerceCheckout = async (params: {
   buyerId: string;
   resourceId: string;
   prepare: (transaction: admin.firestore.Transaction, orderRef: admin.firestore.DocumentReference) => Promise<StripeCommerceDraft>;
+  /** Re-run `prepare` before handing back an open checkout link; `prepare` must not write. */
+  revalidateBeforeReuse?: boolean;
+  /** Stripe requires at least 30 minutes. */
+  checkoutLifetimeSeconds?: number;
 }): Promise<StripeCommerceCheckoutResult> => {
   const orderId = stripeCommerceOrderId(params.kind, params.buyerId, params.resourceId);
   const orderRef = stripeCommerceOrders.doc(orderId);
@@ -2362,7 +2366,15 @@ const startStripeCommerceCheckout = async (params: {
     if (existingStatus === "PAID" || existingStatus === "FULFILLED") {
       return {kind: "complete" as const, existingData};
     }
-    if (existingStatus === "CHECKOUT_READY" && existingUrl) {
+    // Replacing the session now would orphan a payment Stripe may still confirm.
+    if (existingStatus === "PAYMENT_PROCESSING") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Your last payment for this is still processing. You'll see the result once Stripe confirms it."
+      );
+    }
+    const existingReusable = existingStatus === "CHECKOUT_READY" && !!existingUrl;
+    if (existingReusable && !params.revalidateBeforeReuse) {
       return {kind: "reuse" as const, existingData};
     }
     if (existingStatus === "CHECKOUT_CREATING") {
@@ -2381,6 +2393,16 @@ const startStripeCommerceCheckout = async (params: {
     if (platformFeeCents < 0 || platformFeeCents > amountCents) {
       throw new functions.https.HttpsError("failed-precondition", "The configured platform fee is invalid.");
     }
+    if (existingReusable) {
+      const expiresAtMs = checkoutCreatingAtMillis(existingData.checkoutExpiresAt);
+      const sameQuote = Number(existingData.amountCents || 0) === amountCents &&
+        Number(existingData.platformFeeCents || 0) === platformFeeCents &&
+        (asNonEmptyString(existingData.destinationAccountId) || null) === (draft.destinationAccountId || null);
+      if (sameQuote && (!expiresAtMs || expiresAtMs - Date.now() > 2 * 60 * 1000)) {
+        return {kind: "reuse" as const, existingData};
+      }
+    }
+    const supersededSessionId = existingReusable ? asNonEmptyString(existingData.stripeCheckoutSessionId) : undefined;
 
     const now = admin.firestore.Timestamp.now();
     transaction.set(orderRef, {
@@ -2407,7 +2429,7 @@ const startStripeCommerceCheckout = async (params: {
       updatedAt: now,
       createdAt: existing.exists ? existingData.createdAt || now : now,
     }, {merge: true});
-    return {kind: "create" as const, draft, amountCents, platformFeeCents};
+    return {kind: "create" as const, draft, amountCents, platformFeeCents, supersededSessionId};
   });
 
   if (prepared.kind === "complete") {
@@ -2434,6 +2456,19 @@ const startStripeCommerceCheckout = async (params: {
       charged: false,
       message: "Continue securely in Stripe Checkout.",
     };
+  }
+
+  if (prepared.supersededSessionId) {
+    // If the old link was already paid, the webhook refunds it as a superseded session.
+    try {
+      await getStripe().checkout.sessions.expire(prepared.supersededSessionId);
+    } catch (error) {
+      functions.logger.warn("Could not expire superseded Stripe Checkout session.", {
+        orderId,
+        sessionId: prepared.supersededSessionId,
+        error: parseProviderErrorMessage(error),
+      });
+    }
   }
 
   try {
@@ -2465,6 +2500,9 @@ const startStripeCommerceCheckout = async (params: {
       }],
       payment_intent_data: paymentIntentData,
       metadata: {stripeCommerceOrderId: orderId, kind: params.kind},
+      ...(params.checkoutLifetimeSeconds ?
+        {expires_at: Math.floor(Date.now() / 1000) + Math.max(params.checkoutLifetimeSeconds, 31 * 60)} :
+        {}),
     });
     if (!session.url) throw new Error("Stripe did not return a hosted checkout URL.");
 
@@ -3482,6 +3520,9 @@ export const requestMarketplacePurchase = functions.runWith({enforceAppCheck: tr
       kind: "MARKETPLACE",
       buyerId,
       resourceId: itemId,
+      revalidateBeforeReuse: true,
+      // Short links narrow the window where two buyers both pay; the loser is refunded automatically.
+      checkoutLifetimeSeconds: 31 * 60,
       prepare: async (transaction) => {
         const [itemDoc, sellerDoc] = await Promise.all([
           transaction.get(db.collection("marketplace_items").doc(itemId)),
@@ -3622,6 +3663,118 @@ export const processPurchaseRequest = functions.firestore
       });
     }
     return undefined;
+  });
+
+const MARKETPLACE_LISTING_MAX_AGE_DAYS = 60;
+// Removed listings are purged on the same clock so their photos don't linger in Storage.
+const MARKETPLACE_EXPIRING_STATUSES = ["AVAILABLE", "ACTIVE", "OPEN", "DELETED"];
+
+/**
+ * @param {string} folder Top-level Storage folder, such as `marketplace_images` or `ads`.
+ * @param {string} ownerId Uid that must own the file.
+ * @param {unknown} value Download URL stored on the document.
+ * @return {string | null} Object path when the file sits in `{folder}/{ownerId}/` of this project's bucket.
+ */
+const ownedStorageObjectPath = (folder: string, ownerId: string, value: unknown): string | null => {
+  if (!ownerId || typeof value !== "string") return null;
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.hostname !== "firebasestorage.googleapis.com") return null;
+  const match = url.pathname.match(/^\/v0\/b\/([^/]+)\/o\/([^/]+)$/);
+  if (!match || !projectStorageBucketNames().has(match[1])) return null;
+  let objectPath: string;
+  try {
+    objectPath = decodeURIComponent(match[2]);
+  } catch {
+    return null;
+  }
+  const segments = objectPath.split("/");
+  const owned = segments.length >= 3 && segments[0] === folder && segments[1] === ownerId &&
+    !segments.includes("..");
+  return owned ? objectPath : null;
+};
+
+/**
+ * Marketplace listings stay up for 60 days. Older unsold or removed listings are deleted with their photos and
+ * videos; sold listings stay because they are the buyer's and seller's purchase record.
+ */
+export const expireOldMarketplaceListingsJob = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
+  .schedule("every 6 hours")
+  .onRun(async () => {
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - MARKETPLACE_LISTING_MAX_AGE_DAYS * 24 * 60 * 60 * 1000
+    );
+    const bucket = admin.storage().bucket();
+    let listingsDeleted = 0;
+    let filesDeleted = 0;
+    let skipped = 0;
+
+    for (let page = 0; page < 25; page++) {
+      const snap = await db.collection("marketplace_items")
+        .where("status", "in", MARKETPLACE_EXPIRING_STATUSES)
+        .where("timestamp", "<", cutoff)
+        .orderBy("timestamp", "desc")
+        .limit(200)
+        .get();
+      if (snap.empty) break;
+
+      for (const doc of snap.docs) {
+        // Re-check inside a transaction so a sale that lands mid-run is never deleted.
+        const removed = await db.runTransaction(async (transaction) => {
+          const live = await transaction.get(doc.ref);
+          if (!live.exists) return null;
+          const data = (live.data() || {}) as Record<string, unknown>;
+          const status = String(data.status || "").trim().toUpperCase();
+          const postedAt = data.timestamp instanceof admin.firestore.Timestamp ? data.timestamp : null;
+          if (!MARKETPLACE_EXPIRING_STATUSES.includes(status) || !postedAt || postedAt.toMillis() >= cutoff.toMillis()) {
+            return null;
+          }
+          transaction.delete(doc.ref);
+          return data;
+        });
+        if (!removed) {
+          skipped += 1;
+          continue;
+        }
+        listingsDeleted += 1;
+
+        const sellerId = asNonEmptyString(removed.sellerId) || "";
+        const urls = [
+          ...(Array.isArray(removed.media) ?
+            removed.media.map((entry) => (entry as Record<string, unknown> | null)?.url) : []),
+          ...(Array.isArray(removed.imageUrls) ? removed.imageUrls : []),
+        ];
+        const paths = new Set(
+          urls.map((url) => ownedStorageObjectPath("marketplace_images", sellerId, url)).filter((path): path is string => !!path)
+        );
+        for (const path of paths) {
+          try {
+            await bucket.file(path).delete({ignoreNotFound: true});
+            filesDeleted += 1;
+          } catch (error) {
+            functions.logger.warn("Could not delete expired marketplace media.", {itemId: doc.id, path, error});
+          }
+        }
+      }
+      if (snap.size < 200) break;
+    }
+
+    await db.collection("system").doc("marketplace_listing_expiry").set({
+      lastRunAt: admin.firestore.Timestamp.now(),
+      cutoff,
+      listingsDeleted,
+      filesDeleted,
+      skipped,
+    }, {merge: true});
+    functions.logger.info("Expired marketplace listings removed.", {listingsDeleted, filesDeleted, skipped});
+    return null;
   });
 
 
@@ -7033,7 +7186,137 @@ interface PostSponsoredAdRequest {
   media?: unknown;
   paymentRail?: unknown;
   paymentMethodId?: unknown;
+  adType?: unknown;
+  documentState?: unknown;
+  locationName?: unknown;
+  happenedAtMillis?: unknown;
+  timeNote?: unknown;
+  contactMethods?: unknown;
+  durationDays?: unknown;
 }
+
+// Bulletin board ads. Requests without `adType` come from older clients and keep the sponsored-ad rules.
+const BULLETIN_AD_TYPES = ["LOST", "FOUND", "NOTICE", "DOCUMENT", "AD"];
+const BULLETIN_CONTACT_METHODS = ["CHAT", "CALL", "WHATSAPP"];
+const BULLETIN_DURATION_DAYS = [7, 30];
+const BULLETIN_FREE_ACTIVE_LIMIT = 5;
+const BULLETIN_RESOLVED_RETENTION_MS = 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+interface BulletinAdFields {
+  adType: string;
+  documentState: string | null;
+  locationName: string;
+  happenedAtMillis: number | null;
+  timeNote: string;
+  contactMethods: string[];
+  durationDays: number;
+}
+
+/**
+ * @param {PostSponsoredAdRequest} payload Callable input.
+ * @param {string} ownerPhone Trimmed phone from the request.
+ * @return {BulletinAdFields | null} Parsed bulletin fields, or null for a legacy sponsored ad.
+ */
+const parseBulletinAdFields = (payload: PostSponsoredAdRequest, ownerPhone: string): BulletinAdFields | null => {
+  const adType = asNonEmptyString(payload.adType)?.toUpperCase();
+  if (!adType) return null;
+  const invalid = (message: string) => new functions.https.HttpsError("invalid-argument", message);
+  if (!BULLETIN_AD_TYPES.includes(adType)) throw invalid("Choose Lost, Found, Notice, Document or Ad.");
+
+  let documentState: string | null = null;
+  if (adType === "DOCUMENT") {
+    documentState = asNonEmptyString(payload.documentState)?.toUpperCase() || "";
+    if (!["LOST", "FOUND"].includes(documentState)) throw invalid("Say whether the document was lost or found.");
+  }
+
+  const locationName = asNonEmptyString(payload.locationName) || "";
+  if (!locationName) throw invalid("Add where it happened.");
+  if (locationName.length > 200) throw invalid("Keep the place under 200 characters.");
+
+  const timeNote = asNonEmptyString(payload.timeNote) || "";
+  if (timeNote.length > 60) throw invalid("Keep the time note under 60 characters.");
+
+  let happenedAtMillis: number | null = null;
+  if (payload.happenedAtMillis !== undefined && payload.happenedAtMillis !== null) {
+    const millis = Number(payload.happenedAtMillis);
+    const now = Date.now();
+    if (!Number.isFinite(millis) || millis < now - 366 * DAY_MS || millis > now + 366 * DAY_MS) {
+      throw invalid("Choose a date within the last or next year.");
+    }
+    if (["LOST", "FOUND", "DOCUMENT"].includes(adType) && millis > now + DAY_MS) {
+      throw invalid("The date can't be in the future.");
+    }
+    happenedAtMillis = Math.round(millis);
+  }
+
+  const rawMethods = Array.isArray(payload.contactMethods) ? payload.contactMethods : [];
+  let contactMethods = Array.from(new Set(
+    rawMethods.map((value) => String(value || "").trim().toUpperCase())
+      .filter((value) => BULLETIN_CONTACT_METHODS.includes(value))
+  ));
+  // A finder's phone number on a public ID notice is an easy target for scams.
+  if (documentState === "FOUND") contactMethods = ["CHAT"];
+  if (contactMethods.length === 0) throw invalid("Pick at least one way to be reached.");
+  if (contactMethods.some((method) => method !== "CHAT")) {
+    const digits = ownerPhone.replace(/\D/g, "");
+    if (digits.length < 7 || digits.length > 15) throw invalid("Add a valid phone number for calls or WhatsApp.");
+  }
+
+  const durationDays = payload.durationDays === undefined ? 30 : Number(payload.durationDays);
+  if (!BULLETIN_DURATION_DAYS.includes(durationDays)) throw invalid("Choose 7 or 30 days.");
+
+  return {adType, documentState, locationName, happenedAtMillis, timeNote, contactMethods, durationDays};
+};
+
+/**
+ * @param {BulletinAdFields} fields Parsed bulletin fields.
+ * @param {admin.firestore.Timestamp} postedAt When the ad goes live.
+ * @return {Record<string, unknown>} Fields written onto the advertisement document.
+ */
+const bulletinAdDocumentFields = (
+  fields: BulletinAdFields,
+  postedAt: admin.firestore.Timestamp
+): Record<string, unknown> => {
+  let expiresMillis = postedAt.toMillis() + fields.durationDays * DAY_MS;
+  // Notices end the day after the event instead of lingering for the full term.
+  if (fields.adType === "NOTICE" && fields.happenedAtMillis !== null) {
+    const afterEvent = fields.happenedAtMillis + DAY_MS;
+    if (afterEvent > postedAt.toMillis() + 60 * 60 * 1000) expiresMillis = Math.min(expiresMillis, afterEvent);
+  }
+  return {
+    adType: fields.adType,
+    ...(fields.documentState ? {documentState: fields.documentState} : {}),
+    locationName: fields.locationName,
+    happenedAt: fields.happenedAtMillis === null ? null : admin.firestore.Timestamp.fromMillis(fields.happenedAtMillis),
+    timeNote: fields.timeNote,
+    contactMethods: fields.contactMethods,
+    durationDays: fields.durationDays,
+    expiresAt: admin.firestore.Timestamp.fromMillis(expiresMillis),
+  };
+};
+
+/**
+ * @param {Record<string, unknown>} fulfillment Stored checkout fulfillment.
+ * @param {admin.firestore.Timestamp} postedAt Payment confirmation time.
+ * @return {Record<string, unknown>} Bulletin fields for a paid ad, or nothing for a legacy sponsored ad.
+ */
+const bulletinAdFieldsFromFulfillment = (
+  fulfillment: Record<string, unknown>,
+  postedAt: admin.firestore.Timestamp
+): Record<string, unknown> => {
+  const stored = fulfillment.bulletin as BulletinAdFields | undefined;
+  if (!stored || typeof stored !== "object" || !asNonEmptyString(stored.adType)) return {};
+  return bulletinAdDocumentFields({
+    adType: String(stored.adType),
+    documentState: asNonEmptyString(stored.documentState) || null,
+    locationName: asNonEmptyString(stored.locationName) || "",
+    happenedAtMillis: typeof stored.happenedAtMillis === "number" ? stored.happenedAtMillis : null,
+    timeNote: asNonEmptyString(stored.timeNote) || "",
+    contactMethods: Array.isArray(stored.contactMethods) ? stored.contactMethods.map(String) : ["CHAT"],
+    durationDays: BULLETIN_DURATION_DAYS.includes(Number(stored.durationDays)) ? Number(stored.durationDays) : 30,
+  }, postedAt);
+};
 
 export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
@@ -7046,18 +7329,24 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
     const description = asNonEmptyString(payload.description);
     const ownerPhone = asNonEmptyString(payload.ownerPhone) || "";
     const targetUrl = asNonEmptyString(payload.targetUrl) || "";
+    const bulletin = parseBulletinAdFields(payload, ownerPhone);
 
-    if (!title || !description || !targetUrl) {
+    if (!title || !description || (!bulletin && !targetUrl)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Missing required ad fields: title, description, and targetUrl."
+        bulletin ?
+          "Add a title and a description." :
+          "Missing required ad fields: title, description, and targetUrl."
       );
     }
-    if (title.length > 120 || description.length > 2000 || targetUrl.length > 2048) {
+    if (title.length > 120 || description.length > 2000 || targetUrl.length > 2048 || ownerPhone.length > 40) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Sponsored listing text or link exceeds the supported length."
       );
+    }
+    if (bulletin && targetUrl && !targetUrl.toLowerCase().startsWith("https://")) {
+      throw new functions.https.HttpsError("invalid-argument", "Links must start with https://.");
     }
 
     const rawMediaUrls = Array.isArray(payload.mediaUrls) ? payload.mediaUrls : [];
@@ -7093,15 +7382,46 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
       .filter((item) => item.type === "image")
       .map((item) => item.url);
     const finalMediaUrls = mediaUrls.length > 0 ? mediaUrls : derivedImageUrls;
-    if (finalMediaUrls.length === 0 && media.length === 0) {
+    if (!bulletin && finalMediaUrls.length === 0 && media.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Add media before publishing an ad."
       );
     }
+    if (bulletin) {
+      if (bulletin.documentState === "FOUND" && (media.length > 0 || finalMediaUrls.length > 0)) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Don't post photos of a found document. The owner can describe it to you in chat."
+        );
+      }
+      const urls = [...finalMediaUrls, ...media.map((item) => item.url)];
+      if (urls.some((url) => !ownedStorageObjectPath("ads", userId, url))) {
+        throw new functions.https.HttpsError("invalid-argument", "Upload photos from this app before posting.");
+      }
+    }
+
+    const chargesFee = !bulletin || bulletin.adType === "AD";
+    if (bulletin && !chargesFee) {
+      const mine = await db.collection("advertisements").where("ownerId", "==", userId).limit(100).get();
+      const nowMillis = Date.now();
+      const liveFreePosts = mine.docs.filter((doc) => {
+        const ad = doc.data() || {};
+        const type = String(ad.adType || "").toUpperCase();
+        const expiresAt = ad.expiresAt instanceof admin.firestore.Timestamp ? ad.expiresAt.toMillis() : 0;
+        return type && type !== "AD" && ad.isDeleted !== true &&
+          String(ad.status || "").toUpperCase() === "ACTIVE" && expiresAt > nowMillis;
+      }).length;
+      if (liveFreePosts >= BULLETIN_FREE_ACTIVE_LIMIT) {
+        throw new functions.https.HttpsError(
+          "resource-exhausted",
+          `You have ${BULLETIN_FREE_ACTIVE_LIMIT} free posts up. Mark one as resolved or delete it to post another.`
+        );
+      }
+    }
 
     const feeSettings = await getRuntimeFeeSettings();
-    const adFee = roundMoney(Math.max(0, feeSettings.adPostFeeUsd));
+    const adFee = chargesFee ? roundMoney(Math.max(0, feeSettings.adPostFeeUsd)) : 0;
     const paymentRail = normalizeFirstPartyFeePaymentRail(payload.paymentRail);
     const paymentMethodId = asNonEmptyString(payload.paymentMethodId);
 
@@ -7125,8 +7445,20 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
       // Identical repeated submits reuse the protected checkout instead of
       // opening multiple chargeable sessions for the same listing draft.
       const draftKey = createHash("sha256").update(JSON.stringify({
-        title, description, targetUrl, ownerPhone, mediaUrls: finalMediaUrls, media,
+        title, description, targetUrl, ownerPhone, mediaUrls: finalMediaUrls, media, bulletin,
       })).digest("hex");
+      const fulfillmentFor = (adId: string) => ({
+        adId,
+        title,
+        description,
+        targetUrl,
+        ownerPhone,
+        mediaUrls: finalMediaUrls,
+        media,
+        sponsor,
+        ownerId: userId,
+        ...(bulletin ? {bulletin} : {}),
+      });
       if (paymentRail === "MOBILE_MONEY") {
         if (!paymentMethodId) {
           throw new functions.https.HttpsError(
@@ -7152,17 +7484,7 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
               platformFeeUsd: adFee,
               buyerId: userId,
               resourceId: orderRef.id,
-              fulfillment: {
-                adId: orderRef.id,
-                title,
-                description,
-                targetUrl,
-                ownerPhone,
-                mediaUrls: finalMediaUrls,
-                media,
-                sponsor,
-                ownerId: userId,
-              },
+              fulfillment: fulfillmentFor(orderRef.id),
             };
           },
         });
@@ -7184,17 +7506,7 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
             platformFeeUsd: adFee,
             buyerId: userId,
             resourceId: orderRef.id,
-            fulfillment: {
-              adId: orderRef.id,
-              title,
-              description,
-              targetUrl,
-              ownerPhone,
-              mediaUrls: finalMediaUrls,
-              media,
-              sponsor,
-              ownerId: userId,
-            },
+            fulfillment: fulfillmentFor(orderRef.id),
           };
         },
       });
@@ -7230,38 +7542,105 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
         ownerId: userId,
         status: "ACTIVE",
         timestamp,
+        ...(bulletin ? bulletinAdDocumentFields(bulletin, timestamp) : {}),
       });
 
+      const freeBulletinPost = Boolean(bulletin) && !chargesFee;
       transaction.set(userRef.collection("transactions").doc(), {
         title: `Posted Ad: ${title}`,
-        amount: feeToCharge > 0 ? -feeToCharge : 0,
-        type: feeToCharge > 0 ? "DEBIT" : "INFO",
+        amount: 0,
+        type: "INFO",
         status: "COMPLETED",
         timestamp,
-        source: feeToCharge > 0 ? "AD_POST_FEE" : "AD_POST_STAFF_EXEMPT",
-        note: feeToCharge > 0 ?
-          "Sponsored ad posting fee charged." :
+        source: freeBulletinPost ? "AD_POST_FREE" : "AD_POST_STAFF_EXEMPT",
+        note: freeBulletinPost ?
+          "Lost, found, notice and document posts are free." :
           "Staff/owner exemption applied. No ad posting fee charged.",
       });
-
-      if (feeToCharge > 0) {
-        recordPlatformRevenue(transaction, {
-          source: "advertisementFees",
-          amount: feeToCharge,
-          note: `Sponsored ad fee for ad ${adRef.id}`,
-          relatedUserId: userId,
-        });
-      }
 
       return {
         success: true,
         adId: adRef.id,
-        charged: feeToCharge > 0,
-        feeCharged: feeToCharge,
+        charged: false,
+        feeCharged: 0,
+        message: "Your ad is live.",
       };
     });
 
     return result;
+  });
+
+/**
+ * Bulletin ads are deleted with their photos when their 7 or 30 days run out, and 24 hours after the owner marks
+ * them resolved. Legacy sponsored ads have no `expiresAt` and are left alone.
+ */
+export const expireBulletinAdsJob = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
+  .schedule("every 1 hours")
+  .onRun(async () => {
+    const now = admin.firestore.Timestamp.now();
+    const resolvedCutoff = admin.firestore.Timestamp.fromMillis(now.toMillis() - BULLETIN_RESOLVED_RETENTION_MS);
+    const bucket = admin.storage().bucket();
+    let adsDeleted = 0;
+    let filesDeleted = 0;
+
+    const isDue = (ad: Record<string, unknown>): boolean => {
+      const expiresAt = ad.expiresAt instanceof admin.firestore.Timestamp ? ad.expiresAt.toMillis() : null;
+      const resolvedAt = ad.resolvedAt instanceof admin.firestore.Timestamp ? ad.resolvedAt.toMillis() : null;
+      return (expiresAt !== null && expiresAt <= now.toMillis()) ||
+        (resolvedAt !== null && resolvedAt <= resolvedCutoff.toMillis());
+    };
+
+    const queries = [
+      db.collection("advertisements").where("expiresAt", "<=", now),
+      db.collection("advertisements").where("resolvedAt", "<=", resolvedCutoff),
+    ];
+    for (const query of queries) {
+      for (let page = 0; page < 25; page++) {
+        const snap = await query.limit(200).get();
+        if (snap.empty) break;
+        for (const doc of snap.docs) {
+          const removed = await db.runTransaction(async (transaction) => {
+            const live = await transaction.get(doc.ref);
+            if (!live.exists) return null;
+            const ad = (live.data() || {}) as Record<string, unknown>;
+            if (!isDue(ad)) return null;
+            transaction.delete(doc.ref);
+            return ad;
+          });
+          if (!removed) continue;
+          adsDeleted += 1;
+          const ownerId = asNonEmptyString(removed.ownerId) || "";
+          const urls = [
+            ...(Array.isArray(removed.media) ?
+              removed.media.map((entry) => (entry as Record<string, unknown> | null)?.url) : []),
+            ...(Array.isArray(removed.mediaUrls) ? removed.mediaUrls : []),
+          ];
+          const paths = new Set(
+            urls.map((url) => ownedStorageObjectPath("ads", ownerId, url)).filter((path): path is string => !!path)
+          );
+          for (const path of paths) {
+            try {
+              await bucket.file(path).delete({ignoreNotFound: true});
+              filesDeleted += 1;
+            } catch (error) {
+              functions.logger.warn("Could not delete expired ad media.", {adId: doc.id, path, error});
+            }
+          }
+        }
+        if (snap.size < 200) break;
+      }
+    }
+
+    await db.collection("system").doc("bulletin_ad_expiry").set({
+      lastRunAt: now,
+      adsDeleted,
+      filesDeleted,
+    }, {merge: true});
+    functions.logger.info("Expired bulletin ads removed.", {adsDeleted, filesDeleted});
+    return null;
   });
 
 
@@ -23639,6 +24018,7 @@ const settleFirstPartyMobileMoneyFeeCollection = async (
         ownerId: buyerId,
         status: "ACTIVE",
         timestamp: now,
+        ...bulletinAdFieldsFromFulfillment(fulfillment, now),
         ...receipt,
       }, {merge: true});
       recordBuyerReceipt(`Sponsored ad: ${asNonEmptyString(fulfillment.title) || "Advertisement"}`);
@@ -25119,13 +25499,108 @@ const markStripeCommerceOrderTerminal = async (
  * debits an app-maintained wallet balance.
  * @param {Stripe.Checkout.Session} session Verified Stripe Checkout session.
  */
+const stripeCommerceRefunds = db.collection("stripe_commerce_refunds");
+
+type StripeCommerceRefundPlan = {
+  reason?: string;
+  /** False when the order itself was settled by a different session and must keep its status. */
+  updateOrder?: boolean;
+  order?: Record<string, unknown>;
+};
+
+/**
+ * Returns a marketplace payment that can't be fulfilled (sold to someone else first, removed, or paid through a
+ * replaced or duplicate checkout). Destination charges also pull the seller's share and the platform fee back.
+ * @param {Stripe.Checkout.Session} session Paid Stripe Checkout session.
+ * @param {string} orderId Commerce order id.
+ * @param {StripeCommerceRefundPlan} plan Why and how to refund.
+ */
+const refundStripeCommerceCheckout = async (
+  session: Stripe.Checkout.Session,
+  orderId: string,
+  plan: StripeCommerceRefundPlan
+): Promise<void> => {
+  const reason = plan.reason || "This order could not be fulfilled.";
+  const order = plan.order || {};
+  const refundRef = stripeCommerceRefunds.doc(session.id);
+  const prior = await refundRef.get();
+  if (prior.exists && ["pending", "succeeded", "requires_action"].includes(String(prior.data()?.status || ""))) return;
+
+  const paymentIntentId = stripeSessionPaymentIntentId(session);
+  const buyerId = asNonEmptyString(order.buyerId);
+  const now = admin.firestore.Timestamp.now();
+  const base = {
+    orderId,
+    kind: asNonEmptyString(order.kind) || null,
+    buyerId: buyerId || null,
+    stripeCheckoutSessionId: session.id,
+    stripePaymentIntentId: paymentIntentId,
+    amountCents: session.amount_total ?? null,
+    reason,
+    updatedAt: now,
+  };
+  const markForReview = async (failureReason: string) => {
+    await refundRef.set({...base, status: "RECONCILIATION_REQUIRED", failureReason, createdAt: now}, {merge: true});
+    if (plan.updateOrder) {
+      await stripeCommerceOrders.doc(orderId).set({
+        status: "RECONCILIATION_REQUIRED",
+        paymentFailureReason: `${reason} Automatic refund failed: ${failureReason}`,
+        updatedAt: now,
+      }, {merge: true});
+    }
+  };
+  if (!paymentIntentId) {
+    await markForReview("Stripe did not report a payment intent for this session.");
+    return;
+  }
+
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const refundParams: Stripe.RefundCreateParams = {
+      payment_intent: paymentIntentId,
+      metadata: {stripeCommerceOrderId: orderId, reason: reason.slice(0, 450)},
+    };
+    if (intent.transfer_data?.destination) refundParams.reverse_transfer = true;
+    if ((intent.application_fee_amount || 0) > 0) refundParams.refund_application_fee = true;
+    const refund = await stripe.refunds.create(refundParams, {idempotencyKey: `stripe-commerce-refund-${session.id}`});
+    await refundRef.set({...base, status: refund.status || "pending", stripeRefundId: refund.id, createdAt: now}, {merge: true});
+    if (plan.updateOrder) {
+      await stripeCommerceOrders.doc(orderId).set({
+        status: "REFUNDED",
+        stripeRefundId: refund.id,
+        refundedAt: now,
+        updatedAt: now,
+      }, {merge: true});
+    }
+    if (buyerId) {
+      await db.collection("users").doc(buyerId).collection("transactions").doc(`stripe-refund-${session.id}`).set({
+        title: `Refund: ${asNonEmptyString(order.title) || "Marketplace purchase"}`,
+        amount: roundMoney((session.amount_total || 0) / 100),
+        type: "INFO",
+        status: "REFUNDED",
+        timestamp: now,
+        source: "STRIPE_COMMERCE_REFUND",
+        note: "The item was no longer available, so your payment is going back to your card.",
+        stripeCommerceOrderId: orderId,
+        stripeRefundId: refund.id,
+      }, {merge: true});
+    }
+  } catch (error) {
+    functions.logger.error("Automatic Stripe commerce refund failed.", {orderId, sessionId: session.id, error});
+    await markForReview(parseProviderErrorMessage(error));
+  }
+};
+
 const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Promise<void> => {
   const orderId = asNonEmptyString(session.client_reference_id, session.metadata?.stripeCommerceOrderId);
   if (!orderId) {
     functions.logger.warn("Stripe Checkout event missing commerce order id.", {sessionId: session.id});
     return;
   }
+  const refundPlan: StripeCommerceRefundPlan = {};
   await db.runTransaction(async (transaction) => {
+    delete refundPlan.reason;
     const orderRef = stripeCommerceOrders.doc(orderId);
     const orderDoc = await transaction.get(orderRef);
     if (!orderDoc.exists) {
@@ -25134,9 +25609,24 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
     }
     const order = (orderDoc.data() || {}) as Record<string, unknown>;
     const currentStatus = String(order.status || "").toUpperCase();
-    if (currentStatus === "PAID" || currentStatus === "FULFILLED" || currentStatus === "REFUNDED") return;
-    if (asNonEmptyString(order.stripeCheckoutSessionId) !== session.id) {
+    const isCurrentSession = asNonEmptyString(order.stripeCheckoutSessionId) === session.id;
+    // Only marketplace orders refund automatically; other kinds keep the manual review path.
+    const refundsAutomatically = String(order.kind || "").toUpperCase() === "MARKETPLACE";
+    const planRefund = (reason: string, updateOrder: boolean) => {
+      refundPlan.reason = reason;
+      refundPlan.updateOrder = updateOrder;
+      refundPlan.order = order;
+    };
+    if (currentStatus === "PAID" || currentStatus === "FULFILLED") {
+      if (refundsAutomatically && !isCurrentSession) {
+        planRefund("A second payment arrived for an order that was already paid.", false);
+      }
+      return;
+    }
+    if (refundsAutomatically && isCurrentSession && (currentStatus === "REFUNDED" || currentStatus === "REFUND_PENDING")) return;
+    if (!isCurrentSession) {
       functions.logger.warn("Stripe Checkout session does not match commerce order.", {orderId, sessionId: session.id});
+      if (refundsAutomatically) planRefund("Payment arrived through a checkout link that had been replaced.", false);
       return;
     }
     const amountCents = Number(order.amountCents || 0);
@@ -25208,15 +25698,15 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
       const itemRef = db.collection("marketplace_items").doc(itemId);
       const item = await transaction.get(itemRef);
       const itemData = (item.data() || {}) as Record<string, unknown>;
+      const refundUnfulfillable = (reason: string) => {
+        transaction.set(orderRef, {...receipt, status: "REFUND_PENDING", paymentFailureReason: reason}, {merge: true});
+        planRefund(reason, true);
+      };
       if (!item.exists || String(itemData.status || "").toUpperCase() !== "AVAILABLE" || itemData.isDeleted === true) {
-        reconcile("Marketplace item was no longer available when payment completed.");
-        transaction.set(orderRef, {autoRefundStatus: "PENDING"}, {merge: true});
-        return;
+        return refundUnfulfillable("Marketplace item was no longer available when payment completed.");
       }
       if (asNonEmptyString(itemData.sellerId) !== sellerId) {
-        reconcile("Marketplace seller changed before fulfillment.");
-        transaction.set(orderRef, {autoRefundStatus: "PENDING"}, {merge: true});
-        return;
+        return refundUnfulfillable("Marketplace seller changed before fulfillment.");
       }
       // Listings are readable by every member; the buyer stays on the private order doc only.
       transaction.update(itemRef, {status: "SOLD", soldAt: now, updatedAt: now});
@@ -25269,6 +25759,7 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
         ownerId: buyerId,
         status: "ACTIVE",
         timestamp: now,
+        ...bulletinAdFieldsFromFulfillment(fulfillment, now),
         ...receipt,
       }, {merge: true});
       recordBuyerReceipt(`Sponsored ad: ${asNonEmptyString(fulfillment.title) || "Advertisement"}`);
@@ -25370,6 +25861,9 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
 
     transaction.set(orderRef, {...receipt, status: "PAID", fulfilledAt: now}, {merge: true});
   });
+  if (refundPlan.reason) {
+    await refundStripeCommerceCheckout(session, orderId, refundPlan);
+  }
 };
 
 /**
