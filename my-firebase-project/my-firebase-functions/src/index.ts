@@ -3500,12 +3500,13 @@ const MARKETPLACE_LISTING_MAX_AGE_DAYS = 60;
 const MARKETPLACE_EXPIRING_STATUSES = ["AVAILABLE", "ACTIVE", "OPEN", "DELETED"];
 
 /**
- * @param {string} sellerId Listing owner.
- * @param {unknown} value Download URL stored on the listing.
- * @return {string | null} Object path when the file sits in the seller's own marketplace folder.
+ * @param {string} folder Top-level Storage folder, such as `marketplace_images` or `ads`.
+ * @param {string} ownerId Uid that must own the file.
+ * @param {unknown} value Download URL stored on the document.
+ * @return {string | null} Object path when the file sits in `{folder}/{ownerId}/` of this project's bucket.
  */
-const marketplaceOwnedObjectPath = (sellerId: string, value: unknown): string | null => {
-  if (!sellerId || typeof value !== "string") return null;
+const ownedStorageObjectPath = (folder: string, ownerId: string, value: unknown): string | null => {
+  if (!ownerId || typeof value !== "string") return null;
   let url: URL;
   try {
     url = new URL(value.trim());
@@ -3522,7 +3523,7 @@ const marketplaceOwnedObjectPath = (sellerId: string, value: unknown): string | 
     return null;
   }
   const segments = objectPath.split("/");
-  const owned = segments.length >= 3 && segments[0] === "marketplace_images" && segments[1] === sellerId &&
+  const owned = segments.length >= 3 && segments[0] === folder && segments[1] === ownerId &&
     !segments.includes("..");
   return owned ? objectPath : null;
 };
@@ -3581,7 +3582,7 @@ export const expireOldMarketplaceListingsJob = functions.runWith({
           ...(Array.isArray(removed.imageUrls) ? removed.imageUrls : []),
         ];
         const paths = new Set(
-          urls.map((url) => marketplaceOwnedObjectPath(sellerId, url)).filter((path): path is string => !!path)
+          urls.map((url) => ownedStorageObjectPath("marketplace_images", sellerId, url)).filter((path): path is string => !!path)
         );
         for (const path of paths) {
           try {
@@ -7015,7 +7016,137 @@ interface PostSponsoredAdRequest {
   media?: unknown;
   paymentRail?: unknown;
   paymentMethodId?: unknown;
+  adType?: unknown;
+  documentState?: unknown;
+  locationName?: unknown;
+  happenedAtMillis?: unknown;
+  timeNote?: unknown;
+  contactMethods?: unknown;
+  durationDays?: unknown;
 }
+
+// Bulletin board ads. Requests without `adType` come from older clients and keep the sponsored-ad rules.
+const BULLETIN_AD_TYPES = ["LOST", "FOUND", "NOTICE", "DOCUMENT", "AD"];
+const BULLETIN_CONTACT_METHODS = ["CHAT", "CALL", "WHATSAPP"];
+const BULLETIN_DURATION_DAYS = [7, 30];
+const BULLETIN_FREE_ACTIVE_LIMIT = 5;
+const BULLETIN_RESOLVED_RETENTION_MS = 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+interface BulletinAdFields {
+  adType: string;
+  documentState: string | null;
+  locationName: string;
+  happenedAtMillis: number | null;
+  timeNote: string;
+  contactMethods: string[];
+  durationDays: number;
+}
+
+/**
+ * @param {PostSponsoredAdRequest} payload Callable input.
+ * @param {string} ownerPhone Trimmed phone from the request.
+ * @return {BulletinAdFields | null} Parsed bulletin fields, or null for a legacy sponsored ad.
+ */
+const parseBulletinAdFields = (payload: PostSponsoredAdRequest, ownerPhone: string): BulletinAdFields | null => {
+  const adType = asNonEmptyString(payload.adType)?.toUpperCase();
+  if (!adType) return null;
+  const invalid = (message: string) => new functions.https.HttpsError("invalid-argument", message);
+  if (!BULLETIN_AD_TYPES.includes(adType)) throw invalid("Choose Lost, Found, Notice, Document or Ad.");
+
+  let documentState: string | null = null;
+  if (adType === "DOCUMENT") {
+    documentState = asNonEmptyString(payload.documentState)?.toUpperCase() || "";
+    if (!["LOST", "FOUND"].includes(documentState)) throw invalid("Say whether the document was lost or found.");
+  }
+
+  const locationName = asNonEmptyString(payload.locationName) || "";
+  if (!locationName) throw invalid("Add where it happened.");
+  if (locationName.length > 200) throw invalid("Keep the place under 200 characters.");
+
+  const timeNote = asNonEmptyString(payload.timeNote) || "";
+  if (timeNote.length > 60) throw invalid("Keep the time note under 60 characters.");
+
+  let happenedAtMillis: number | null = null;
+  if (payload.happenedAtMillis !== undefined && payload.happenedAtMillis !== null) {
+    const millis = Number(payload.happenedAtMillis);
+    const now = Date.now();
+    if (!Number.isFinite(millis) || millis < now - 366 * DAY_MS || millis > now + 366 * DAY_MS) {
+      throw invalid("Choose a date within the last or next year.");
+    }
+    if (["LOST", "FOUND", "DOCUMENT"].includes(adType) && millis > now + DAY_MS) {
+      throw invalid("The date can't be in the future.");
+    }
+    happenedAtMillis = Math.round(millis);
+  }
+
+  const rawMethods = Array.isArray(payload.contactMethods) ? payload.contactMethods : [];
+  let contactMethods = Array.from(new Set(
+    rawMethods.map((value) => String(value || "").trim().toUpperCase())
+      .filter((value) => BULLETIN_CONTACT_METHODS.includes(value))
+  ));
+  // A finder's phone number on a public ID notice is an easy target for scams.
+  if (documentState === "FOUND") contactMethods = ["CHAT"];
+  if (contactMethods.length === 0) throw invalid("Pick at least one way to be reached.");
+  if (contactMethods.some((method) => method !== "CHAT")) {
+    const digits = ownerPhone.replace(/\D/g, "");
+    if (digits.length < 7 || digits.length > 15) throw invalid("Add a valid phone number for calls or WhatsApp.");
+  }
+
+  const durationDays = payload.durationDays === undefined ? 30 : Number(payload.durationDays);
+  if (!BULLETIN_DURATION_DAYS.includes(durationDays)) throw invalid("Choose 7 or 30 days.");
+
+  return {adType, documentState, locationName, happenedAtMillis, timeNote, contactMethods, durationDays};
+};
+
+/**
+ * @param {BulletinAdFields} fields Parsed bulletin fields.
+ * @param {admin.firestore.Timestamp} postedAt When the ad goes live.
+ * @return {Record<string, unknown>} Fields written onto the advertisement document.
+ */
+const bulletinAdDocumentFields = (
+  fields: BulletinAdFields,
+  postedAt: admin.firestore.Timestamp
+): Record<string, unknown> => {
+  let expiresMillis = postedAt.toMillis() + fields.durationDays * DAY_MS;
+  // Notices end the day after the event instead of lingering for the full term.
+  if (fields.adType === "NOTICE" && fields.happenedAtMillis !== null) {
+    const afterEvent = fields.happenedAtMillis + DAY_MS;
+    if (afterEvent > postedAt.toMillis() + 60 * 60 * 1000) expiresMillis = Math.min(expiresMillis, afterEvent);
+  }
+  return {
+    adType: fields.adType,
+    ...(fields.documentState ? {documentState: fields.documentState} : {}),
+    locationName: fields.locationName,
+    happenedAt: fields.happenedAtMillis === null ? null : admin.firestore.Timestamp.fromMillis(fields.happenedAtMillis),
+    timeNote: fields.timeNote,
+    contactMethods: fields.contactMethods,
+    durationDays: fields.durationDays,
+    expiresAt: admin.firestore.Timestamp.fromMillis(expiresMillis),
+  };
+};
+
+/**
+ * @param {Record<string, unknown>} fulfillment Stored checkout fulfillment.
+ * @param {admin.firestore.Timestamp} postedAt Payment confirmation time.
+ * @return {Record<string, unknown>} Bulletin fields for a paid ad, or nothing for a legacy sponsored ad.
+ */
+const bulletinAdFieldsFromFulfillment = (
+  fulfillment: Record<string, unknown>,
+  postedAt: admin.firestore.Timestamp
+): Record<string, unknown> => {
+  const stored = fulfillment.bulletin as BulletinAdFields | undefined;
+  if (!stored || typeof stored !== "object" || !asNonEmptyString(stored.adType)) return {};
+  return bulletinAdDocumentFields({
+    adType: String(stored.adType),
+    documentState: asNonEmptyString(stored.documentState) || null,
+    locationName: asNonEmptyString(stored.locationName) || "",
+    happenedAtMillis: typeof stored.happenedAtMillis === "number" ? stored.happenedAtMillis : null,
+    timeNote: asNonEmptyString(stored.timeNote) || "",
+    contactMethods: Array.isArray(stored.contactMethods) ? stored.contactMethods.map(String) : ["CHAT"],
+    durationDays: BULLETIN_DURATION_DAYS.includes(Number(stored.durationDays)) ? Number(stored.durationDays) : 30,
+  }, postedAt);
+};
 
 export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
@@ -7028,18 +7159,24 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
     const description = asNonEmptyString(payload.description);
     const ownerPhone = asNonEmptyString(payload.ownerPhone) || "";
     const targetUrl = asNonEmptyString(payload.targetUrl) || "";
+    const bulletin = parseBulletinAdFields(payload, ownerPhone);
 
-    if (!title || !description || !targetUrl) {
+    if (!title || !description || (!bulletin && !targetUrl)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Missing required ad fields: title, description, and targetUrl."
+        bulletin ?
+          "Add a title and a description." :
+          "Missing required ad fields: title, description, and targetUrl."
       );
     }
-    if (title.length > 120 || description.length > 2000 || targetUrl.length > 2048) {
+    if (title.length > 120 || description.length > 2000 || targetUrl.length > 2048 || ownerPhone.length > 40) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Sponsored listing text or link exceeds the supported length."
       );
+    }
+    if (bulletin && targetUrl && !targetUrl.toLowerCase().startsWith("https://")) {
+      throw new functions.https.HttpsError("invalid-argument", "Links must start with https://.");
     }
 
     const rawMediaUrls = Array.isArray(payload.mediaUrls) ? payload.mediaUrls : [];
@@ -7075,15 +7212,46 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
       .filter((item) => item.type === "image")
       .map((item) => item.url);
     const finalMediaUrls = mediaUrls.length > 0 ? mediaUrls : derivedImageUrls;
-    if (finalMediaUrls.length === 0 && media.length === 0) {
+    if (!bulletin && finalMediaUrls.length === 0 && media.length === 0) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Add media before publishing an ad."
       );
     }
+    if (bulletin) {
+      if (bulletin.documentState === "FOUND" && (media.length > 0 || finalMediaUrls.length > 0)) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Don't post photos of a found document. The owner can describe it to you in chat."
+        );
+      }
+      const urls = [...finalMediaUrls, ...media.map((item) => item.url)];
+      if (urls.some((url) => !ownedStorageObjectPath("ads", userId, url))) {
+        throw new functions.https.HttpsError("invalid-argument", "Upload photos from this app before posting.");
+      }
+    }
+
+    const chargesFee = !bulletin || bulletin.adType === "AD";
+    if (bulletin && !chargesFee) {
+      const mine = await db.collection("advertisements").where("ownerId", "==", userId).limit(100).get();
+      const nowMillis = Date.now();
+      const liveFreePosts = mine.docs.filter((doc) => {
+        const ad = doc.data() || {};
+        const type = String(ad.adType || "").toUpperCase();
+        const expiresAt = ad.expiresAt instanceof admin.firestore.Timestamp ? ad.expiresAt.toMillis() : 0;
+        return type && type !== "AD" && ad.isDeleted !== true &&
+          String(ad.status || "").toUpperCase() === "ACTIVE" && expiresAt > nowMillis;
+      }).length;
+      if (liveFreePosts >= BULLETIN_FREE_ACTIVE_LIMIT) {
+        throw new functions.https.HttpsError(
+          "resource-exhausted",
+          `You have ${BULLETIN_FREE_ACTIVE_LIMIT} free posts up. Mark one as resolved or delete it to post another.`
+        );
+      }
+    }
 
     const feeSettings = await getRuntimeFeeSettings();
-    const adFee = roundMoney(Math.max(0, feeSettings.adPostFeeUsd));
+    const adFee = chargesFee ? roundMoney(Math.max(0, feeSettings.adPostFeeUsd)) : 0;
     const paymentRail = normalizeFirstPartyFeePaymentRail(payload.paymentRail);
     const paymentMethodId = asNonEmptyString(payload.paymentMethodId);
 
@@ -7107,8 +7275,20 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
       // Identical repeated submits reuse the protected checkout instead of
       // opening multiple chargeable sessions for the same listing draft.
       const draftKey = createHash("sha256").update(JSON.stringify({
-        title, description, targetUrl, ownerPhone, mediaUrls: finalMediaUrls, media,
+        title, description, targetUrl, ownerPhone, mediaUrls: finalMediaUrls, media, bulletin,
       })).digest("hex");
+      const fulfillmentFor = (adId: string) => ({
+        adId,
+        title,
+        description,
+        targetUrl,
+        ownerPhone,
+        mediaUrls: finalMediaUrls,
+        media,
+        sponsor,
+        ownerId: userId,
+        ...(bulletin ? {bulletin} : {}),
+      });
       if (paymentRail === "MOBILE_MONEY") {
         if (!paymentMethodId) {
           throw new functions.https.HttpsError(
@@ -7134,17 +7314,7 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
               platformFeeUsd: adFee,
               buyerId: userId,
               resourceId: orderRef.id,
-              fulfillment: {
-                adId: orderRef.id,
-                title,
-                description,
-                targetUrl,
-                ownerPhone,
-                mediaUrls: finalMediaUrls,
-                media,
-                sponsor,
-                ownerId: userId,
-              },
+              fulfillment: fulfillmentFor(orderRef.id),
             };
           },
         });
@@ -7166,17 +7336,7 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
             platformFeeUsd: adFee,
             buyerId: userId,
             resourceId: orderRef.id,
-            fulfillment: {
-              adId: orderRef.id,
-              title,
-              description,
-              targetUrl,
-              ownerPhone,
-              mediaUrls: finalMediaUrls,
-              media,
-              sponsor,
-              ownerId: userId,
-            },
+            fulfillment: fulfillmentFor(orderRef.id),
           };
         },
       });
@@ -7212,38 +7372,105 @@ export const postSponsoredAd = functions.runWith({enforceAppCheck: true})
         ownerId: userId,
         status: "ACTIVE",
         timestamp,
+        ...(bulletin ? bulletinAdDocumentFields(bulletin, timestamp) : {}),
       });
 
+      const freeBulletinPost = Boolean(bulletin) && !chargesFee;
       transaction.set(userRef.collection("transactions").doc(), {
         title: `Posted Ad: ${title}`,
-        amount: feeToCharge > 0 ? -feeToCharge : 0,
-        type: feeToCharge > 0 ? "DEBIT" : "INFO",
+        amount: 0,
+        type: "INFO",
         status: "COMPLETED",
         timestamp,
-        source: feeToCharge > 0 ? "AD_POST_FEE" : "AD_POST_STAFF_EXEMPT",
-        note: feeToCharge > 0 ?
-          "Sponsored ad posting fee charged." :
+        source: freeBulletinPost ? "AD_POST_FREE" : "AD_POST_STAFF_EXEMPT",
+        note: freeBulletinPost ?
+          "Lost, found, notice and document posts are free." :
           "Staff/owner exemption applied. No ad posting fee charged.",
       });
-
-      if (feeToCharge > 0) {
-        recordPlatformRevenue(transaction, {
-          source: "advertisementFees",
-          amount: feeToCharge,
-          note: `Sponsored ad fee for ad ${adRef.id}`,
-          relatedUserId: userId,
-        });
-      }
 
       return {
         success: true,
         adId: adRef.id,
-        charged: feeToCharge > 0,
-        feeCharged: feeToCharge,
+        charged: false,
+        feeCharged: 0,
+        message: "Your ad is live.",
       };
     });
 
     return result;
+  });
+
+/**
+ * Bulletin ads are deleted with their photos when their 7 or 30 days run out, and 24 hours after the owner marks
+ * them resolved. Legacy sponsored ads have no `expiresAt` and are left alone.
+ */
+export const expireBulletinAdsJob = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
+  .schedule("every 1 hours")
+  .onRun(async () => {
+    const now = admin.firestore.Timestamp.now();
+    const resolvedCutoff = admin.firestore.Timestamp.fromMillis(now.toMillis() - BULLETIN_RESOLVED_RETENTION_MS);
+    const bucket = admin.storage().bucket();
+    let adsDeleted = 0;
+    let filesDeleted = 0;
+
+    const isDue = (ad: Record<string, unknown>): boolean => {
+      const expiresAt = ad.expiresAt instanceof admin.firestore.Timestamp ? ad.expiresAt.toMillis() : null;
+      const resolvedAt = ad.resolvedAt instanceof admin.firestore.Timestamp ? ad.resolvedAt.toMillis() : null;
+      return (expiresAt !== null && expiresAt <= now.toMillis()) ||
+        (resolvedAt !== null && resolvedAt <= resolvedCutoff.toMillis());
+    };
+
+    const queries = [
+      db.collection("advertisements").where("expiresAt", "<=", now),
+      db.collection("advertisements").where("resolvedAt", "<=", resolvedCutoff),
+    ];
+    for (const query of queries) {
+      for (let page = 0; page < 25; page++) {
+        const snap = await query.limit(200).get();
+        if (snap.empty) break;
+        for (const doc of snap.docs) {
+          const removed = await db.runTransaction(async (transaction) => {
+            const live = await transaction.get(doc.ref);
+            if (!live.exists) return null;
+            const ad = (live.data() || {}) as Record<string, unknown>;
+            if (!isDue(ad)) return null;
+            transaction.delete(doc.ref);
+            return ad;
+          });
+          if (!removed) continue;
+          adsDeleted += 1;
+          const ownerId = asNonEmptyString(removed.ownerId) || "";
+          const urls = [
+            ...(Array.isArray(removed.media) ?
+              removed.media.map((entry) => (entry as Record<string, unknown> | null)?.url) : []),
+            ...(Array.isArray(removed.mediaUrls) ? removed.mediaUrls : []),
+          ];
+          const paths = new Set(
+            urls.map((url) => ownedStorageObjectPath("ads", ownerId, url)).filter((path): path is string => !!path)
+          );
+          for (const path of paths) {
+            try {
+              await bucket.file(path).delete({ignoreNotFound: true});
+              filesDeleted += 1;
+            } catch (error) {
+              functions.logger.warn("Could not delete expired ad media.", {adId: doc.id, path, error});
+            }
+          }
+        }
+        if (snap.size < 200) break;
+      }
+    }
+
+    await db.collection("system").doc("bulletin_ad_expiry").set({
+      lastRunAt: now,
+      adsDeleted,
+      filesDeleted,
+    }, {merge: true});
+    functions.logger.info("Expired bulletin ads removed.", {adsDeleted, filesDeleted});
+    return null;
   });
 
 
@@ -23621,6 +23848,7 @@ const settleFirstPartyMobileMoneyFeeCollection = async (
         ownerId: buyerId,
         status: "ACTIVE",
         timestamp: now,
+        ...bulletinAdFieldsFromFulfillment(fulfillment, now),
         ...receipt,
       }, {merge: true});
       recordBuyerReceipt(`Sponsored ad: ${asNonEmptyString(fulfillment.title) || "Advertisement"}`);
@@ -25360,6 +25588,7 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
         ownerId: buyerId,
         status: "ACTIVE",
         timestamp: now,
+        ...bulletinAdFieldsFromFulfillment(fulfillment, now),
         ...receipt,
       }, {merge: true});
       recordBuyerReceipt(`Sponsored ad: ${asNonEmptyString(fulfillment.title) || "Advertisement"}`);

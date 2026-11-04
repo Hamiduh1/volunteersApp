@@ -3301,8 +3301,47 @@ service cloud.firestore {
           'ownerPhone',
           'media',
           'mediaUrls',
-          'updatedAt'
-        ]);
+          'updatedAt',
+          'locationName',
+          'timeNote',
+          'happenedAt',
+          'contactMethods'
+        ])
+        && bulletinAdPatchValid(request.resource.data);
+    }
+
+    // Bulletin ads carry `adType`; legacy sponsored ads skip these checks.
+    function bulletinAdPatchValid(data) {
+      return resource.data.get('adType', '') == ''
+        || (
+          data.title is string && data.title.size() > 0 && data.title.size() <= 120
+          && data.description is string && data.description.size() <= 2000
+          && data.get('ownerPhone', '') is string && data.get('ownerPhone', '').size() <= 40
+          && data.locationName is string && data.locationName.size() > 0 && data.locationName.size() <= 200
+          && data.get('timeNote', '') is string && data.get('timeNote', '').size() <= 60
+          && (data.get('happenedAt', null) == null || data.happenedAt is timestamp)
+          && data.contactMethods is list
+          && data.contactMethods.size() > 0
+          && data.contactMethods.size() <= 3
+          && data.contactMethods.hasOnly(['CHAT', 'CALL', 'WHATSAPP'])
+          && (
+            resource.data.get('documentState', '') != 'FOUND'
+            || (
+              data.contactMethods == ['CHAT']
+              && data.get('media', []).size() == 0
+              && data.get('mediaUrls', []).size() == 0
+            )
+          )
+        );
+    }
+
+    function isSafeAdvertisementResolve() {
+      return resource.data.ownerId == request.auth.uid
+        && resource.data.get('adType', '') != ''
+        && resource.data.get('status', '') == 'ACTIVE'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'resolvedAt'])
+        && request.resource.data.status == 'RESOLVED'
+        && request.resource.data.resolvedAt == request.time;
     }
 
     function isSafeAdvertisementSoftDelete() {
@@ -3384,7 +3423,7 @@ service cloud.firestore {
       allow update: if isSignedIn()
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId
-        && (isSafeAdvertisementContentPatch() || isSafeAdvertisementSoftDelete());
+        && (isSafeAdvertisementContentPatch() || isSafeAdvertisementSoftDelete() || isSafeAdvertisementResolve());
       allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 
