@@ -3415,6 +3415,65 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // --- GARAGE SALE HELPERS ---
+    function garageSaleClientKeys() {
+      return ['title', 'description', 'shopName', 'contactName', 'contactPhone', 'contactEmail',
+        'address', 'city', 'state', 'postalCode', 'latitude', 'longitude', 'media', 'ownerId',
+        'timestamp', 'saleType', 'startsAt', 'endsAt', 'categories', 'paymentOptions', 'notes',
+        'status', 'updatedAt'];
+    }
+
+    function garageSaleEditableKeys() {
+      return ['title', 'description', 'shopName', 'contactName', 'contactPhone', 'contactEmail',
+        'address', 'city', 'state', 'postalCode', 'latitude', 'longitude', 'media',
+        'saleType', 'startsAt', 'endsAt', 'categories', 'paymentOptions', 'notes', 'updatedAt'];
+    }
+
+    // Limits are looser than the apps' so listings from older clients stay editable.
+    function garageSaleFieldsValid(data) {
+      return data.get('title', '') is string
+        && data.get('title', '').size() > 0
+        && data.get('title', '').size() <= 200
+        && data.get('description', '') is string
+        && data.get('description', '').size() <= 4000
+        && data.get('media', []) is list
+        && data.get('media', []).size() <= 20
+        && data.get('saleType', 'GARAGE') in ['GARAGE', 'YARD', 'MOVING', 'ESTATE', 'MULTI_FAMILY', 'COMMUNITY']
+        && data.get('categories', []) is list
+        && data.get('categories', []).size() <= 8
+        && data.get('paymentOptions', []) is list
+        && data.get('paymentOptions', []).hasOnly(['CASH', 'IN_APP_CARD', 'MOBILE_MONEY', 'BANK_TRANSFER'])
+        && data.get('notes', '') is string
+        && data.get('notes', '').size() <= 300
+        && (('startsAt' in data) == ('endsAt' in data))
+        && (!('startsAt' in data)
+          || (data.startsAt is timestamp
+            && data.endsAt is timestamp
+            && data.endsAt > data.startsAt
+            && data.endsAt <= data.startsAt + duration.value(14, 'd')));
+    }
+
+    function isGarageSaleContentEdit() {
+      return resource.data.get('status', 'ACTIVE') == 'ACTIVE'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(garageSaleEditableKeys())
+        && garageSaleFieldsValid(request.resource.data)
+        && (!('endsAt' in request.resource.data) || request.resource.data.endsAt > request.time);
+    }
+
+    // "End sale": hides it now and starts the one-day cleanup clock.
+    function isGarageSaleEnd() {
+      return resource.data.get('status', 'ACTIVE') == 'ACTIVE'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'endsAt', 'updatedAt'])
+        && request.resource.data.status == 'ENDED'
+        && request.resource.data.endsAt == request.time;
+    }
+
+    function isGarageSaleSoftDelete() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isDeleted', 'status', 'updatedAt'])
+        && request.resource.data.isDeleted == true
+        && request.resource.data.status == 'DELETED';
+    }
+
     // --- ADVERTISEMENTS ---
     match /advertisements/{adId} {
       allow read: if isSignedIn();
@@ -3428,10 +3487,24 @@ service cloud.firestore {
     }
 
     // --- GARAGE SALES ---
+    // Dated sales are removed by expireGarageSalesJob one day after endsAt;
+    // soft-deleted ones on its next run. Hard deletes stay server-side so media is cleaned up.
     match /garage_sales/{saleId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
-      allow update, delete: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.keys().hasOnly(garageSaleClientKeys())
+        && request.resource.data.get('status', 'ACTIVE') == 'ACTIVE'
+        && garageSaleFieldsValid(request.resource.data)
+        && (!('endsAt' in request.resource.data) || request.resource.data.endsAt > request.time)
+        && (!('startsAt' in request.resource.data)
+          || request.resource.data.startsAt < request.time + duration.value(90, 'd'));
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && resource.data.get('isDeleted', false) != true
+        && (isGarageSaleContentEdit() || isGarageSaleEnd() || isGarageSaleSoftDelete());
+      allow delete: if false;
     }
 
     match /garage_sale_payments/{paymentId} {

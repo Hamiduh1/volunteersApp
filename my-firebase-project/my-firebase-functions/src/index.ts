@@ -4609,8 +4609,12 @@ export const requestGarageSalePurchase = functions.runWith({enforceAppCheck: tru
         if (!saleDoc.exists) throw new functions.https.HttpsError("not-found", "Garage sale listing not found.");
         const liveSale = (saleDoc.data() || {}) as Record<string, unknown>;
         const status = String(liveSale.status || "ACTIVE").trim().toUpperCase();
-        if (liveSale.isDeleted === true || ["CLOSED", "DELETED", "REMOVED", "INACTIVE", "ARCHIVED"].includes(status)) {
+        if (liveSale.isDeleted === true || ["CLOSED", "DELETED", "REMOVED", "INACTIVE", "ARCHIVED", "ENDED"].includes(status)) {
           throw new functions.https.HttpsError("failed-precondition", "This garage sale listing is no longer accepting checkout.");
+        }
+        const endsAt = liveSale.endsAt instanceof admin.firestore.Timestamp ? liveSale.endsAt.toMillis() : null;
+        if (endsAt !== null && endsAt <= Date.now()) {
+          throw new functions.https.HttpsError("failed-precondition", "This garage sale has ended.");
         }
         if (asNonEmptyString(liveSale.ownerId) !== sellerId) {
           throw new functions.https.HttpsError("failed-precondition", "Garage seller changed. Refresh and try again.");
@@ -7643,6 +7647,88 @@ export const expireBulletinAdsJob = functions.runWith({
     return null;
   });
 
+
+const GARAGE_SALE_ENDED_RETENTION_MS = DAY_MS;
+const GARAGE_SALE_UNDATED_MAX_AGE_MS = 60 * DAY_MS;
+
+/**
+ * Removes garage sales a day after they end (or are ended early), soft-deleted
+ * sales, and undated legacy sales older than 60 days, plus their uploaded media.
+ */
+export const expireGarageSalesJob = functions.runWith({
+  timeoutSeconds: 540,
+  memory: "512MB",
+}).pubsub
+  .schedule("every 1 hours")
+  .onRun(async () => {
+    const now = admin.firestore.Timestamp.now();
+    const endedCutoff = admin.firestore.Timestamp.fromMillis(now.toMillis() - GARAGE_SALE_ENDED_RETENTION_MS);
+    const undatedCutoff = admin.firestore.Timestamp.fromMillis(now.toMillis() - GARAGE_SALE_UNDATED_MAX_AGE_MS);
+    const bucket = admin.storage().bucket();
+    let salesDeleted = 0;
+    let filesDeleted = 0;
+
+    const millis = (value: unknown): number | null =>
+      value instanceof admin.firestore.Timestamp ? value.toMillis() : null;
+    const isDue = (sale: Record<string, unknown>): boolean => {
+      if (sale.isDeleted === true) return true;
+      const endsAt = millis(sale.endsAt);
+      if (endsAt !== null) return endsAt <= endedCutoff.toMillis();
+      const postedAt = millis(sale.timestamp);
+      return postedAt !== null && postedAt <= undatedCutoff.toMillis();
+    };
+
+    const queries = [
+      db.collection("garage_sales").where("isDeleted", "==", true),
+      db.collection("garage_sales").where("endsAt", "<=", endedCutoff),
+      db.collection("garage_sales").where("timestamp", "<=", undatedCutoff),
+    ];
+    for (const query of queries) {
+      let cursor: admin.firestore.QueryDocumentSnapshot | null = null;
+      for (let page = 0; page < 25; page++) {
+        const pageQuery: admin.firestore.Query = cursor ? query.startAfter(cursor).limit(200) : query.limit(200);
+        const snap = await pageQuery.get();
+        if (snap.empty) break;
+        cursor = snap.docs[snap.docs.length - 1];
+        for (const doc of snap.docs) {
+          const removed = await db.runTransaction(async (transaction) => {
+            const live = await transaction.get(doc.ref);
+            if (!live.exists) return null;
+            const sale = (live.data() || {}) as Record<string, unknown>;
+            if (!isDue(sale)) return null;
+            transaction.delete(doc.ref);
+            return sale;
+          });
+          if (!removed) continue;
+          salesDeleted += 1;
+          const ownerId = asNonEmptyString(removed.ownerId) || "";
+          const urls = Array.isArray(removed.media) ?
+            removed.media.map((entry) => (entry as Record<string, unknown> | null)?.url) : [];
+          const paths = new Set(
+            urls.map((url) => ownedStorageObjectPath("garage_sales", ownerId, url))
+              .filter((path): path is string => !!path)
+          );
+          for (const path of paths) {
+            try {
+              await bucket.file(path).delete({ignoreNotFound: true});
+              filesDeleted += 1;
+            } catch (error) {
+              functions.logger.warn("Could not delete garage sale media.", {saleId: doc.id, path, error});
+            }
+          }
+        }
+        if (snap.size < 200) break;
+      }
+    }
+
+    await db.collection("system").doc("garage_sale_expiry").set({
+      lastRunAt: now,
+      salesDeleted,
+      filesDeleted,
+    }, {merge: true});
+    functions.logger.info("Expired garage sales removed.", {salesDeleted, filesDeleted});
+    return null;
+  });
 
 // =============================================================================
 //  4. BLIND DATE FUNCTION (UPDATED)
@@ -25727,7 +25813,10 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
       const sale = await transaction.get(saleRef);
       const saleData = (sale.data() || {}) as Record<string, unknown>;
       if (!sale.exists || saleData.isDeleted === true || asNonEmptyString(saleData.ownerId) !== sellerId) {
-        return reconcile("Garage listing changed before fulfillment.");
+        const reason = "Garage listing was removed or changed before payment completed.";
+        transaction.set(orderRef, {...receipt, status: "REFUND_PENDING", paymentFailureReason: reason}, {merge: true});
+        planRefund(reason, true);
+        return;
       }
       transaction.set(db.collection("garage_sale_checkout_orders").doc(orderId), {
         orderId, garageSaleId, buyerId, sellerId, amountUsd, platformFeeUsd, sellerNetUsd: roundMoney(amountUsd - platformFeeUsd),
