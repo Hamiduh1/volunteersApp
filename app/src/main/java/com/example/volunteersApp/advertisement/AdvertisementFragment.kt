@@ -100,6 +100,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -700,6 +703,11 @@ private fun SponsoredHubScreen(
     val discoverAds = remember(filteredAds) { filteredAds.sortedByDescending { it.sortTimeMs() } }
     val discoverGarage = remember(filteredGarage) { filteredGarage.sortedByDescending { it.sortTimeMs() } }
     val adLazyEntries = remember(adCollections) { flattenAdsForLazyList(adCollections) }
+    val adListPositions = remember(adLazyEntries) {
+        adLazyEntries.filterIsInstance<SponsoredAdsListEntry.AdItem>()
+            .withIndex()
+            .associate { (index, entry) -> stableAdvertisementKey(entry.advertisement) to index }
+    }
 
     if (showFeeEducation) {
         ModalBottomSheet(
@@ -846,7 +854,7 @@ private fun SponsoredHubScreen(
                             }
                         }
                     } else if (adsBrowseLayout == AdsBrowseLayout.Discover) {
-                        items(discoverAds, key = { stableAdvertisementKey(it) }) { ad ->
+                        itemsIndexed(discoverAds, key = { _, ad -> stableAdvertisementKey(ad) }) { index, ad ->
                             Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                                 SponsoredAdCard(
                                     advertisement = ad,
@@ -854,7 +862,8 @@ private fun SponsoredHubScreen(
                                     onEdit = { onEditAdClicked(ad) },
                                     onDelete = { onDeleteAdClicked(ad) },
                                     onChat = { viewModel.sendChatInvitation(ad) },
-                                    showSponsorLine = true
+                                    showSponsorLine = true,
+                                    bold = index % 2 == 0
                                 )
                             }
                         }
@@ -888,7 +897,8 @@ private fun SponsoredHubScreen(
                                             onEdit = { onEditAdClicked(ad) },
                                             onDelete = { onDeleteAdClicked(ad) },
                                             onChat = { viewModel.sendChatInvitation(ad) },
-                                            showSponsorLine = false
+                                            showSponsorLine = false,
+                                            bold = (adListPositions[stableAdvertisementKey(ad)] ?: 0) % 2 == 0
                                         )
                                     }
                                 }
@@ -928,6 +938,16 @@ private fun SponsoredHubScreen(
                             nearMe = garageNearMe,
                             onSelected = { garageDayFilter = it },
                             onNearMeToggle = onGarageNearMeToggle
+                        )
+                    }
+                    item {
+                        GarageSummaryLine(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            text = if (garageBrowseLayout == GarageBrowseLayout.Discover) {
+                                garageDiscoverSummary(filteredGarage.size)
+                            } else {
+                                garageShopsSummary(filteredGarage.size, garageCollections.size)
+                            }
                         )
                     }
                     item {
@@ -981,26 +1001,16 @@ private fun SponsoredHubScreen(
                     } else {
                         garageCollections.forEach { collection ->
                             item(key = "shop_${collection.ownerKey}") {
-                                GarageShopCard(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                GarageShopSection(
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp),
                                     title = collection.displayTitle,
-                                    subtitle = garageShopSubtitle(collection.sales, garageNowMs),
+                                    sales = collection.sales,
                                     isOpen = garageShopProfiles[collection.ownerKey]?.isOpen ?: true,
-                                    onOpen = { onOpenShopProfile(collection.ownerKey, collection.displayTitle) }
-                                )
-                            }
-                            itemsIndexed(
-                                collection.sales,
-                                key = { _, sale -> "shop_${collection.ownerKey}_${stableGarageSaleKey(sale)}" }
-                            ) { index, sale ->
-                                GarageSaleFeedCard(
-                                    modifier = Modifier.padding(start = 28.dp, end = 16.dp),
-                                    sale = sale,
                                     nowMs = garageNowMs,
-                                    distanceText = garageDistanceFor(sale),
-                                    isSaved = sale.id in garageSavedIds,
-                                    onClick = { onOpenGarageSale(sale) },
-                                    badge = if (index == 0 && sale.timing(garageNowMs) != GarageSaleTiming.Ended) "Next up" else null
+                                    distanceFor = { sale -> if (garageNearMe) garageDistanceFor(sale) else null },
+                                    savedIds = garageSavedIds,
+                                    onOpenShop = { onOpenShopProfile(collection.ownerKey, collection.displayTitle) },
+                                    onOpenSale = onOpenGarageSale
                                 )
                             }
                         }
@@ -1495,10 +1505,19 @@ private fun SponsoredDataRefreshWarningBanner(
 }
 
 @Composable
-private fun SponsoredMetaChip(text: String, garageStyle: Boolean = false) {
-    val bg = if (garageStyle) SponsoredA11yPalette.garageChipBackground else SponsoredA11yPalette.adsChipBackground
-    val fg = if (garageStyle) SponsoredA11yPalette.garageChipText else SponsoredA11yPalette.adsChipText
-    val border = if (garageStyle) SponsoredA11yPalette.garageChipBorder else SponsoredA11yPalette.adsChipBorder
+private fun SponsoredMetaChip(text: String, garageStyle: Boolean = false, onBoldTextColor: Color? = null) {
+    val bg = when {
+        onBoldTextColor != null -> Color.White
+        garageStyle -> SponsoredA11yPalette.garageChipBackground
+        else -> SponsoredA11yPalette.adsChipBackground
+    }
+    val fg = onBoldTextColor
+        ?: if (garageStyle) SponsoredA11yPalette.garageChipText else SponsoredA11yPalette.adsChipText
+    val border = when {
+        onBoldTextColor != null -> Color.White
+        garageStyle -> SponsoredA11yPalette.garageChipBorder
+        else -> SponsoredA11yPalette.adsChipBorder
+    }
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = bg,
@@ -2014,6 +2033,10 @@ private fun SponsoredOpenLoopCard(
 }
 
 @OptIn(ExperimentalFoundationApi::class)
+private val AdCardGradientStart = Color(0.98f, 0.47f, 0.20f)
+private val AdCardGradientEnd = Color(0.91f, 0.26f, 0.47f)
+
+/** Lists alternate by position across the whole list: even positions bold, odd positions soft. */
 @Composable
 internal fun SponsoredAdCard(
     advertisement: Advertisement,
@@ -2021,8 +2044,12 @@ internal fun SponsoredAdCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onChat: () -> Unit,
-    showSponsorLine: Boolean = true
+    showSponsorLine: Boolean = true,
+    bold: Boolean = false
 ) {
+    val onBoldPrimary = Color.White
+    val onBoldSecondary = Color.White.copy(alpha = 0.8f)
+    val cardShape = RoundedCornerShape(18.dp)
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
@@ -2037,14 +2064,38 @@ internal fun SponsoredAdCard(
         mutableStateOf<Pair<List<GarageSaleMedia>, Int>?>(null)
     }
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = SponsoredA11yPalette.cardSurface,
-        tonalElevation = 1.dp,
-        shadowElevation = 2.dp,
-        border = BorderStroke(1.dp, SponsoredA11yPalette.cardBorder)
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (bold) {
+                    Modifier.shadow(
+                        elevation = 10.dp,
+                        shape = cardShape,
+                        ambientColor = AdCardGradientEnd.copy(alpha = 0.3f),
+                        spotColor = AdCardGradientEnd.copy(alpha = 0.3f)
+                    )
+                } else {
+                    Modifier
+                }
+            ),
+        shape = cardShape,
+        color = if (bold) {
+            Color.Transparent
+        } else {
+            AdCardGradientStart.copy(alpha = 0.07f).compositeOver(SponsoredA11yPalette.cardSurface)
+        },
+        border = BorderStroke(
+            1.dp,
+            if (bold) Color.White.copy(alpha = 0.12f) else AdCardGradientStart.copy(alpha = 0.22f)
+        )
     ) {
-        Column {
+        Column(
+            modifier = if (bold) {
+                Modifier.background(Brush.linearGradient(listOf(AdCardGradientStart, AdCardGradientEnd)))
+            } else {
+                Modifier
+            }
+        ) {
             MediaPager(
                 media = media,
                 modifier = Modifier
@@ -2052,8 +2103,8 @@ internal fun SponsoredAdCard(
                     .aspectRatio(4f / 3f)
                     .clip(
                         RoundedCornerShape(
-                            topStart = 20.dp,
-                            topEnd = 20.dp,
+                            topStart = 18.dp,
+                            topEnd = 18.dp,
                             bottomStart = 0.dp,
                             bottomEnd = 0.dp
                         )
@@ -2076,7 +2127,7 @@ internal fun SponsoredAdCard(
                             "Show details for ${advertisement.title.ifBlank { "advertisement" }}"
                         }
                     }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2088,7 +2139,7 @@ internal fun SponsoredAdCard(
                             text = advertisement.title.ifBlank { "Advertisement" },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = SponsoredA11yPalette.textPrimary,
+                            color = if (bold) onBoldPrimary else SponsoredA11yPalette.textPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -2097,7 +2148,7 @@ internal fun SponsoredAdCard(
                                 text = "Sponsored by ${advertisement.sponsor.ifBlank { "Volunteer App Partner" }}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = SponsoredA11yPalette.textSecondary
+                                color = if (bold) onBoldSecondary else SponsoredA11yPalette.textSecondary
                             )
                         }
                     }
@@ -2105,7 +2156,11 @@ internal fun SponsoredAdCard(
                     if (isOwner) {
                         Box {
                             IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "Advertisement actions")
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = "Advertisement actions",
+                                    tint = if (bold) onBoldPrimary else LocalContentColor.current
+                                )
                             }
                             DropdownMenu(
                                 expanded = showMenu,
@@ -2135,7 +2190,8 @@ internal fun SponsoredAdCard(
                         Icon(
                             imageVector = Icons.Default.ExpandMore,
                             contentDescription = if (expanded) "Collapse" else "Expand",
-                            modifier = Modifier.graphicsLayer(rotationZ = rotation)
+                            modifier = Modifier.graphicsLayer(rotationZ = rotation),
+                            tint = if (bold) onBoldPrimary else LocalContentColor.current
                         )
                     }
                 }
@@ -2146,20 +2202,23 @@ internal fun SponsoredAdCard(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    SponsoredMetaChip("Sponsored")
+                    SponsoredMetaChip("Sponsored", onBoldTextColor = AdCardGradientEnd.takeIf { bold })
                     if (isOwner) {
                         advertisementOwnerStatusLabel(advertisement.status)?.let { statusLabel ->
-                            SponsoredMetaChip(statusLabel)
+                            SponsoredMetaChip(statusLabel, onBoldTextColor = AdCardGradientEnd.takeIf { bold })
                         }
                     }
-                    SponsoredMetaChip(formatPostedLabel(advertisement.timestamp))
+                    SponsoredMetaChip(
+                        formatPostedLabel(advertisement.timestamp),
+                        onBoldTextColor = AdCardGradientEnd.takeIf { bold }
+                    )
                 }
 
                 if (!expanded && advertisement.description.isNotBlank()) {
                     Text(
                         text = advertisement.description,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = SponsoredA11yPalette.textSecondary,
+                        color = if (bold) onBoldSecondary else SponsoredA11yPalette.textSecondary,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -2167,11 +2226,15 @@ internal fun SponsoredAdCard(
 
                 AnimatedVisibility(visible = expanded) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Divider()
+                        if (bold) {
+                            Divider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.2f))
+                        } else {
+                            Divider()
+                        }
                         Text(
                             text = advertisement.description.ifBlank { "No description available." },
                             style = MaterialTheme.typography.bodyLarge,
-                            color = SponsoredA11yPalette.textSecondary
+                            color = if (bold) onBoldSecondary else SponsoredA11yPalette.textSecondary
                         )
 
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2184,7 +2247,15 @@ internal fun SponsoredAdCard(
                                             fallbackMessage = "Invalid link."
                                         )
                                     },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    colors = if (bold) {
+                                        ButtonDefaults.buttonColors(
+                                            containerColor = Color.White,
+                                            contentColor = AdCardGradientEnd
+                                        )
+                                    } else {
+                                        ButtonDefaults.buttonColors()
+                                    }
                                 ) {
                                     Icon(Icons.Default.Link, contentDescription = null)
                                     Spacer(Modifier.width(8.dp))
@@ -2195,7 +2266,17 @@ internal fun SponsoredAdCard(
                             if (canInviteChat) {
                                 OutlinedButton(
                                     onClick = onChat,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    colors = if (bold) {
+                                        ButtonDefaults.outlinedButtonColors(contentColor = onBoldPrimary)
+                                    } else {
+                                        ButtonDefaults.outlinedButtonColors()
+                                    },
+                                    border = if (bold) {
+                                        BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))
+                                    } else {
+                                        ButtonDefaults.outlinedButtonBorder(enabled = true)
+                                    }
                                 ) {
                                     Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
                                     Spacer(Modifier.width(8.dp))
@@ -2212,6 +2293,16 @@ internal fun SponsoredAdCard(
                                         intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${advertisement.ownerPhone}")),
                                         fallbackMessage = "No phone number available."
                                     )
+                                },
+                                colors = if (bold) {
+                                    ButtonDefaults.outlinedButtonColors(contentColor = onBoldPrimary)
+                                } else {
+                                    ButtonDefaults.outlinedButtonColors()
+                                },
+                                border = if (bold) {
+                                    BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))
+                                } else {
+                                    ButtonDefaults.outlinedButtonBorder(enabled = true)
                                 }
                             ) {
                                 Icon(Icons.Default.Phone, contentDescription = null)

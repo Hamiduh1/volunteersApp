@@ -1,7 +1,14 @@
 package com.example.volunteersApp.advertisement
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -106,14 +113,15 @@ fun SponsoredAdvertiserProfileScreen(
                     )
                 }
             } else {
-                items(ads, key = { stableAdvertisementKey(it) }) { ad ->
+                itemsIndexed(ads, key = { _, ad -> stableAdvertisementKey(ad) }) { index, ad ->
                     SponsoredAdCard(
                         advertisement = ad,
                         isOwner = ad.ownerId == currentUserId,
                         onEdit = { onEditAd(ad) },
                         onDelete = { onDeleteAd(ad) },
                         onChat = { onChat(ad) },
-                        showSponsorLine = false
+                        showSponsorLine = false,
+                        bold = index % 2 == 0
                     )
                 }
             }
@@ -150,6 +158,8 @@ fun SponsoredShopProfileScreen(
     )
     val isOwner = ownerKey == currentUserId
     val isOpen = shopProfile?.isOpen ?: true
+    var shopQuery by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val shownSales = sales.filter { it.matchesGarageSaleQuery(shopQuery) }
 
     Scaffold(
         containerColor = SponsoredA11yPalette.pageBackground,
@@ -214,19 +224,64 @@ fun SponsoredShopProfileScreen(
                     }
                 }
             }
-            if (sales.isEmpty()) {
+            item {
+                OutlinedTextField(
+                    value = shopQuery,
+                    onValueChange = { shopQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search this shop's sales") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp)
+                )
+            }
+            item {
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Sales",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = SponsoredA11yPalette.textPrimary
+                    )
+                    Text(
+                        "${shownSales.size}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = SponsoredA11yPalette.textSecondary
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        "Soonest first",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SponsoredA11yPalette.textSecondary
+                    )
+                }
+            }
+            if (shownSales.isEmpty()) {
                 item {
-                    Text("No listings for this shop.", color = SponsoredA11yPalette.textSecondary)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                            .background(SponsoredA11yPalette.cardSurfaceSoft, RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (shopQuery.isBlank()) "No listings for this shop." else "No sales match your search.",
+                            color = SponsoredA11yPalette.textSecondary
+                        )
+                    }
                 }
             } else {
-                itemsIndexed(sales, key = { _, sale -> stableGarageSaleKey(sale) }) { index, sale ->
-                    GarageSaleFeedCard(
-                        sale = sale,
+                items(
+                    shownSales.chunked(2),
+                    key = { row -> row.joinToString("|") { stableGarageSaleKey(it) } }
+                ) { row ->
+                    GarageSaleTileGrid(
+                        sales = row,
                         nowMs = nowMs,
-                        distanceText = null,
-                        isSaved = sale.id in savedIds,
-                        onClick = { onOpenSale(sale) },
-                        badge = if (index == 0 && sale.timing(nowMs) != GarageSaleTiming.Ended) "Next up" else null
+                        distanceFor = { null },
+                        savedIds = savedIds,
+                        onOpen = onOpenSale
                     )
                 }
             }

@@ -2,7 +2,13 @@ package com.example.volunteersApp.advertisement
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -442,6 +448,338 @@ internal fun GarageDiscoverGridRow(
         }
         if (sales.size == 1) {
             Box(modifier = Modifier.weight(1f).width(0.dp))
+        }
+    }
+}
+
+private fun garageTilePostedLabel(sale: GarageSale, nowMs: Long): String {
+    val posted = sale.timestamp?.toDate()?.time ?: return "Garage sale"
+    val days = ((nowMs - posted) / 86_400_000L).toInt()
+    return when {
+        days <= 0 -> "Posted today"
+        days == 1 -> "Posted yesterday"
+        else -> "Posted $days days ago"
+    }
+}
+
+/** Fixed cover, 1-line status, 2 reserved title lines and 1 detail line keep every tile the same height. */
+@Composable
+internal fun GarageSaleTile(
+    sale: GarageSale,
+    nowMs: Long,
+    distanceText: String?,
+    isSaved: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val timing = sale.timing(nowMs)
+    val ended = timing == GarageSaleTiming.Ended
+    val live = timing is GarageSaleTiming.OpenNow
+    val type = sale.saleTypeValue
+    val typeColor = SponsoredA11yPalette.accentGarage
+    Surface(
+        modifier = modifier.alpha(if (ended) 0.65f else 1f),
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = SponsoredA11yPalette.cardSurface,
+        border = if (live) {
+            BorderStroke(1.5.dp, GarageOpenGreen.copy(alpha = 0.55f))
+        } else {
+            BorderStroke(0.5.dp, SponsoredA11yPalette.cardBorder)
+        }
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(112.dp)
+            ) {
+                val thumb = sale.thumbnailUrl()
+                if (thumb != null) {
+                    AsyncImage(
+                        model = thumb,
+                        contentDescription = sale.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(typeColor.copy(alpha = 0.75f), typeColor.copy(alpha = 0.40f))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            type.icon(),
+                            contentDescription = type.label,
+                            tint = Color.White,
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+                }
+                sale.calendarDayMs(nowMs)?.let { dayMs ->
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(Color.White.copy(alpha = 0.85f)),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            SimpleDateFormat("MMM", Locale.getDefault()).format(Date(dayMs)).uppercase(Locale.getDefault()),
+                            fontSize = 9.sp,
+                            lineHeight = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (ended) SponsoredA11yPalette.textSecondary else typeColor,
+                            maxLines = 1
+                        )
+                        Text(
+                            SimpleDateFormat("d", Locale.getDefault()).format(Date(dayMs)),
+                            fontSize = 17.sp,
+                            lineHeight = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SponsoredA11yPalette.textPrimary,
+                            maxLines = 1
+                        )
+                    }
+                }
+                if (isSaved) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .size(26.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Bookmark,
+                            contentDescription = "Saved",
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+            }
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    if (timing == GarageSaleTiming.Undated) {
+                        Text(
+                            garageTilePostedLabel(sale, nowMs),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = SponsoredA11yPalette.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else {
+                        if (live) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(GarageOpenGreen, CircleShape)
+                            )
+                        }
+                        Text(
+                            timing.shortLabel(nowMs),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = when {
+                                live -> GarageOpenGreen
+                                ended -> SponsoredA11yPalette.textSecondary
+                                else -> typeColor
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Text(
+                    sale.title.ifBlank { "Garage sale" },
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (ended) SponsoredA11yPalette.textSecondary else SponsoredA11yPalette.textPrimary,
+                    minLines = 2,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    listOfNotNull(
+                        type.label,
+                        sale.areaLabel().takeIf { it.isNotBlank() },
+                        distanceText?.removeSuffix(" away")
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SponsoredA11yPalette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+/** Two-column grid of [GarageSaleTile]s, 10dp spacing both ways. */
+@Composable
+internal fun GarageSaleTileGrid(
+    sales: List<GarageSale>,
+    nowMs: Long,
+    distanceFor: (GarageSale) -> String?,
+    savedIds: Set<String>,
+    onOpen: (GarageSale) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        sales.chunked(2).forEach { row ->
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { sale ->
+                    GarageSaleTile(
+                        sale = sale,
+                        nowMs = nowMs,
+                        distanceText = distanceFor(sale),
+                        isSaved = sale.id in savedIds,
+                        onClick = { onOpen(sale) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (row.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+internal fun garageShopsSummary(saleCount: Int, sellerCount: Int): String? {
+    if (saleCount == 0) return null
+    val sales = "$saleCount ${if (saleCount == 1) "sale" else "sales"}"
+    val sellers = "$sellerCount ${if (sellerCount == 1) "seller" else "sellers"}"
+    return "$sales from $sellers · soonest first"
+}
+
+internal fun garageDiscoverSummary(photoCount: Int): String? {
+    if (photoCount == 0) return null
+    return "$photoCount ${if (photoCount == 1) "photo" else "photos"} from sales near you · tap one for details"
+}
+
+@Composable
+internal fun GarageSummaryLine(text: String?, modifier: Modifier = Modifier) {
+    if (text.isNullOrBlank()) return
+    Text(
+        text,
+        modifier = modifier,
+        style = MaterialTheme.typography.bodySmall,
+        color = SponsoredA11yPalette.textSecondary,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
+}
+
+/** Shop header, the next 4 sales as tiles, then "View all N sales" when there are more. */
+@Composable
+internal fun GarageShopSection(
+    title: String,
+    sales: List<GarageSale>,
+    isOpen: Boolean,
+    nowMs: Long,
+    distanceFor: (GarageSale) -> String?,
+    savedIds: Set<String>,
+    onOpenShop: () -> Unit,
+    onOpenSale: (GarageSale) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = SponsoredA11yPalette.cardSurface,
+        border = BorderStroke(0.5.dp, SponsoredA11yPalette.cardBorder)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onOpenShop),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = SponsoredA11yPalette.garageChipBackground,
+                    border = BorderStroke(1.dp, SponsoredA11yPalette.garageChipBorder)
+                ) {
+                    Icon(
+                        Icons.Default.Storefront,
+                        contentDescription = null,
+                        modifier = Modifier.padding(10.dp),
+                        tint = SponsoredA11yPalette.accentGarage
+                    )
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = SponsoredA11yPalette.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val subtitle = garageShopSubtitle(sales, nowMs)
+                    Text(
+                        if (isOpen) subtitle else "$subtitle · shop closed",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SponsoredA11yPalette.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "View shop",
+                    tint = SponsoredA11yPalette.accentGarage
+                )
+            }
+            GarageSaleTileGrid(
+                sales = sales.take(4),
+                nowMs = nowMs,
+                distanceFor = distanceFor,
+                savedIds = savedIds,
+                onOpen = onOpenSale
+            )
+            if (sales.size > 4) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onOpenShop,
+                    shape = RoundedCornerShape(12.dp),
+                    color = GarageOpenGreen.copy(alpha = 0.10f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "View all ${sales.size} sales",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = GarageOpenGreen
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = GarageOpenGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }
