@@ -2839,10 +2839,12 @@ const notifyFollowers = async (params: {
   type: string;
   referenceId: string;
   settingsField: FollowerNotificationSetting;
+  recipientIds?: string[];
 }): Promise<void> => {
   const {actorId, title, body, type, referenceId, settingsField} = params;
-  const followersSnap = await db.collection("users").doc(actorId).collection("followers").get();
-  if (followersSnap.empty) {
+  const candidateIds = params.recipientIds ??
+    (await db.collection("users").doc(actorId).collection("followers").get()).docs.map((doc) => doc.id);
+  if (candidateIds.length === 0) {
     return;
   }
 
@@ -2860,8 +2862,7 @@ const notifyFollowers = async (params: {
       chatPrivacyBlocked.filter((id): id is string => typeof id === "string") :
       []),
   ]);
-  const followerIds = followersSnap.docs
-    .map((doc) => doc.id)
+  const followerIds = [...new Set(candidateIds)]
     .filter((id) => id && id !== actorId && !blockedIds.has(id));
 
   const tokens = new Set<string>();
@@ -4897,6 +4898,11 @@ export const onLiveSessionBecameLiveNotifyFollowers = functions.firestore
   });
 
 const LIVE_FOLLOWER_PUSH_HOST_COOLDOWN_MS = 10 * 60 * 1000;
+// Matches the live_sessions rules for who may watch an event-only stream.
+const EVENT_LIVE_GUEST_STATUSES = [
+  "APPROVED", "ACCEPTED", "ATTENDED", "COMPLETED",
+  "approved", "accepted", "attended", "completed",
+];
 
 /**
  * Sends at most one "is live" push per session (onCreate and onUpdate can both fire)
@@ -4936,14 +4942,35 @@ const notifyLiveSessionFollowersIfNeeded = async (
   const actorId = String(session.hostId || session.hostUid || "").trim();
   if (!actorId) return undefined;
 
-  // Invite-only and event-only streams must not announce their title to every follower.
+  const title = session.title || "Live now";
+  const hostName = session.hostName || "Someone";
+
+  // Event-only streams go to the event's approved guests instead of the host's followers.
   const viewAccessMode = String(session.viewAccessMode || "public").trim().toLowerCase();
+  if (viewAccessMode === "accepted_event_volunteers") {
+    const eventId = String(session.sourceId || session.linkedEventId || "").trim();
+    if (!eventId) return undefined;
+    const approved = await db.collection("events").doc(eventId).collection("applications")
+      .where("status", "in", EVENT_LIVE_GUEST_STATUSES)
+      .get();
+    const guestIds = approved.docs.map((doc) => asNonEmptyString(doc.get("volunteerId"), doc.get("userId")) || doc.id);
+    if (guestIds.length === 0) return undefined;
+    if (!(await claimLiveFollowerPush(sessionId, actorId))) return undefined;
+    await notifyFollowers({
+      actorId,
+      title: `${hostName} is live for your event`,
+      body: title,
+      type: "liveStream",
+      referenceId: sessionId,
+      settingsField: "liveStreams",
+      recipientIds: guestIds,
+    });
+    return undefined;
+  }
+  // Invite-only streams must not announce their title to every follower.
   if (viewAccessMode !== "public" && viewAccessMode !== "followers_only") return undefined;
 
   if (!(await claimLiveFollowerPush(sessionId, actorId))) return undefined;
-
-  const title = session.title || "Live now";
-  const hostName = session.hostName || "Someone";
 
   await notifyFollowers({
     actorId,
@@ -6905,6 +6932,67 @@ interface ApplyForEventRequest {
   eventId?: string;
 }
 
+// Every application that is not rejected, withdrawn or still awaiting payment holds a seat.
+const EVENT_SEAT_STATUSES = [
+  "PENDING", "APPROVED", "ACCEPTED", "ATTENDED", "COMPLETED",
+  "pending", "approved", "accepted", "attended", "completed",
+];
+const EVENT_RELEASED_SEAT_STATUSES = new Set(["REJECTED", "REJECTED_BY_EMPLOYER", "WITHDRAWN", "CANCELLED"]);
+// Events stamped with this version keep participantsCount in step with their seats; older events are recounted.
+const EVENT_SEAT_COUNT_VERSION = 2;
+
+const isEventSeatStatus = (status: unknown): boolean =>
+  EVENT_SEAT_STATUSES.includes(String(status || "").trim().toUpperCase());
+
+const eventSeatLimit = (eventData: Record<string, unknown>): number | null => {
+  const limit = Number(eventData.volunteerLimit ?? 0);
+  return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : null;
+};
+
+const countEventSeats = async (
+  eventRef: FirebaseFirestore.DocumentReference,
+  transaction?: FirebaseFirestore.Transaction
+): Promise<number> => {
+  const query = eventRef.collection("applications").where("status", "in", EVENT_SEAT_STATUSES);
+  if (transaction) return (await transaction.get(query)).size;
+  return (await query.count().get()).data().count;
+};
+
+/**
+ * Reads the seats taken on an event inside a transaction.
+ * @param {FirebaseFirestore.Transaction} transaction Active transaction; this must run before any write.
+ * @param {FirebaseFirestore.DocumentReference} eventRef Event document.
+ * @param {Record<string, unknown>} eventData Event data read in the same transaction.
+ * @return {Promise<{seatsTaken: number, trusted: boolean}>} Seats taken and whether the stored count was used.
+ */
+const readEventSeatsTaken = async (
+  transaction: FirebaseFirestore.Transaction,
+  eventRef: FirebaseFirestore.DocumentReference,
+  eventData: Record<string, unknown>
+): Promise<{seatsTaken: number; trusted: boolean}> => {
+  if (Number(eventData.participantsCountVersion) === EVENT_SEAT_COUNT_VERSION) {
+    const stored = Number(eventData.participantsCount ?? 0);
+    return {seatsTaken: Number.isFinite(stored) ? Math.max(0, Math.floor(stored)) : 0, trusted: true};
+  }
+  return {seatsTaken: await countEventSeats(eventRef, transaction), trusted: false};
+};
+
+const assertEventSeatAvailable = (eventData: Record<string, unknown>, seatsTaken: number) => {
+  const limit = eventSeatLimit(eventData);
+  if (limit !== null && seatsTaken >= limit) {
+    throw new functions.https.HttpsError("failed-precondition", "This event is full.");
+  }
+};
+
+const takeEventSeatUpdate = (
+  seats: {seatsTaken: number; trusted: boolean},
+  now: admin.firestore.Timestamp
+) => ({
+  participantsCount: seats.trusted ? admin.firestore.FieldValue.increment(1) : seats.seatsTaken + 1,
+  participantsCountVersion: EVENT_SEAT_COUNT_VERSION,
+  lastUpdatedAt: now,
+});
+
 export const applyForEvent = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
@@ -6973,10 +7061,13 @@ export const applyForEvent = functions.runWith({enforceAppCheck: true})
           }
           if (
             applicationDoc.exists &&
+            String(applicationDoc.data()?.status || "").toUpperCase() !== "WITHDRAWN" &&
             !["PENDING", "PENDING_CHECKOUT"].includes(String(applicationDoc.data()?.paymentStatus || "").toUpperCase())
           ) {
             throw new functions.https.HttpsError("failed-precondition", "You have already applied for this event.");
           }
+          // The seat is taken when payment completes; checkout is refused once the event is already full.
+          assertEventSeatAvailable(eventData, (await readEventSeatsTaken(transaction, eventRef, eventData)).seatsTaken);
           const timestamp = admin.firestore.Timestamp.now();
           transaction.set(applicationRef, {
             applicationId: applicationRef.id,
@@ -7031,7 +7122,8 @@ export const applyForEvent = functions.runWith({enforceAppCheck: true})
       if (!eventDoc.exists) {
         throw new functions.https.HttpsError("not-found", "Event not found.");
       }
-      if (applicationDoc.exists) {
+      // A volunteer who withdrew may register again; an organizer's rejection stands.
+      if (applicationDoc.exists && String(applicationDoc.data()?.status || "").toUpperCase() !== "WITHDRAWN") {
         throw new functions.https.HttpsError("failed-precondition", "You have already applied for this event.");
       }
 
@@ -7054,8 +7146,11 @@ export const applyForEvent = functions.runWith({enforceAppCheck: true})
       if (eventFee > 0) {
         throw new functions.https.HttpsError("failed-precondition", "This event now requires Stripe Checkout. Refresh and try again.");
       }
+      const seats = await readEventSeatsTaken(transaction, eventRef, eventData as Record<string, unknown>);
+      assertEventSeatAvailable(eventData as Record<string, unknown>, seats.seatsTaken);
 
       const timestamp = admin.firestore.Timestamp.now();
+      transaction.update(eventRef, takeEventSeatUpdate(seats, timestamp));
 
       transaction.set(applicationRef, {
         applicationId: applicationRef.id,
@@ -7077,6 +7172,7 @@ export const applyForEvent = functions.runWith({enforceAppCheck: true})
         currency: "USD",
         paymentStatus: "NOT_REQUIRED",
         appliedDate: timestamp,
+        seatTakenAt: timestamp,
         paymentProcessedAt: null,
       });
 
@@ -7092,6 +7188,183 @@ export const applyForEvent = functions.runWith({enforceAppCheck: true})
     });
 
     return result;
+  });
+
+// Signup and paid fulfillment take seats transactionally; this releases a seat when the
+// organizer rejects or the volunteer withdraws, and takes it back if a closed one is re-approved.
+export const onEventApplicationSeatChange = functions.firestore
+  .document("events/{eventId}/applications/{appId}")
+  .onWrite(async (change, context) => {
+    if (!change.before.exists) return undefined;
+    const beforeStatus = String(change.before.get("status") || "").trim().toUpperCase();
+    const afterStatus = change.after.exists ? String(change.after.get("status") || "").trim().toUpperCase() : "";
+    const heldBefore = isEventSeatStatus(beforeStatus);
+    const heldAfter = change.after.exists && isEventSeatStatus(afterStatus);
+    let delta = 0;
+    if (heldBefore && !heldAfter) delta = -1;
+    if (!heldBefore && heldAfter && EVENT_RELEASED_SEAT_STATUSES.has(beforeStatus)) {
+      // A fresh signup stamps seatTakenAt and has already taken its seat in the same transaction.
+      const takenBefore = change.before.get("seatTakenAt") as admin.firestore.Timestamp | undefined;
+      const takenAfter = change.after.get("seatTakenAt") as admin.firestore.Timestamp | undefined;
+      const retakenBySignup = takenAfter !== undefined && (takenBefore === undefined || !takenAfter.isEqual(takenBefore));
+      if (!retakenBySignup) delta = 1;
+    }
+    if (delta === 0) return undefined;
+
+    const eventRef = db.collection("events").doc(context.params.eventId);
+    await db.runTransaction(async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists) return;
+      const eventData = (eventDoc.data() || {}) as Record<string, unknown>;
+      const now = admin.firestore.Timestamp.now();
+      if (Number(eventData.participantsCountVersion) !== EVENT_SEAT_COUNT_VERSION) {
+        // The application write has already landed, so a fresh count is exact.
+        const seatsTaken = await countEventSeats(eventRef, transaction);
+        transaction.update(eventRef, {
+          participantsCount: seatsTaken,
+          participantsCountVersion: EVENT_SEAT_COUNT_VERSION,
+          lastUpdatedAt: now,
+        });
+        return;
+      }
+      const stored = Number(eventData.participantsCount ?? 0);
+      const current = Number.isFinite(stored) ? Math.max(0, Math.floor(stored)) : 0;
+      transaction.update(eventRef, {participantsCount: Math.max(0, current + delta), lastUpdatedAt: now});
+    });
+    return undefined;
+  });
+
+const eventApplicationIsUnpaid = (application: Record<string, unknown>): boolean => {
+  if (asNonEmptyString(application.paymentStatus)) return false;
+  const amounts = [application.ticketPrice, application.transactionAmount, application.organizerNetAmount]
+    .map((value) => Number(value ?? 0));
+  return amounts.every((value) => !Number.isFinite(value) || value === 0);
+};
+
+interface WithdrawEventApplicationRequest {
+  eventId?: unknown;
+}
+
+// Volunteers can cancel a free registration or an unfinished checkout before the event starts.
+// Paid tickets stay with the organizer, who arranges any refund.
+export const withdrawEventApplication = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in to cancel a registration.");
+    }
+    const userId = context.auth.uid;
+    const eventId = asNonEmptyString((data as WithdrawEventApplicationRequest | undefined)?.eventId);
+    if (!eventId) {
+      throw new functions.https.HttpsError("invalid-argument", "Missing required field: eventId.");
+    }
+    const eventRef = db.collection("events").doc(eventId);
+    const applicationRef = eventRef.collection("applications").doc(userId);
+
+    return db.runTransaction(async (transaction) => {
+      const [eventDoc, applicationDoc] = await Promise.all([
+        transaction.get(eventRef),
+        transaction.get(applicationRef),
+      ]);
+      if (!applicationDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "You have not registered for this event.");
+      }
+      const application = (applicationDoc.data() || {}) as Record<string, unknown>;
+      const status = String(application.status || "").trim().toUpperCase();
+      if (EVENT_RELEASED_SEAT_STATUSES.has(status)) {
+        return {success: true, eventId, status, message: "This registration is already closed."};
+      }
+      const eventData = (eventDoc.data() || {}) as Record<string, unknown>;
+      const eventTime = resolveListingTimeMillis(eventData, "EVENT");
+      if (eventDoc.exists && eventTime !== null && eventTime <= Date.now()) {
+        throw new functions.https.HttpsError("failed-precondition", "This event has already started.");
+      }
+      const paymentStatus = String(application.paymentStatus || "").trim().toUpperCase();
+      const unpaid = status === "PENDING_PAYMENT" ||
+        ["NOT_REQUIRED", "STAFF_EXEMPT"].includes(paymentStatus) ||
+        eventApplicationIsUnpaid(application);
+      if (!unpaid) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Paid tickets can't be cancelled in the app. Message the organizer about a refund."
+        );
+      }
+      const now = admin.firestore.Timestamp.now();
+      transaction.set(applicationRef, {
+        status: "WITHDRAWN",
+        withdrawnAt: now,
+        lastUpdatedAt: now,
+        updatedAt: now,
+      }, {merge: true});
+      return {success: true, eventId, status: "WITHDRAWN", message: "Your registration was cancelled."};
+    });
+  });
+
+// Event-only streams are hidden from the public Live directory; this lists the ones the
+// caller may watch because their registration for the linked event is approved.
+export const getMyEventLiveSessions = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (_data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in to see event streams.");
+    }
+    const userId = context.auth.uid;
+    const applications = await db.collectionGroup("applications").where("volunteerId", "==", userId).get();
+    const approvedStatuses = new Set(EVENT_LIVE_GUEST_STATUSES.map((status) => status.toUpperCase()));
+    const eventIds = [...new Set(applications.docs
+      .filter((doc) => doc.ref.parent.parent?.parent.id === "events")
+      .filter((doc) => approvedStatuses.has(String(doc.get("status") || "").trim().toUpperCase()))
+      .map((doc) => doc.ref.parent.parent?.id || "")
+      .filter((id) => id.length > 0))];
+
+    const sessions: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < eventIds.length; i += 30) {
+      const chunk = eventIds.slice(i, i + 30);
+      const snapshot = await db.collection("live_sessions").where("sourceId", "in", chunk).get();
+      for (const doc of snapshot.docs) {
+        const data = doc.data() || {};
+        const status = String(data.status || "").trim().toLowerCase();
+        const mode = String(data.viewAccessMode || "").trim().toLowerCase();
+        if (!["live", "active"].includes(status) || mode !== "accepted_event_volunteers") continue;
+        const startedAt = data.startedAt || data.createdAt;
+        sessions.push({
+          sessionId: doc.id,
+          eventId: asNonEmptyString(data.sourceId) || "",
+          hostId: asNonEmptyString(data.hostId, data.hostUid) || "",
+          hostName: asNonEmptyString(data.hostName) || "Organizer",
+          title: asNonEmptyString(data.title) || "Live now",
+          startedAtMillis: startedAt instanceof admin.firestore.Timestamp ? startedAt.toMillis() : null,
+        });
+      }
+    }
+    return {sessions};
+  });
+
+// Recounts seats on events created before seat counting, so the volunteer limit and the
+// rules that lock price and deletion once people have registered apply to them too.
+export const reconcileEventSeatCountsJob = functions
+  .runWith({timeoutSeconds: 540, memory: "512MB"})
+  .pubsub.schedule("every 24 hours")
+  .onRun(async () => {
+    const snapshot = await db.collection("events").get();
+    let updated = 0;
+    for (const document of snapshot.docs) {
+      if (Number(document.get("participantsCountVersion")) === EVENT_SEAT_COUNT_VERSION) continue;
+      await db.runTransaction(async (transaction) => {
+        const fresh = await transaction.get(document.ref);
+        if (!fresh.exists || Number(fresh.get("participantsCountVersion")) === EVENT_SEAT_COUNT_VERSION) return;
+        const seatsTaken = await countEventSeats(document.ref, transaction);
+        transaction.update(document.ref, {
+          participantsCount: seatsTaken,
+          participantsCountVersion: EVENT_SEAT_COUNT_VERSION,
+        });
+        updated += 1;
+      });
+    }
+    await db.collection("system").doc("event_seat_counts").set({
+      lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+      eventsScanned: snapshot.size,
+      eventsRecounted: updated,
+    }, {merge: true});
+    return null;
   });
 
 interface ApplyForJobRequest {
@@ -25916,24 +26189,50 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
       if (!eventId || !organizerId || !applicantId || applicantId !== buyerId || organizerId !== sellerId) {
         return reconcile("Event registration is missing required fulfillment data.");
       }
+      const eventRef = db.collection("events").doc(eventId);
       const [eventDoc, applicationDoc] = await Promise.all([
-        transaction.get(db.collection("events").doc(eventId)),
-        transaction.get(db.collection("events").doc(eventId).collection("applications").doc(applicantId)),
+        transaction.get(eventRef),
+        transaction.get(eventRef.collection("applications").doc(applicantId)),
       ]);
-      if (!eventDoc.exists || !isPublicVolunteerListing((eventDoc.data() || {}) as Record<string, unknown>, "EVENT", Date.now())) {
-        return reconcile("Event stopped accepting registrations before payment completed.");
-      }
       if (!applicationDoc.exists || asNonEmptyString(applicationDoc.data()?.stripeCommerceOrderId) !== orderId) {
         return reconcile("Event application no longer matches this checkout.");
       }
+      const eventData = (eventDoc.data() || {}) as Record<string, unknown>;
+      const seats = eventDoc.exists ? await readEventSeatsTaken(transaction, eventRef, eventData) : null;
+      const refundTicket = (reason: string) => {
+        transaction.set(orderRef, {...receipt, status: "REFUND_PENDING", paymentFailureReason: reason}, {merge: true});
+        transaction.set(applicationDoc.ref, {
+          ...receipt,
+          paymentStatus: "REFUND_PENDING",
+          status: "WITHDRAWN",
+          closureReason: reason,
+        }, {merge: true});
+        planRefund(reason, true);
+      };
+      if (!eventDoc.exists || !seats || !isPublicVolunteerListing(eventData, "EVENT", Date.now())) {
+        return refundTicket("Event stopped accepting registrations before payment completed.");
+      }
+      if (EVENT_RELEASED_SEAT_STATUSES.has(String(applicationDoc.data()?.status || "").trim().toUpperCase())) {
+        return refundTicket("Registration was cancelled before payment completed.");
+      }
+      const limit = eventSeatLimit(eventData);
+      if (limit !== null && seats.seatsTaken >= limit) {
+        return refundTicket("Event filled up before payment completed.");
+      }
+      // Paid tickets are confirmed by payment; organizers cannot review them in the app.
       transaction.set(applicationDoc.ref, {
         ...receipt,
-        status: "PENDING",
+        status: "APPROVED",
+        approvedAt: now,
+        approvedBy: "PAYMENT",
+        seatTakenAt: now,
+        lastUpdatedAt: now,
         transactionAmount: amountUsd,
         ticketPrice: amountUsd,
         ownerFeeAmount: platformFeeUsd,
         organizerNetAmount: roundMoney(amountUsd - platformFeeUsd),
       }, {merge: true});
+      transaction.update(eventRef, takeEventSeatUpdate(seats, now));
       recordBuyerReceipt(`Event registration: ${asNonEmptyString(eventDoc.data()?.title) || "Event"}`);
       recordSellerReceipt(`Event registration: ${asNonEmptyString(eventDoc.data()?.title) || "Event"}`);
       if (platformFeeUsd > 0) {
