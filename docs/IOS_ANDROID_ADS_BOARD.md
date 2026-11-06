@@ -78,3 +78,7 @@ alone. Until deployed, iOS hides expired ads but they stay in Firestore.
 1. Firestore rules (`my-firebase-project/firestore.rules`) — needed for edit and resolve on new ads.
 2. Functions (Android) — needed for posting new ads at all: until then, iOS posts fail because the old
    `postSponsoredAd` requires a link and media.
+
+---
+
+Card colours, garage tile grid and screen order: see `IOS_ANDROID_SPONSORED_CARDS.md`.

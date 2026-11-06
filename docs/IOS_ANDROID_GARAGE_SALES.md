@@ -92,3 +92,7 @@ automatically** (before, it needed manual reconciliation).
 1. Firestore rules (fixes Android edit and delete immediately).
 2. Functions: `expireGarageSalesJob` and the updated `requestGarageSalePurchase` plus checkout fulfillment (from the
    Android machine, together with the other pending functions).
+
+---
+
+Card colours, garage tile grid and screen order: see `IOS_ANDROID_SPONSORED_CARDS.md`.
