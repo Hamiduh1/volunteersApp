@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.annotation.Keep
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.chat.fetchBlockedUserIds
+import com.example.volunteersApp.chat.fetchBlockedUserIds
 import com.example.volunteersApp.firebase.CallableFunction
 import com.example.volunteersApp.firebase.FirestoreAppConfigDocument
 import com.example.volunteersApp.firebase.FirestoreCollection
@@ -91,7 +93,14 @@ data class GarageSale(
     val ownerId: String = "",
     val status: String = "",
     val isDeleted: Boolean = false,
-    val timestamp: com.google.firebase.Timestamp? = null
+    val timestamp: com.google.firebase.Timestamp? = null,
+    val saleType: String = "",
+    val startsAt: com.google.firebase.Timestamp? = null,
+    val endsAt: com.google.firebase.Timestamp? = null,
+    val categories: List<String> = emptyList(),
+    val paymentOptions: List<String> = emptyList(),
+    val notes: String = "",
+    val updatedAt: com.google.firebase.Timestamp? = null
 )
 
 @Keep
@@ -393,7 +402,8 @@ class AdvertisementViewModel : ViewModel() {
         postalCode: String,
         latitudeText: String,
         longitudeText: String,
-        mediaUploads: List<GarageMediaUpload>
+        mediaUploads: List<GarageMediaUpload>,
+        schedule: GarageSaleScheduleInput? = null
     ) {
         viewModelScope.launch {
             if (!submitMutex.tryLock()) {
@@ -426,6 +436,7 @@ class AdvertisementViewModel : ViewModel() {
                 latErr?.let { throw IllegalArgumentException(it) }
                 val (longitude, lngErr) = parseOptionalLongitude(longitudeText)
                 lngErr?.let { throw IllegalArgumentException(it) }
+                schedule?.let { garageScheduleValidationError(it) }?.let { throw IllegalArgumentException(it) }
 
                 val uploadedMedia = mutableListOf<GarageSaleMedia>()
                 val totalFiles = mediaUploads.size
@@ -474,6 +485,8 @@ class AdvertisementViewModel : ViewModel() {
                     "ownerId" to currentUser.uid,
                     "timestamp" to FieldValue.serverTimestamp()
                 )
+                schedule?.let { saleData.putAll(garageScheduleFields(it)) }
+                saleData["status"] = "ACTIVE"
 
                 garageSalesCollection.document().set(saleData).await()
                 listingWritten = true
@@ -681,6 +694,7 @@ class AdvertisementViewModel : ViewModel() {
         longitudeText: String,
         retainedExistingMedia: List<GarageSaleMedia>,
         newMediaUploads: List<GarageMediaUpload>,
+        schedule: GarageSaleScheduleInput? = null,
     ) {
         viewModelScope.launch {
             if (!submitMutex.tryLock()) {
@@ -712,6 +726,7 @@ class AdvertisementViewModel : ViewModel() {
                 latErr?.let { throw IllegalArgumentException(it) }
                 val (longitude, lngErr) = parseOptionalLongitude(longitudeText)
                 lngErr?.let { throw IllegalArgumentException(it) }
+                schedule?.let { garageScheduleValidationError(it) }?.let { throw IllegalArgumentException(it) }
 
                 val saleSnapshot = garageSalesCollection.document(cleanSaleId).get().await()
                 require(saleSnapshot.exists()) { "Garage listing not found." }
@@ -719,6 +734,7 @@ class AdvertisementViewModel : ViewModel() {
                 require(isOwnerEditableCommunityDoc(saleData, currentUser.uid)) {
                     "This listing can no longer be edited."
                 }
+                require(!isGarageSaleDocEnded(saleData)) { "This sale has ended and can't be edited." }
 
                 val docMedia = mediaFromGarageSnapshot(saleSnapshot)
                 val docUrls = docMedia.map { it.url }.toSet()
@@ -776,6 +792,7 @@ class AdvertisementViewModel : ViewModel() {
                     },
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
+                schedule?.let { updates.putAll(garageScheduleFields(it)) }
                 garageSalesCollection.document(cleanSaleId).update(updates).await()
                 listingUpdated = true
                 upsertGarageShopProfile(
@@ -839,6 +856,167 @@ class AdvertisementViewModel : ViewModel() {
             }
         }
     }
+
+    private val _garageChatRequestedOwnerIds = MutableStateFlow<Set<String>>(emptySet())
+    val garageChatRequestedOwnerIds: StateFlow<Set<String>> = _garageChatRequestedOwnerIds.asStateFlow()
+
+    /** Rules accept exactly `status: ENDED`, `endsAt: serverTimestamp()` and `updatedAt`. */
+    fun endGarageSale(saleId: String) {
+        viewModelScope.launch {
+            if (!submitMutex.tryLock()) {
+                _errorMessage.value = "Another sponsored action is still running. Please wait."
+                return@launch
+            }
+            try {
+                _errorMessage.value = null
+                _statusMessage.value = null
+                val currentUser = auth.currentUser ?: throw IllegalStateException("You must be logged in.")
+                val cleanSaleId = saleId.trim()
+                require(cleanSaleId.isNotEmpty()) { "Listing ID is missing." }
+                val saleSnapshot = garageSalesCollection.document(cleanSaleId).get().await()
+                require(saleSnapshot.exists()) { "Garage listing not found." }
+                val saleData = saleSnapshot.data ?: emptyMap()
+                require(isOwnerEditableCommunityDoc(saleData, currentUser.uid)) {
+                    "You can only end your own garage sale."
+                }
+                require(!isGarageSaleDocEnded(saleData)) { "This sale has already ended." }
+                garageSalesCollection.document(cleanSaleId).update(
+                    mapOf(
+                        "status" to "ENDED",
+                        "endsAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+                refreshInternal(clearMessages = false)
+                _statusMessage.value = "Sale ended. Buyers no longer see it, and it's removed tomorrow."
+            } catch (error: Exception) {
+                Log.e("AdViewModel", "Error ending garage sale", error)
+                _errorMessage.value = functionOrMessage(error, "Couldn't end this sale.")
+            } finally {
+                submitMutex.unlock()
+            }
+        }
+    }
+
+    fun sendGarageChatInvitation(garageSale: GarageSale) {
+        viewModelScope.launch {
+            _errorMessage.value = null
+            _statusMessage.value = null
+            try {
+                val currentUser = auth.currentUser ?: throw IllegalStateException("You must be logged in.")
+                sendInvitation(
+                    currentUser = currentUser,
+                    recipientId = garageSale.ownerId,
+                    contextLabel = "Garage Sale: ${garageSale.title.ifBlank { "Listing" }}",
+                    duplicateMessage = "Invitation already sent to seller!"
+                )
+                _garageChatRequestedOwnerIds.value = _garageChatRequestedOwnerIds.value + garageSale.ownerId.trim()
+            } catch (error: Exception) {
+                Log.e("AdViewModel", "Failed to send garage sale invitation.", error)
+                _errorMessage.value = functionOrMessage(error, "Failed to send invitation.")
+            }
+        }
+    }
+
+    fun reportGarageSale(garageSale: GarageSale, reason: String, details: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val currentUser = auth.currentUser ?: throw IllegalStateException("You must be logged in.")
+                val cleanReason = reason.trim().ifBlank { "Other" }
+                val cleanDetails = details.trim().take(1_000)
+                db.collection(FirestoreCollection.USER_REPORTS).add(
+                    hashMapOf(
+                        "contentType" to "garage_sale",
+                        "contentId" to garageSale.id,
+                        "path" to "garage_sales/${garageSale.id}",
+                        "reportedUserId" to garageSale.ownerId,
+                        "reportedUserName" to garageSale.shopName.ifBlank { garageSale.contactName },
+                        "eventName" to garageSale.title,
+                        "reason" to cleanReason,
+                        "reasonForReport" to if (cleanDetails.isEmpty()) cleanReason else "$cleanReason: $cleanDetails",
+                        "details" to cleanDetails,
+                        "reportingUserId" to currentUser.uid,
+                        "reportingUserDisplayName" to (currentUser.displayName ?: "Anonymous"),
+                        "status" to "open",
+                        "source" to "android_garage_sale",
+                        "timestamp" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+                _statusMessage.value = "Thanks. Our team will review this sale."
+                onDone(true)
+            } catch (error: Exception) {
+                Log.e("AdViewModel", "Failed to report garage sale.", error)
+                _errorMessage.value = functionOrMessage(error, "Couldn't send the report.")
+                onDone(false)
+            }
+        }
+    }
+
+    /** Most recent sale by the current user, used to pre-fill contact details on a new post. */
+    suspend fun lastOwnGarageSale(): GarageSale? {
+        val uid = auth.currentUser?.uid ?: return null
+        val inMemory = _garageSales.value.filter { it.ownerId == uid }.maxByOrNull { it.timestamp?.seconds ?: 0L }
+        if (inMemory != null) return inMemory
+        return runCatching {
+            garageSalesCollection.whereEqualTo("ownerId", uid).limit(10).get().await()
+                .documents.mapNotNull { it.toObject(GarageSale::class.java) }
+                .maxByOrNull { it.timestamp?.seconds ?: 0L }
+        }.getOrNull()
+    }
+
+    suspend fun isCurrentUserFeeExemptStaff(): Boolean {
+        val uid = auth.currentUser?.uid ?: return false
+        return runCatching {
+            val role = db.collection(FirestoreCollection.USERS).document(uid).get().await()
+                .getString("role")?.trim()?.lowercase(Locale.US).orEmpty()
+            role in com.example.volunteersApp.marketplace.MARKETPLACE_STAFF_ROLES
+        }.getOrDefault(false)
+    }
+
+    /** Stripe Connect onboarding for garage sale card payouts. */
+    suspend fun garagePayoutSetupUrl(): String {
+        val uid = auth.currentUser?.uid ?: throw IllegalStateException("You must be logged in.")
+        val accountPayload = mutableMapOf<String, Any>(
+            "purpose" to "BUSINESS_EARNINGS",
+            "commerceService" to "GARAGE_SALE",
+        )
+        runCatching {
+            db.collection(FirestoreCollection.USERS).document(uid).get().await().getString("country")
+        }.getOrNull()
+            ?.let { com.example.volunteersApp.wallet.normalizeGlobalCountryIso(it) }
+            ?.takeIf { it.isNotBlank() }
+            ?.let { accountPayload["country"] = it }
+        FunctionsClient.callMap(CallableFunction.CREATE_CONNECT_ACCOUNT, accountPayload)
+        val raw = FunctionsClient.callMap(
+            CallableFunction.CREATE_CONNECT_ONBOARDING_LINK,
+            mapOf("platform" to "ANDROID", "purpose" to "BUSINESS_EARNINGS", "commerceService" to "GARAGE_SALE")
+        )
+        val nested = raw?.get("data") as? Map<*, *>
+        val url = listOf("url", "onboardingUrl", "accountLinkUrl", "link").firstNotNullOfOrNull { key ->
+            (raw?.get(key) as? String)?.takeIf { it.isNotBlank() } ?: (nested?.get(key) as? String)?.takeIf { it.isNotBlank() }
+        }
+        return url ?: throw IllegalStateException("Payout setup link not available.")
+    }
+
+    private fun garageScheduleValidationError(schedule: GarageSaleScheduleInput): String? = when {
+        schedule.endsAtMs <= schedule.startsAtMs -> "The sale has to end after it starts."
+        schedule.endsAtMs <= System.currentTimeMillis() -> "The sale's end time is already in the past."
+        schedule.endsAtMs - schedule.startsAtMs > (GARAGE_SALE_MAX_EXTRA_DAYS + 1) * 86_400_000L ->
+            "A sale can run for up to ${GARAGE_SALE_MAX_EXTRA_DAYS + 1} days."
+        schedule.categories.size > GARAGE_SALE_MAX_CATEGORIES -> "Pick up to $GARAGE_SALE_MAX_CATEGORIES categories."
+        schedule.paymentOptions.isEmpty() -> "Choose at least one way to pay."
+        schedule.notes.trim().length > GARAGE_SALE_NOTES_MAX -> "Notes must be $GARAGE_SALE_NOTES_MAX characters or fewer."
+        else -> null
+    }
+
+    private fun garageScheduleFields(schedule: GarageSaleScheduleInput): Map<String, Any?> = mapOf(
+        "saleType" to schedule.saleType.wire,
+        "startsAt" to com.google.firebase.Timestamp(java.util.Date(schedule.startsAtMs)),
+        "endsAt" to com.google.firebase.Timestamp(java.util.Date(schedule.endsAtMs)),
+        "categories" to schedule.categories.distinct().map { it.wire },
+        "paymentOptions" to schedule.paymentOptions.distinct().map { it.wire },
+        "notes" to schedule.notes.trim()
+    )
 
     fun setGarageShopOpen(isOpen: Boolean) {
         viewModelScope.launch {
@@ -916,6 +1094,7 @@ class AdvertisementViewModel : ViewModel() {
                 require(saleSnapshot.exists()) { "Garage sale listing not found." }
                 val saleData = saleSnapshot.data ?: emptyMap()
                 require(isActiveCommunityDoc(saleData)) { "This listing is no longer available." }
+                require(!isGarageSaleDocEnded(saleData)) { "This garage sale has ended." }
                 val saleOwnerId = saleSnapshot.getString("ownerId").orEmpty().trim()
                 require(saleOwnerId == cleanSellerId) { "Seller information does not match this listing." }
                 val shopProfile = _garageShopProfiles.value[saleOwnerId]
@@ -1144,10 +1323,12 @@ class AdvertisementViewModel : ViewModel() {
             .limit(120)
             .get()
             .await()
+        val blockedOwnerIds = runCatching { db.fetchBlockedUserIds(currentUid) }.getOrDefault(emptySet())
 
         return snapshot.documents.mapNotNull { document ->
             val data = document.data ?: return@mapNotNull null
             if (!isVisibleGarageSale(data, currentUid)) return@mapNotNull null
+            if ((data["ownerId"] as? String).orEmpty().trim() in blockedOwnerIds) return@mapNotNull null
             document.toObject(GarageSale::class.java)
         }
     }
@@ -1224,6 +1405,7 @@ class AdvertisementViewModel : ViewModel() {
             return normalizedSponsoredStatus(data["status"] as? String) !in setOf("DELETED", "REMOVED")
         }
         if (!isActiveCommunityDoc(data)) return false
+        if (isGarageSaleDocEnded(data)) return false
         val shopProfile = _garageShopProfiles.value[ownerId]
         return shopProfile?.isOpen ?: true
     }

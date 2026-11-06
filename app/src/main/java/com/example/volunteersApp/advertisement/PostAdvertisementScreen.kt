@@ -597,7 +597,7 @@ internal fun garagePublishConfirmDetail(
 }
 
 @Composable
-private fun SponsoredSubmittingOverlay(
+internal fun SponsoredSubmittingOverlay(
     progress: Float?,
     canCancelUpload: Boolean,
     onCancel: () -> Unit,
@@ -658,7 +658,7 @@ private fun SponsoredSubmittingOverlay(
     }
 }
 
-private fun resolveFileName(context: android.content.Context, uri: Uri): String {
+internal fun resolveFileName(context: android.content.Context, uri: Uri): String {
     val resolver = context.contentResolver
     val cursor = resolver.query(uri, null, null, null, null)
     val nameIndex = cursor?.getColumnIndex(OpenableColumns.DISPLAY_NAME) ?: -1

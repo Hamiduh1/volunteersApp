@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -133,10 +136,18 @@ fun SponsoredShopProfileScreen(
     onEditSale: (GarageSale) -> Unit,
     onDeleteSale: (GarageSale) -> Unit,
     onChat: (GarageSale) -> Unit,
+    onOpenSale: (GarageSale) -> Unit = {},
 ) {
-    val sales = garageSales.filter { sale ->
-        sale.ownerId.ifBlank { "__anon_${sale.contactName}" } == ownerKey
-    }.sortedByDescending { it.timestamp?.toDate()?.time ?: 0L }
+    androidx.activity.compose.BackHandler(onBack = onNavigateUp)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val savedIds = GarageSavedSales.ids(context).collectAsState().value.orEmpty()
+    val nowMs = remember { System.currentTimeMillis() }
+    val sales = sortGarageSales(
+        garageSales.filter { sale ->
+            sale.ownerId.ifBlank { "__anon_${sale.contactName}" } == ownerKey
+        },
+        nowMs
+    )
     val isOwner = ownerKey == currentUserId
     val isOpen = shopProfile?.isOpen ?: true
 
@@ -180,7 +191,7 @@ fun SponsoredShopProfileScreen(
                             Icon(Icons.Default.Storefront, contentDescription = null, tint = SponsoredA11yPalette.accentGarage)
                             Text("Shop profile", style = MaterialTheme.typography.labelLarge, color = SponsoredA11yPalette.accentGarage)
                         }
-                        Text("${sales.size} listing(s)", fontWeight = FontWeight.SemiBold)
+                        Text(garageShopSubtitle(sales, nowMs), fontWeight = FontWeight.SemiBold)
                         Text(
                             text = if (isOpen) "Open — buyers can start checkout." else "Closed — checkout is disabled.",
                             style = MaterialTheme.typography.bodySmall,
@@ -208,18 +219,14 @@ fun SponsoredShopProfileScreen(
                     Text("No listings for this shop.", color = SponsoredA11yPalette.textSecondary)
                 }
             } else {
-                items(sales, key = { stableGarageSaleKey(it) }) { sale ->
-                    GarageSaleCard(
-                        garageSale = sale,
-                        isOwner = isOwner,
-                        shopIsOpen = isOpen,
-                        publicFees = publicFees,
-                        feeSettingsUnavailable = feeSettingsUnavailable,
-                        viewModel = viewModel,
-                        onEdit = { onEditSale(sale) },
-                        onDelete = { onDeleteSale(sale) },
-                        onChat = { onChat(sale) },
-                        showSellerLine = false
+                itemsIndexed(sales, key = { _, sale -> stableGarageSaleKey(sale) }) { index, sale ->
+                    GarageSaleFeedCard(
+                        sale = sale,
+                        nowMs = nowMs,
+                        distanceText = null,
+                        isSaved = sale.id in savedIds,
+                        onClick = { onOpenSale(sale) },
+                        badge = if (index == 0 && sale.timing(nowMs) != GarageSaleTiming.Ended) "Next up" else null
                     )
                 }
             }

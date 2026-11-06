@@ -1,5 +1,16 @@
 package com.example.volunteersApp.advertisement
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -270,6 +281,20 @@ fun AdvertisementFeatureScreen(
     var advertiserProfileTitle by remember { mutableStateOf("") }
     var shopProfileOwnerKey by remember { mutableStateOf<String?>(null) }
     var shopProfileTitle by remember { mutableStateOf("") }
+    var garageDetailSaleId by rememberSaveable { mutableStateOf<String?>(null) }
+    var awaitingAdCheckoutReturn by remember { mutableStateOf(false) }
+    var showAdCheckoutReturn by remember { mutableStateOf(false) }
+    val adCheckoutLifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(adCheckoutLifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && awaitingAdCheckoutReturn) {
+                awaitingAdCheckoutReturn = false
+                showAdCheckoutReturn = true
+            }
+        }
+        adCheckoutLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { adCheckoutLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val statusMessage by viewModel.statusMessage.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
@@ -293,6 +318,7 @@ fun AdvertisementFeatureScreen(
                 is AdScreenEvent.OpenStripeCheckout -> {
                     runCatching {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(event.url)))
+                        awaitingAdCheckoutReturn = true
                     }.onFailure {
                         Toast.makeText(
                             context,
@@ -347,11 +373,10 @@ fun AdvertisementFeatureScreen(
         }
 
         showCreateGarageSale -> {
-            PostGarageSaleScreen(
+            GarageSaleEditorScreen(
                 existingSale = editingGarageSale,
                 viewModel = viewModel,
                 publicFees = publicFees,
-                feeSettingsUnavailable = feeSettingsUnavailable,
                 onNavigateUp = {
                     showCreateGarageSale = false
                     editingGarageSale = null
@@ -375,6 +400,32 @@ fun AdvertisementFeatureScreen(
             )
         }
 
+        garageDetailSaleId != null -> {
+            val garageSales by viewModel.garageSales.collectAsState()
+            val shopProfiles by viewModel.garageShopProfiles.collectAsState()
+            val detailSale = garageSales.firstOrNull { it.id == garageDetailSaleId }
+            if (detailSale == null) {
+                LaunchedEffect(garageDetailSaleId) { garageDetailSaleId = null }
+            } else {
+                val profile = shopProfiles[detailSale.ownerId]
+                GarageSaleDetailScreen(
+                    sale = detailSale,
+                    shopTitle = profile?.shopName?.trim()?.takeIf { it.isNotBlank() }
+                        ?: detailSale.shopName.trim().takeIf { it.isNotBlank() }
+                        ?: detailSale.contactName.trim().ifBlank { "the seller" },
+                    isOwner = detailSale.ownerId == FirebaseAuth.getInstance().currentUser?.uid.orEmpty(),
+                    shopIsOpen = profile?.isOpen ?: true,
+                    publicFees = publicFees,
+                    viewModel = viewModel,
+                    onNavigateUp = { garageDetailSaleId = null },
+                    onEdit = {
+                        editingGarageSale = detailSale
+                        showCreateGarageSale = true
+                    }
+                )
+            }
+        }
+
         shopProfileOwnerKey != null -> {
             val garageSales by viewModel.garageSales.collectAsState()
             val shopProfiles by viewModel.garageShopProfiles.collectAsState()
@@ -393,7 +444,8 @@ fun AdvertisementFeatureScreen(
                     showCreateGarageSale = true
                 },
                 onDeleteSale = { garageToDelete = it },
-                onChat = viewModel::sendChatInvitation
+                onChat = viewModel::sendChatInvitation,
+                onOpenSale = { garageDetailSaleId = it.id }
             )
         }
 
@@ -424,9 +476,42 @@ fun AdvertisementFeatureScreen(
                 onOpenShopProfile = { ownerKey, title ->
                     shopProfileOwnerKey = ownerKey
                     shopProfileTitle = title
-                }
+                },
+                onOpenGarageSale = { garageDetailSaleId = it.id }
             )
         }
+    }
+
+    if (showAdCheckoutReturn) {
+        AlertDialog(
+            onDismissRequest = { showAdCheckoutReturn = false },
+            title = { Text("Ad checkout") },
+            text = {
+                Text("If you paid, your ad goes live once Stripe confirms. If you cancelled, you weren't charged and nothing was posted.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAdCheckoutReturn = false
+                    viewModel.refresh()
+                }) { Text("OK") }
+            }
+        )
+    }
+
+    if (showAdCheckoutReturn) {
+        AlertDialog(
+            onDismissRequest = { showAdCheckoutReturn = false },
+            title = { Text("Ad checkout") },
+            text = {
+                Text("If you paid, your ad goes live once Stripe confirms. If you cancelled, you weren't charged and nothing was posted.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAdCheckoutReturn = false
+                    viewModel.refresh()
+                }) { Text("OK") }
+            }
+        )
     }
 
     if (garageToDelete != null) {
@@ -494,7 +579,9 @@ private fun SponsoredHubScreen(
     onDeleteGarageClicked: (GarageSale) -> Unit,
     onOpenAdvertiserProfile: (ownerKey: String, title: String) -> Unit,
     onOpenShopProfile: (ownerKey: String, title: String) -> Unit,
+    onOpenGarageSale: (GarageSale) -> Unit = {},
 ) {
+    val context = LocalContext.current
     val advertisements by viewModel.advertisements.collectAsState()
     val garageSales by viewModel.garageSales.collectAsState()
     val garageShopProfiles by viewModel.garageShopProfiles.collectAsState()
@@ -517,13 +604,99 @@ private fun SponsoredHubScreen(
     val filteredAds = remember(advertisements, adSearchQuery) {
         advertisements.filter { it.matchesSponsoredSearch(adSearchQuery) }
     }
-    val filteredGarage = remember(garageSales, garageSearchQuery) {
-        garageSales.filter { it.matchesGarageSearch(garageSearchQuery) }
+    var garageDayFilter by rememberSaveable { mutableStateOf(GarageDayFilter.ALL) }
+    var garageNearMe by rememberSaveable { mutableStateOf(false) }
+    var garageUserLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var garageNowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            garageNowMs = System.currentTimeMillis()
+        }
+    }
+    val garageSavedIds = GarageSavedSales.ids(context).collectAsState().value.orEmpty()
+    val garageLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    val hasGarageLocationPermission = {
+        listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            .any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+    }
+    @SuppressLint("MissingPermission")
+    fun fetchGarageLocation(enableNearMe: Boolean) {
+        val apply: (android.location.Location?) -> Boolean = { location ->
+            if (location != null) {
+                garageUserLocation = location.latitude to location.longitude
+                if (enableNearMe) garageNearMe = true
+            }
+            location != null
+        }
+        garageLocationClient.lastLocation.addOnSuccessListener { last ->
+            if (!apply(last)) {
+                garageLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, CancellationTokenSource().token)
+                    .addOnSuccessListener { current ->
+                        if (!apply(current) && enableNearMe) {
+                            Toast.makeText(context, "Couldn't get your location right now.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+            }
+        }
+    }
+    val garageLocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.any { it }) {
+            fetchGarageLocation(enableNearMe = true)
+        } else {
+            Toast.makeText(context, "Location is off, so sales can't be sorted by distance.", Toast.LENGTH_SHORT).show()
+        }
+    }
+    LaunchedEffect(selectedSection) {
+        if (selectedSection == AdSection.GarageSales && garageUserLocation == null && hasGarageLocationPermission()) {
+            fetchGarageLocation(enableNearMe = false)
+        }
+    }
+    val onGarageNearMeToggle: () -> Unit = {
+        when {
+            garageNearMe -> garageNearMe = false
+            garageUserLocation != null -> garageNearMe = true
+            hasGarageLocationPermission() -> fetchGarageLocation(enableNearMe = true)
+            else -> garageLocationPermissionLauncher.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+        }
+    }
+    val garageSearchMatches = remember(garageSales, garageSearchQuery) {
+        garageSales.filter { it.matchesGarageSaleQuery(garageSearchQuery) }
+    }
+    val garageDayCounts = remember(garageSearchMatches, garageSavedIds, garageNowMs) {
+        GarageDayFilter.entries.associateWith { filter ->
+            garageSearchMatches.count { it.matchesDayFilter(filter, garageSavedIds, garageNowMs) }
+        }
+    }
+    val filteredGarage = remember(
+        garageSearchMatches, garageDayFilter, garageSavedIds, garageNowMs, garageNearMe, garageUserLocation
+    ) {
+        val sorted = sortGarageSales(
+            garageSearchMatches.filter { it.matchesDayFilter(garageDayFilter, garageSavedIds, garageNowMs) },
+            garageNowMs
+        )
+        val location = garageUserLocation
+        if (garageNearMe && location != null) {
+            sorted.sortedBy { it.distanceKmFrom(location) ?: Double.MAX_VALUE }
+        } else {
+            sorted
+        }
+    }
+    val garageDistanceFor: (GarageSale) -> String? = { sale ->
+        garageDistanceLabel(sale.distanceKmFrom(garageUserLocation))
     }
     val adCollections = remember(filteredAds) { groupedAdvertisementCollections(filteredAds) }
     val garageCollections = remember(filteredGarage, garageShopProfiles) {
+        val order = filteredGarage.withIndex().associate { (index, sale) -> stableGarageSaleKey(sale) to index }
         groupedGarageCollections(filteredGarage, garageShopProfiles)
+            .map { group -> group.copy(sales = group.sales.sortedBy { order[stableGarageSaleKey(it)] ?: Int.MAX_VALUE }) }
+            .sortedBy { group -> group.sales.firstOrNull()?.let { order[stableGarageSaleKey(it)] } ?: Int.MAX_VALUE }
     }
+    val discoverGarageRows = remember(filteredGarage) { filteredGarage.chunked(2) }
     val discoverAds = remember(filteredAds) { filteredAds.sortedByDescending { it.sortTimeMs() } }
     val discoverGarage = remember(filteredGarage) { filteredGarage.sortedByDescending { it.sortTimeMs() } }
     val adLazyEntries = remember(adCollections) { flattenAdsForLazyList(adCollections) }
@@ -737,7 +910,7 @@ private fun SponsoredHubScreen(
                             modifier = Modifier.padding(horizontal = 16.dp),
                             query = garageSearchQuery,
                             onQueryChange = { garageSearchQuery = it },
-                            placeholder = "Search garage sales..."
+                            placeholder = "Search sales, area, type or category..."
                         )
                     }
                     item {
@@ -745,6 +918,16 @@ private fun SponsoredHubScreen(
                             modifier = Modifier.padding(horizontal = 16.dp),
                             selected = garageBrowseLayout,
                             onSelected = { garageBrowseLayout = it }
+                        )
+                    }
+                    item {
+                        GarageDayFilterRow(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            selected = garageDayFilter,
+                            counts = garageDayCounts,
+                            nearMe = garageNearMe,
+                            onSelected = { garageDayFilter = it },
+                            onNearMeToggle = onGarageNearMeToggle
                         )
                     }
                     item {
@@ -759,49 +942,67 @@ private fun SponsoredHubScreen(
                             Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                                 EmptySectionCard(
                                     icon = Icons.Default.Storefront,
-                                    title = if (garageSearchQuery.isNotBlank()) "No matching garage sales" else "No garage sales available",
-                                    body = if (garageSearchQuery.isNotBlank()) {
-                                        "Try another search."
-                                    } else {
-                                        "Post your first garage sale."
+                                    title = when {
+                                        garageSearchQuery.isNotBlank() -> "No matching garage sales"
+                                        garageDayFilter == GarageDayFilter.SAVED -> "No saved sales yet"
+                                        garageDayFilter != GarageDayFilter.ALL -> "No sales ${garageDayFilter.label.lowercase(Locale.getDefault())}"
+                                        else -> "No garage sales available"
                                     },
-                                    actionLabel = if (garageSearchQuery.isNotBlank()) "Clear search" else "Create Garage Sale",
-                                    onAction = if (garageSearchQuery.isNotBlank()) {
-                                        { garageSearchQuery = "" }
-                                    } else {
-                                        onAddGarageClicked
+                                    body = when {
+                                        garageSearchQuery.isNotBlank() -> "Try another search."
+                                        garageDayFilter == GarageDayFilter.SAVED -> "Tap the bookmark on a sale to keep it here."
+                                        garageDayFilter != GarageDayFilter.ALL -> "Try another day."
+                                        else -> "Post your first garage sale."
+                                    },
+                                    actionLabel = when {
+                                        garageSearchQuery.isNotBlank() -> "Clear search"
+                                        garageDayFilter != GarageDayFilter.ALL -> "Show all"
+                                        else -> "Create Garage Sale"
+                                    },
+                                    onAction = when {
+                                        garageSearchQuery.isNotBlank() -> { { garageSearchQuery = "" } }
+                                        garageDayFilter != GarageDayFilter.ALL -> { { garageDayFilter = GarageDayFilter.ALL } }
+                                        else -> onAddGarageClicked
                                     }
                                 )
                             }
                         }
                     } else if (garageBrowseLayout == GarageBrowseLayout.Discover) {
-                        items(discoverGarage, key = { stableGarageSaleKey(it) }) { sale ->
-                            val shopOpen = garageShopProfiles[sale.ownerId]?.isOpen ?: true
-                            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                                GarageSaleCard(
-                                    garageSale = sale,
-                                    isOwner = sale.ownerId == currentUserId,
-                                    shopIsOpen = shopOpen,
-                                    publicFees = publicFees,
-                                    feeSettingsUnavailable = feeSettingsUnavailable,
-                                    viewModel = viewModel,
-                                    onEdit = { onEditGarageClicked(sale) },
-                                    onDelete = { onDeleteGarageClicked(sale) },
-                                    onChat = { viewModel.sendChatInvitation(sale) },
-                                    showSellerLine = true
-                                )
-                            }
+                        items(discoverGarageRows, key = { row -> row.joinToString("|") { stableGarageSaleKey(it) } }) { row ->
+                            GarageDiscoverGridRow(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                sales = row,
+                                nowMs = garageNowMs,
+                                distanceFor = garageDistanceFor,
+                                savedIds = garageSavedIds,
+                                onOpen = onOpenGarageSale
+                            )
                         }
                     } else {
-                        items(garageCollections, key = { it.ownerKey }) { collection ->
-                            GarageShopBrowseCard(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                collection = collection,
-                                isOpen = garageShopProfiles[collection.ownerKey]?.isOpen ?: true,
-                                onOpen = {
-                                    onOpenShopProfile(collection.ownerKey, collection.displayTitle)
-                                }
-                            )
+                        garageCollections.forEach { collection ->
+                            item(key = "shop_${collection.ownerKey}") {
+                                GarageShopCard(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    title = collection.displayTitle,
+                                    subtitle = garageShopSubtitle(collection.sales, garageNowMs),
+                                    isOpen = garageShopProfiles[collection.ownerKey]?.isOpen ?: true,
+                                    onOpen = { onOpenShopProfile(collection.ownerKey, collection.displayTitle) }
+                                )
+                            }
+                            itemsIndexed(
+                                collection.sales,
+                                key = { _, sale -> "shop_${collection.ownerKey}_${stableGarageSaleKey(sale)}" }
+                            ) { index, sale ->
+                                GarageSaleFeedCard(
+                                    modifier = Modifier.padding(start = 28.dp, end = 16.dp),
+                                    sale = sale,
+                                    nowMs = garageNowMs,
+                                    distanceText = garageDistanceFor(sale),
+                                    isSaved = sale.id in garageSavedIds,
+                                    onClick = { onOpenGarageSale(sale) },
+                                    badge = if (index == 0 && sale.timing(garageNowMs) != GarageSaleTiming.Ended) "Next up" else null
+                                )
+                            }
                         }
                     }
                 }

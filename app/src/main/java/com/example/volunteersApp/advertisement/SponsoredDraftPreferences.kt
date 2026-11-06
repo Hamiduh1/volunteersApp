@@ -28,6 +28,14 @@ private object Keys {
     val garagePostal = stringPreferencesKey("garage_postal")
     val garageLatitude = stringPreferencesKey("garage_latitude")
     val garageLongitude = stringPreferencesKey("garage_longitude")
+    val garageSaleType = stringPreferencesKey("garage_sale_type")
+    val garageFirstDayMs = stringPreferencesKey("garage_first_day_ms")
+    val garageLastDayMs = stringPreferencesKey("garage_last_day_ms")
+    val garageOpensMinutes = stringPreferencesKey("garage_opens_minutes")
+    val garageClosesMinutes = stringPreferencesKey("garage_closes_minutes")
+    val garageCategories = stringPreferencesKey("garage_categories")
+    val garagePaymentOptions = stringPreferencesKey("garage_payment_options")
+    val garageNotes = stringPreferencesKey("garage_notes")
 }
 
 data class NewAdDraft(
@@ -49,7 +57,15 @@ data class GarageSaleDraft(
     val state: String,
     val postalCode: String,
     val latitude: String,
-    val longitude: String
+    val longitude: String,
+    val saleType: String = "",
+    val firstDayMs: String = "",
+    val lastDayMs: String = "",
+    val opensMinutes: String = "",
+    val closesMinutes: String = "",
+    val categories: String = "",
+    val paymentOptions: String = "",
+    val notes: String = ""
 )
 
 suspend fun Context.readNewAdDraft(): NewAdDraft? {
@@ -94,11 +110,20 @@ suspend fun Context.readGarageSaleDraft(): GarageSaleDraft? {
         state = p[Keys.garageState].orEmpty(),
         postalCode = p[Keys.garagePostal].orEmpty(),
         latitude = p[Keys.garageLatitude].orEmpty(),
-        longitude = p[Keys.garageLongitude].orEmpty()
+        longitude = p[Keys.garageLongitude].orEmpty(),
+        saleType = p[Keys.garageSaleType].orEmpty(),
+        firstDayMs = p[Keys.garageFirstDayMs].orEmpty(),
+        lastDayMs = p[Keys.garageLastDayMs].orEmpty(),
+        opensMinutes = p[Keys.garageOpensMinutes].orEmpty(),
+        closesMinutes = p[Keys.garageClosesMinutes].orEmpty(),
+        categories = p[Keys.garageCategories].orEmpty(),
+        paymentOptions = p[Keys.garagePaymentOptions].orEmpty(),
+        notes = p[Keys.garageNotes].orEmpty()
     )
     val allBlank = listOf(
         draft.title, draft.description, draft.shopName, draft.contactName, draft.contactPhone, draft.contactEmail,
-        draft.address, draft.city, draft.state, draft.postalCode, draft.latitude, draft.longitude
+        draft.address, draft.city, draft.state, draft.postalCode, draft.latitude, draft.longitude,
+        draft.categories, draft.notes
     ).all { it.isBlank() }
     return if (allBlank) null else draft
 }
@@ -117,6 +142,14 @@ suspend fun Context.writeGarageSaleDraft(draft: GarageSaleDraft) {
         prefs[Keys.garagePostal] = draft.postalCode
         prefs[Keys.garageLatitude] = draft.latitude
         prefs[Keys.garageLongitude] = draft.longitude
+        prefs[Keys.garageSaleType] = draft.saleType
+        prefs[Keys.garageFirstDayMs] = draft.firstDayMs
+        prefs[Keys.garageLastDayMs] = draft.lastDayMs
+        prefs[Keys.garageOpensMinutes] = draft.opensMinutes
+        prefs[Keys.garageClosesMinutes] = draft.closesMinutes
+        prefs[Keys.garageCategories] = draft.categories
+        prefs[Keys.garagePaymentOptions] = draft.paymentOptions
+        prefs[Keys.garageNotes] = draft.notes
     }
 }
 
@@ -134,5 +167,13 @@ suspend fun Context.clearGarageSaleDraft() {
         prefs.remove(Keys.garagePostal)
         prefs.remove(Keys.garageLatitude)
         prefs.remove(Keys.garageLongitude)
+        prefs.remove(Keys.garageSaleType)
+        prefs.remove(Keys.garageFirstDayMs)
+        prefs.remove(Keys.garageLastDayMs)
+        prefs.remove(Keys.garageOpensMinutes)
+        prefs.remove(Keys.garageClosesMinutes)
+        prefs.remove(Keys.garageCategories)
+        prefs.remove(Keys.garagePaymentOptions)
+        prefs.remove(Keys.garageNotes)
     }
 }

@@ -57,6 +57,7 @@ internal fun validateOptionalAdPhone(raw: String): String? {
 internal fun validateOptionalGaragePhone(raw: String): String? {
     val t = raw.trim()
     if (t.isEmpty()) return null
+    if (countDigits(t) > 15) return "Phone can have at most 15 digits."
     return if (countDigits(t) >= 7) null else "Phone must include at least 7 digits, or leave it blank."
 }
 
