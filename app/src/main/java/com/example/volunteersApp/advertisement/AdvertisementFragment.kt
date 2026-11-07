@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
@@ -1029,37 +1030,45 @@ private fun GarageBrowseModeSelector(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = SponsoredA11yPalette.cardSurface,
+        shape = RoundedCornerShape(14.dp),
+        color = SponsoredA11yPalette.textPrimary.copy(alpha = 0.06f),
         border = BorderStroke(1.dp, SponsoredA11yPalette.cardBorder)
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = "Browse garage sales",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = SponsoredA11yPalette.textPrimary
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GarageBrowseModeOption(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Default.Search,
-                    title = "Discover",
-                    detail = "Individual listings",
-                    selected = selected == GarageBrowseLayout.Discover,
-                    onClick = { onSelected(GarageBrowseLayout.Discover) }
-                )
-                GarageBrowseModeOption(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Default.Storefront,
-                    title = "Shops",
-                    detail = "Seller storefronts",
-                    selected = selected == GarageBrowseLayout.Shops,
-                    onClick = { onSelected(GarageBrowseLayout.Shops) }
-                )
+        Row(modifier = Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf(
+                Triple(GarageBrowseLayout.Shops, "Shops", Icons.Default.Storefront),
+                Triple(GarageBrowseLayout.Discover, "Discover", Icons.Default.GridView),
+            ).forEach { (layout, label, icon) ->
+                val isSelected = selected == layout
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = "$label view" + if (isSelected) ", selected" else "" },
+                    onClick = { onSelected(layout) },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isSelected) SponsoredA11yPalette.cardSurface else Color.Transparent,
+                    shadowElevation = if (isSelected) 2.dp else 0.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = if (isSelected) SponsoredA11yPalette.textPrimary else SponsoredA11yPalette.textSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) SponsoredA11yPalette.textPrimary else SponsoredA11yPalette.textSecondary
+                        )
+                    }
+                }
             }
         }
     }
@@ -1205,8 +1214,8 @@ private fun SponsoredBottomCapsuleBar(
                 modifier = Modifier.weight(1f),
                 label = "Garage sale",
                 icon = Icons.Default.Storefront,
-                gradient = listOf(SponsoredA11yPalette.accentGarage, SponsoredA11yPalette.accentGarageLight),
-                contentColor = SponsoredA11yPalette.textPrimary,
+                gradient = SponsoredA11yPalette.garageCapsuleGradient,
+                contentColor = Color.White,
                 onClick = onGarageSale
             )
         }

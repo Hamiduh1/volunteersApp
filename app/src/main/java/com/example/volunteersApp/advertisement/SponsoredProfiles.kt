@@ -191,6 +191,7 @@ fun SponsoredShopProfileScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     color = SponsoredA11yPalette.cardSurface,
+                    shadowElevation = 2.dp,
                     border = androidx.compose.foundation.BorderStroke(1.dp, SponsoredA11yPalette.cardBorder)
                 ) {
                     Column(

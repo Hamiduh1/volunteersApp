@@ -65,6 +65,18 @@ internal fun GarageSaleType.icon(): ImageVector = when (this) {
     GarageSaleType.COMMUNITY -> Icons.Default.Groups
 }
 
+/** Saturated so covers stay bright; the wallet gold text colour turns brown in gradients. */
+internal fun GarageSaleType.tint(): Color = when (this) {
+    GarageSaleType.GARAGE -> Color(0xFFEA580C)
+    GarageSaleType.YARD -> Color(0xFF16A34A)
+    GarageSaleType.MOVING -> Color(0xFF2563EB)
+    GarageSaleType.ESTATE -> Color(0xFF7C3AED)
+    GarageSaleType.MULTI_FAMILY -> Color(0xFFDB2777)
+    GarageSaleType.COMMUNITY -> Color(0xFF0D9488)
+}
+
+internal val GarageSelectedChip = Color(0xFF172033)
+
 internal fun GarageSale.thumbnailUrl(): String? = media.firstOrNull { m ->
     val url = m.url.lowercase(Locale.US)
     m.url.isNotBlank() && (m.type.equals("image", ignoreCase = true) ||
@@ -74,11 +86,12 @@ internal fun GarageSale.thumbnailUrl(): String? = media.firstOrNull { m ->
 @Composable
 internal fun GarageCalendarBlock(sale: GarageSale, nowMs: Long, modifier: Modifier = Modifier) {
     val dayMs = sale.calendarDayMs(nowMs)
+    val typeColor = sale.saleTypeValue.tint()
     Surface(
         modifier = modifier.size(56.dp),
         shape = RoundedCornerShape(12.dp),
-        color = SponsoredA11yPalette.garageChipBackground,
-        border = BorderStroke(1.dp, SponsoredA11yPalette.garageChipBorder)
+        color = typeColor.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, typeColor.copy(alpha = 0.28f))
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -89,7 +102,7 @@ internal fun GarageCalendarBlock(sale: GarageSale, nowMs: Long, modifier: Modifi
                 Icon(
                     sale.saleTypeValue.icon(),
                     contentDescription = sale.saleTypeValue.label,
-                    tint = SponsoredA11yPalette.accentGarage,
+                    tint = typeColor,
                     modifier = Modifier.size(26.dp)
                 )
             } else {
@@ -97,7 +110,7 @@ internal fun GarageCalendarBlock(sale: GarageSale, nowMs: Long, modifier: Modifi
                     SimpleDateFormat("MMM", Locale.getDefault()).format(Date(dayMs)).uppercase(Locale.getDefault()),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
-                    color = SponsoredA11yPalette.accentGarage
+                    color = typeColor
                 )
                 Text(
                     SimpleDateFormat("d", Locale.getDefault()).format(Date(dayMs)),
@@ -156,6 +169,7 @@ internal fun GarageSaleFeedCard(
         onClick = onClick,
         shape = RoundedCornerShape(18.dp),
         color = SponsoredA11yPalette.cardSurface,
+        shadowElevation = 2.dp,
         border = BorderStroke(1.dp, SponsoredA11yPalette.cardBorder)
     ) {
         Row(
@@ -172,7 +186,7 @@ internal fun GarageSaleFeedCard(
                             badge,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = SponsoredA11yPalette.accentGarage
+                            color = sale.saleTypeValue.tint()
                         )
                     }
                 }
@@ -221,20 +235,25 @@ internal fun GarageSaleFeedCard(
                             contentScale = ContentScale.Crop
                         )
                     } else {
-                        Icon(sale.saleTypeValue.icon(), contentDescription = null, tint = SponsoredA11yPalette.accentGarage)
+                        Icon(sale.saleTypeValue.icon(), contentDescription = null, tint = sale.saleTypeValue.tint())
                     }
                 }
                 if (isSaved) {
-                    Icon(
-                        Icons.Default.Bookmark,
-                        contentDescription = "Saved",
-                        tint = SponsoredA11yPalette.accentGarage,
+                    Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(2.dp)
-                            .size(18.dp)
-                            .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(6.dp))
-                    )
+                            .padding(3.dp)
+                            .size(20.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Bookmark,
+                            contentDescription = "Saved",
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
                 }
             }
         }
@@ -256,14 +275,18 @@ internal fun GarageSaleDiscoverTile(
         onClick = onClick,
         shape = RoundedCornerShape(16.dp),
         color = SponsoredA11yPalette.cardSurface,
+        shadowElevation = 2.dp,
         border = BorderStroke(1.dp, SponsoredA11yPalette.cardBorder)
     ) {
         Column {
+            val typeColor = sale.saleTypeValue.tint()
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .background(SponsoredA11yPalette.cardSurfaceSoft),
+                    .background(
+                        Brush.linearGradient(listOf(typeColor.copy(alpha = 0.75f), typeColor.copy(alpha = 0.40f)))
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 val thumb = sale.thumbnailUrl()
@@ -278,7 +301,7 @@ internal fun GarageSaleDiscoverTile(
                     Icon(
                         sale.saleTypeValue.icon(),
                         contentDescription = null,
-                        tint = SponsoredA11yPalette.accentGarage,
+                        tint = Color.White,
                         modifier = Modifier.size(40.dp)
                     )
                 }
@@ -286,16 +309,21 @@ internal fun GarageSaleDiscoverTile(
                     GarageStatusBadge(timing, nowMs, compact = true)
                 }
                 if (isSaved) {
-                    Icon(
-                        Icons.Default.Bookmark,
-                        contentDescription = "Saved",
-                        tint = SponsoredA11yPalette.accentGarage,
+                    Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(6.dp)
-                            .size(20.dp)
-                            .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(6.dp))
-                    )
+                            .size(26.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Bookmark,
+                            contentDescription = "Saved",
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
                 }
             }
             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -333,25 +361,47 @@ internal fun GarageDayFilterRow(
         modifier = modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        val chipColors = FilterChipDefaults.filterChipColors(
+            containerColor = SponsoredA11yPalette.cardSurface,
+            labelColor = SponsoredA11yPalette.textPrimary,
+            iconColor = SponsoredA11yPalette.textPrimary,
+            selectedContainerColor = GarageSelectedChip,
+            selectedLabelColor = Color.White,
+            selectedLeadingIconColor = Color.White
+        )
         GarageDayFilter.entries.forEach { filter ->
+            val isSelected = selected == filter
             FilterChip(
-                selected = selected == filter,
+                selected = isSelected,
                 onClick = { onSelected(filter) },
-                label = { Text("${filter.label} ${counts[filter] ?: 0}") },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = SponsoredA11yPalette.garageChipBackground,
-                    selectedLabelColor = SponsoredA11yPalette.textPrimary
+                label = {
+                    Text(
+                        "${filter.label} ${counts[filter] ?: 0}",
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                },
+                shape = RoundedCornerShape(999.dp),
+                colors = chipColors,
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = isSelected,
+                    borderColor = SponsoredA11yPalette.cardBorder,
+                    selectedBorderColor = GarageSelectedChip
                 )
             )
         }
         FilterChip(
             selected = nearMe,
             onClick = onNearMeToggle,
-            label = { Text("Near me") },
+            label = { Text("Near me", fontWeight = if (nearMe) FontWeight.Bold else FontWeight.Medium) },
             leadingIcon = { Icon(Icons.Default.NearMe, contentDescription = null, modifier = Modifier.size(16.dp)) },
-            colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = SponsoredA11yPalette.garageChipBackground,
-                selectedLabelColor = SponsoredA11yPalette.textPrimary
+            shape = RoundedCornerShape(999.dp),
+            colors = chipColors,
+            border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
+                selected = nearMe,
+                borderColor = SponsoredA11yPalette.cardBorder,
+                selectedBorderColor = GarageSelectedChip
             )
         )
     }
@@ -476,16 +526,17 @@ internal fun GarageSaleTile(
     val ended = timing == GarageSaleTiming.Ended
     val live = timing is GarageSaleTiming.OpenNow
     val type = sale.saleTypeValue
-    val typeColor = SponsoredA11yPalette.accentGarage
+    val typeColor = type.tint()
     Surface(
         modifier = modifier.alpha(if (ended) 0.65f else 1f),
         onClick = onClick,
         shape = RoundedCornerShape(16.dp),
         color = SponsoredA11yPalette.cardSurface,
+        shadowElevation = if (ended) 0.dp else 3.dp,
         border = if (live) {
             BorderStroke(1.5.dp, GarageOpenGreen.copy(alpha = 0.55f))
         } else {
-            BorderStroke(0.5.dp, SponsoredA11yPalette.cardBorder)
+            BorderStroke(1.dp, SponsoredA11yPalette.cardBorder)
         }
     ) {
         Column {
@@ -698,7 +749,8 @@ internal fun GarageShopSection(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         color = SponsoredA11yPalette.cardSurface,
-        border = BorderStroke(0.5.dp, SponsoredA11yPalette.cardBorder)
+        shadowElevation = 2.dp,
+        border = BorderStroke(1.dp, SponsoredA11yPalette.cardBorder)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
@@ -709,16 +761,17 @@ internal fun GarageShopSection(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                val shopColor = GarageSaleType.GARAGE.tint()
                 Surface(
                     shape = CircleShape,
-                    color = SponsoredA11yPalette.garageChipBackground,
-                    border = BorderStroke(1.dp, SponsoredA11yPalette.garageChipBorder)
+                    color = shopColor.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, shopColor.copy(alpha = 0.30f))
                 ) {
                     Icon(
                         Icons.Default.Storefront,
                         contentDescription = null,
                         modifier = Modifier.padding(10.dp),
-                        tint = SponsoredA11yPalette.accentGarage
+                        tint = shopColor
                     )
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -742,7 +795,7 @@ internal fun GarageShopSection(
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = "View shop",
-                    tint = SponsoredA11yPalette.accentGarage
+                    tint = SponsoredA11yPalette.textSecondary
                 )
             }
             GarageSaleTileGrid(

@@ -622,6 +622,7 @@ private fun GarageDetailCard(content: @Composable () -> Unit) {
             .padding(horizontal = 16.dp),
         shape = RoundedCornerShape(16.dp),
         color = SponsoredA11yPalette.cardSurface,
+        shadowElevation = 2.dp,
         border = BorderStroke(1.dp, SponsoredA11yPalette.cardBorder)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -660,14 +661,14 @@ private fun GarageDetailSection(title: String, content: @Composable () -> Unit) 
 internal fun GarageChip(text: String) {
     Surface(
         shape = RoundedCornerShape(999.dp),
-        color = SponsoredA11yPalette.garageChipBackground,
-        border = BorderStroke(1.dp, SponsoredA11yPalette.garageChipBorder)
+        color = SponsoredA11yPalette.accentGarage.copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, SponsoredA11yPalette.accentGarage.copy(alpha = 0.25f))
     ) {
         Text(
             text,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelMedium,
-            color = SponsoredA11yPalette.garageChipText,
+            color = SponsoredA11yPalette.accentGarage,
             fontWeight = FontWeight.SemiBold
         )
     }

@@ -39,13 +39,18 @@ internal object SponsoredA11yPalette {
   )
 
   val garageSectionGradient = listOf(
-    WalletActionGold.copy(alpha = 0.20f),
+    Color(0xFFF97316).copy(alpha = 0.14f),
+    WalletActionGold.copy(alpha = 0.10f),
     WalletSurface,
   )
 
+  /** White label stays above 4.5:1 at both ends. */
+  val garageCapsuleGradient = listOf(Color(0xFFC2410C), Color(0xFFDC2626))
+
   val accentAds = WalletAccent
   val accentAdsLight = WalletAccentContainer
-  val accentGarage = WalletActionGoldText
+  /** Orange 700: 5.2:1 on white, so it stays readable as icon and label colour. */
+  val accentGarage = Color(0xFFC2410C)
   val accentGarageLight = WalletActionGold.copy(alpha = 0.24f)
 
   val textPrimary = WalletTextPrimary
