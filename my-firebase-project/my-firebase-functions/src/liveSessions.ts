@@ -306,7 +306,7 @@ const canUserWatchLiveSession = async (
       const data = doc.data() || {};
       const status = String(data.status || "").trim().toLowerCase();
       return String(data.eventId || "").trim() === sourceId &&
-        (status === "accepted" || status === "approved");
+        ["accepted", "approved", "attended", "completed"].includes(status);
     });
   }
   default:

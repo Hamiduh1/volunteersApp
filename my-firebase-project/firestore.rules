@@ -2159,6 +2159,12 @@ service cloud.firestore {
         0;
     }
 
+    // The server stamps participantsCountVersion once participantsCount matches the seats taken;
+    // until then an event is treated as possibly having registrations.
+    function eventHasNoRegistrations(data) {
+      return data.get('participantsCountVersion', 0) == 2 && eventParticipantCount(data) == 0;
+    }
+
     function organizerEventIdentityIsStable() {
       return (!('organizerId' in resource.data) ||
           request.resource.data.organizerId == resource.data.organizerId)
@@ -2177,6 +2183,7 @@ service cloud.firestore {
         && ('participantsCount' in request.resource.data)
         && request.resource.data.participantsCount is int
         && request.resource.data.participantsCount == 0
+        && request.resource.data.get('participantsCountVersion', 2) == 2
         && ('volunteerLimit' in request.resource.data)
         && request.resource.data.volunteerLimit is int
         && request.resource.data.volunteerLimit > 0
@@ -2197,7 +2204,7 @@ service cloud.firestore {
           )
         )
         && (
-          eventParticipantCount(resource.data) == 0 ||
+          eventHasNoRegistrations(resource.data) ||
           (
             (!('payment' in resource.data) || request.resource.data.payment == resource.data.payment)
             && (!('eventFee' in resource.data) || request.resource.data.eventFee == resource.data.eventFee)
@@ -2207,7 +2214,7 @@ service cloud.firestore {
 
     function organizerEventVisibilityIsSafe() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
-      return eventParticipantCount(resource.data) == 0 ||
+      return eventHasNoRegistrations(resource.data) ||
         (
           !changed.hasAny(['isDeleted', 'isActive'])
           && (!changed.hasAny(['status']) || request.resource.data.status in [
@@ -2249,9 +2256,7 @@ service cloud.firestore {
       allow delete: if isOrganizer() && (
         resource.data.organizerId == request.auth.uid ||
         resource.data.organizerUid == request.auth.uid
-      ) && ('participantsCount' in resource.data)
-        && resource.data.participantsCount is int
-        && resource.data.participantsCount == 0;
+      ) && eventHasNoRegistrations(resource.data);
 
       match /applications/{appId} {
         allow read: if isSignedIn() && (
