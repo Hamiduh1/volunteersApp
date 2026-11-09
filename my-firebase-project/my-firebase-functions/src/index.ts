@@ -10787,6 +10787,31 @@ const asNonEmptyString = (...values: unknown[]): string | undefined => {
   return undefined;
 };
 
+// Number digits of a saved mobile-money recipient, whichever field older app versions wrote.
+const savedMobileMoneyPhoneDigits = (data: Record<string, unknown>): string =>
+  normalizeBeneficiaryPhoneDigits(asNonEmptyString(
+    data.mobileNumber,
+    data.recipientPhoneE164,
+    data.recipientPhone,
+    data.phoneNumber,
+    data.accountNumber,
+    data.phone
+  ));
+
+// One saved mobile-money recipient per number, including older records without an identity key.
+const findSavedMobileMoneyRecipientByPhone = (
+  docs: admin.firestore.QueryDocumentSnapshot[],
+  phone: unknown,
+  excludeBeneficiaryId?: string
+): admin.firestore.QueryDocumentSnapshot | undefined => {
+  const digits = normalizeBeneficiaryPhoneDigits(phone);
+  if (!digits) return undefined;
+  return docs.find((document) =>
+    document.id !== excludeBeneficiaryId &&
+    savedMobileMoneyPhoneDigits(document.data() || {}) === digits
+  );
+};
+
 type AfriexBusinessCustomer = {
   customerId: string;
   reference: string | null;
@@ -17818,6 +17843,29 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
             recipient: existingRecipient,
           };
         }
+      }
+      const savedMobileMoneySnap = await transaction.get(
+        db.collection("users").doc(senderId).collection("beneficiaries")
+          .where("type", "==", "MOBILE_MONEY")
+      );
+      const samePhoneRecipient = findSavedMobileMoneyRecipientByPhone(
+        savedMobileMoneySnap.docs,
+        phone,
+        beneficiaryId
+      );
+      if (samePhoneRecipient) {
+        // Refresh the recipient already saved for this number instead of adding it again.
+        recipient.createdAt = samePhoneRecipient.get("createdAt") || now;
+        transaction.set(samePhoneRecipient.ref, recipient, {merge: true});
+        transaction.set(verificationRef, {
+          registrationBeneficiaryId: samePhoneRecipient.id,
+          registrationAppliedAt: admin.firestore.Timestamp.now(),
+          updatedAt: admin.firestore.Timestamp.now(),
+        }, {merge: true});
+        return {
+          beneficiaryId: samePhoneRecipient.id,
+          recipient: {...(samePhoneRecipient.data() || {}), ...recipient},
+        };
       }
       transaction.set(beneficiaryRef, recipient, {merge: true});
       transaction.set(verificationRef, {

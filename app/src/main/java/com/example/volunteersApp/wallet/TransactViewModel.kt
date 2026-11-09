@@ -3749,6 +3749,19 @@ class TransactViewModel : ViewModel() {
         }
     }
 
+    /** Saved mobile money recipient with the same number, so one number is only saved once. */
+    fun findSavedMobileMoneyRecipient(phoneE164: String, excludeBeneficiaryId: String? = null): Beneficiary? {
+        val digits = phoneE164.filter(Char::isDigit)
+        if (digits.isEmpty()) return null
+        return _uiState.value.beneficiaries.firstOrNull { saved ->
+            saved.id.isNotBlank() &&
+                saved.id != excludeBeneficiaryId &&
+                afriexBeneficiaryDestinationRoute(saved.type) == "MOBILE_MONEY" &&
+                listOf(saved.mobileNumber, saved.accountNumber, saved.phone)
+                    .any { it?.filter(Char::isDigit) == digits }
+        }
+    }
+
     fun saveBeneficiaryIfNeeded(
         beneficiary: Beneficiary,
         /** True when re-verified details replace an existing saved recipient (iOS edit flow). */

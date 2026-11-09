@@ -1657,6 +1657,13 @@ fun TransactScreen(
                 initialType = if (isBankMode) "BANK_ACCOUNT" else "MOBILE_MONEY",
                 lockBeneficiaryType = isBeneficiaryLane,
                 isSaving = isSavingBeneficiary,
+                excludeBeneficiaryId = replacingBeneficiaryId,
+                onUseSavedRecipient = { saved ->
+                    if (!isSavingBeneficiary) {
+                        showRegistrationSheet = false
+                        selectBeneficiary(saved)
+                    }
+                },
                 onProceed = { newBeneficiary ->
                     if (!isSavingBeneficiary) {
                         isSavingBeneficiary = true
@@ -2781,6 +2788,9 @@ fun BeneficiaryRegistrationSheet(
     initialType: String = "MOBILE_MONEY",
     lockBeneficiaryType: Boolean = false,
     isSaving: Boolean = false,
+    /** Recipient being edited; its own number is not treated as a duplicate. */
+    excludeBeneficiaryId: String? = null,
+    onUseSavedRecipient: ((Beneficiary) -> Unit)? = null,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var beneficiaryType by remember { mutableStateOf(initialType.uppercase(Locale.US)) }
@@ -4298,6 +4308,14 @@ fun BeneficiaryRegistrationSheet(
             }
             if (resolvedMobileRecipient == null) {
                 OutlinedButton(
+            val savedDuplicate = duplicateSavedRecipient
+            if (savedDuplicate != null && onUseSavedRecipient != null) {
+                TextButton(onClick = { onUseSavedRecipient(savedDuplicate) }) {
+                    Text("Use saved recipient")
+                }
+            }
+            if (resolvedMobileRecipient == null) {
+                OutlinedButton(
                     onClick = {
                         if (!isMobileRecipientPayoutCountry) {
                             mobileRecipientResolutionError =
@@ -4331,6 +4349,11 @@ fun BeneficiaryRegistrationSheet(
                                 "Select a provider from the current list before verifying."
                             return@OutlinedButton
                         }
+                        val savedSameNumber = viewModel.findSavedMobileMoneyRecipient(fullPhone, excludeBeneficiaryId)
+                        duplicateSavedRecipient = savedSameNumber
+                        if (savedSameNumber != null) {
+                            mobileRecipientResolutionError =
+                                "This number is already saved as ${savedSameNumber.name.ifBlank { "a recipient" }}."
                         isResolvingMobileRecipient = true
                         resolvedMobileRecipient = null
                         isProviderNameConfirmed = false
