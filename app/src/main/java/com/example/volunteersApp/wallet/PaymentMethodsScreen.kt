@@ -1382,7 +1382,10 @@ private fun AddBankReceiveRouteDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val countries = remember { afriexLocalBankPayoutLiveCountries() }
+    // The server saves a receive route only when the payout partner confirms the account holder name.
+    val countries = remember {
+        afriexLocalBankPayoutLiveCountries().filter { afriexLocalBankSupportsAccountNameEnquiry(it) }
+    }
     var selectedCountry by remember { mutableStateOf(countries.firstOrNull().orEmpty()) }
     var accountHolderName by remember { mutableStateOf("") }
     var accountNumber by remember { mutableStateOf("") }
@@ -1416,11 +1419,20 @@ private fun AddBankReceiveRouteDialog(
         title = { Text("Add bank receive route") },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState())
+                    .imePadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
                     "This route is verified before another member can send to you. It is separate from a US ACH funding bank and does not require Stripe Connect.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Bank receive routes are available in ${countries.joinToString(" and ")}, where the bank confirms the account holder name. US bank accounts cannot receive member transfers yet.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1570,7 +1582,11 @@ private fun AddSwiftReceiveRouteDialog(
         title = { Text("Add SWIFT receive route") },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState())
+                    .imePadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(

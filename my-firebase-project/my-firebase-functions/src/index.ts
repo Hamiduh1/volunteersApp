@@ -14232,7 +14232,14 @@ export const saveVerifiedBeneficiary = functions.runWith({enforceAppCheck: true}
       .where("recipientIdentityKey", "==", recipientIdentityKey)
       .limit(1)
       .get();
-    const beneficiaryRef = existing.docs[0]?.ref || beneficiaries.doc();
+    const isMobileMoney = String(stored.type || "").trim().toUpperCase() === "MOBILE_MONEY";
+    const samePhoneRecipient = !existing.docs[0] && isMobileMoney ?
+      findSavedMobileMoneyRecipientByPhone(
+        (await beneficiaries.where("type", "==", "MOBILE_MONEY").get()).docs,
+        asNonEmptyString(stored.mobileNumber, stored.accountNumber, stored.phone)
+      ) :
+      undefined;
+    const beneficiaryRef = existing.docs[0]?.ref || samePhoneRecipient?.ref || beneficiaries.doc();
     const saved = {
       ...stored,
       recipientIdentityKey,

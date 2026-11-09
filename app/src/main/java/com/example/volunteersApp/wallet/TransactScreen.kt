@@ -2828,6 +2828,7 @@ fun BeneficiaryRegistrationSheet(
     var resolvedMobileRecipient by remember { mutableStateOf<ResolvedMobileMoneyRecipient?>(null) }
     var isResolvingMobileRecipient by remember { mutableStateOf(false) }
     var mobileRecipientResolutionError by remember { mutableStateOf<String?>(null) }
+    var duplicateSavedRecipient by remember { mutableStateOf<Beneficiary?>(null) }
     var isProviderNameConfirmed by remember { mutableStateOf(false) }
     var country by remember {
         mutableStateOf(
@@ -2901,6 +2902,7 @@ fun BeneficiaryRegistrationSheet(
         resolvedMobileRecipient = null
         isProviderNameConfirmed = false
         mobileRecipientResolutionError = null
+        duplicateSavedRecipient = null
     }
 
     fun clearBankRecipientResolution() {
@@ -4306,8 +4308,6 @@ fun BeneficiaryRegistrationSheet(
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            if (resolvedMobileRecipient == null) {
-                OutlinedButton(
             val savedDuplicate = duplicateSavedRecipient
             if (savedDuplicate != null && onUseSavedRecipient != null) {
                 TextButton(onClick = { onUseSavedRecipient(savedDuplicate) }) {
@@ -4354,6 +4354,8 @@ fun BeneficiaryRegistrationSheet(
                         if (savedSameNumber != null) {
                             mobileRecipientResolutionError =
                                 "This number is already saved as ${savedSameNumber.name.ifBlank { "a recipient" }}."
+                            return@OutlinedButton
+                        }
                         isResolvingMobileRecipient = true
                         resolvedMobileRecipient = null
                         isProviderNameConfirmed = false
