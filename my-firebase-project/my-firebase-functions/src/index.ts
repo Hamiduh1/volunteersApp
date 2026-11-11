@@ -10705,7 +10705,7 @@ const finalizeSenderTransactionsForPayout = async (
   senderId: string,
   payoutRef: FirebaseFirestore.DocumentReference,
   payoutData: FirebaseFirestore.DocumentData,
-  nextStatus: "COMPLETED" | "FAILED" | "FUNDING_RECONCILIATION_REQUIRED"
+  nextStatus: "COMPLETED" | "FAILED" | "FUNDING_RECONCILIATION_REQUIRED" | "REFUNDED"
 ): Promise<number> => {
   const txSnapshots = await loadSenderTransactionsForPayout(senderId, payoutRef, payoutData);
   if (txSnapshots.length === 0) {
@@ -15657,6 +15657,7 @@ const applyMobileMoneyProviderResult = async (
         fundingBankChargeId: asNonEmptyString(latestData.fundingBankChargeId),
         providerStatus: "PAYOUT_REJECTED_AFTER_EXTERNAL_FUNDING",
       });
+      await refundExternalFundingForRejectedDelivery(payoutRef, "The recipient payout was rejected.");
     }
     return;
   }
@@ -16646,6 +16647,7 @@ const processPendingAfriexBankSwiftPayout = async (
         fundingBankChargeId: asNonEmptyString(data.fundingBankChargeId),
         providerStatus: "PAYOUT_REJECTED_AFTER_EXTERNAL_FUNDING",
       });
+      await refundExternalFundingForRejectedDelivery(payoutRef, "The recipient bank payout was rejected.");
     } else if (senderId && terminalStatus === "FAILED") {
       await finalizeSenderTransactionsForPayout(senderId, payoutRef, data, "FAILED");
     }
@@ -16685,6 +16687,7 @@ const processPendingAfriexBankSwiftPayout = async (
         fundingBankChargeId: asNonEmptyString(data.fundingBankChargeId),
         providerStatus: "PAYOUT_REJECTED_AFTER_EXTERNAL_FUNDING",
       });
+      await refundExternalFundingForRejectedDelivery(payoutRef, "The recipient bank payout was rejected.");
       return;
     }
     await payoutRef.set({
@@ -18659,6 +18662,99 @@ const markExternalFundingReconciliationRequired = async (params: {
       }, {merge: true});
     }
   });
+};
+
+// Refunds the card or US bank debit of a beneficiary transfer whose delivery the payout partner
+// definitively rejected, then releases the sender's send lock when it belongs to this payout and
+// nothing else is awaiting reconciliation. Returns false, leaving the payout in reconciliation,
+// when Stripe cannot refund it.
+const refundExternalFundingForRejectedDelivery = async (
+  payoutRef: FirebaseFirestore.DocumentReference,
+  reason: string
+): Promise<boolean> => {
+  const payoutSnap = await payoutRef.get();
+  const data = payoutSnap.data() || {};
+  const senderId = asNonEmptyString(data.senderId);
+  const fundingSource = String(data.fundingSource || "").trim().toUpperCase();
+  const status = String(data.status || "").trim().toUpperCase();
+  if (!senderId || String(data.type || "").trim().toUpperCase() !== "BENEFICIARY_TRANSFER") return false;
+  if (!["EXTERNAL_CARD", "EXTERNAL_BANK"].includes(fundingSource)) return false;
+  if (data.refundProcessed === true || status === "REFUNDED") return true;
+  if (status !== "FUNDING_RECONCILIATION_REQUIRED" || data.providerReversed === true) return false;
+  const paymentIntentId = fundingSource === "EXTERNAL_CARD" ? asNonEmptyString(data.fundingPaymentIntentId) : undefined;
+  const chargeId = fundingSource === "EXTERNAL_BANK" ? asNonEmptyString(data.fundingBankChargeId) : undefined;
+  if (!paymentIntentId && !chargeId) return false;
+
+  // Marked before the Stripe call so the charge.refunded webhook does not treat this refund as a reversal.
+  await payoutRef.set({autoRefundStatus: "PENDING", autoRefundAttemptedAt: admin.firestore.Timestamp.now()}, {merge: true});
+  let refund: Stripe.Refund;
+  try {
+    refund = await getStripe().refunds.create({
+      ...(paymentIntentId ? {payment_intent: paymentIntentId} : {charge: chargeId}),
+      metadata: {payoutRequestId: payoutRef.id, senderId, reason: "PAYOUT_REJECTED_AFTER_EXTERNAL_FUNDING"},
+    }, {idempotencyKey: `external-funding-refund-${payoutRef.id}`});
+  } catch (error) {
+    const message = parseProviderErrorMessage(error);
+    functions.logger.error("Automatic refund after a rejected delivery failed.", {
+      payoutRequestId: payoutRef.id,
+      error: message,
+    });
+    await payoutRef.set({
+      autoRefundStatus: "FAILED",
+      autoRefundError: message,
+      autoRefundAttemptedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+    return false;
+  }
+  if (refund.status === "failed" || refund.status === "canceled") {
+    await payoutRef.set({
+      autoRefundStatus: "FAILED",
+      autoRefundError: refund.failure_reason || refund.status,
+      stripeRefundId: refund.id,
+      autoRefundAttemptedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+    return false;
+  }
+
+  const now = admin.firestore.Timestamp.now();
+  await payoutRef.set({
+    status: "REFUNDED",
+    providerStatus: "PAYOUT_REJECTED_FUNDING_REFUNDED",
+    refundProcessed: true,
+    refundAmount: roundMoney(refund.amount / 100),
+    refundReason: reason,
+    refundedAt: now,
+    stripeRefundId: refund.id,
+    stripeRefundStatus: refund.status || null,
+    autoRefundStatus: "SUBMITTED",
+    fundingReconciliationRequired: false,
+    fundingReconciliationResolvedAt: now,
+    fundingReconciliationResolution: "AUTO_REFUNDED",
+    processedAt: now,
+  }, {merge: true});
+  await finalizeSenderTransactionsForPayout(senderId, payoutRef, data, "REFUNDED");
+
+  const otherOpenReconciliation = await db.collection("payout_requests")
+    .where("senderId", "==", senderId)
+    .where("status", "==", "FUNDING_RECONCILIATION_REQUIRED")
+    .limit(1)
+    .get();
+  if (otherOpenReconciliation.empty) {
+    const lockRef = db.collection("external_funding_reconciliation_locks").doc(senderId);
+    await db.runTransaction(async (transaction) => {
+      const lockSnap = await transaction.get(lockRef);
+      if (!lockSnap.exists || lockSnap.get("active") !== true) return;
+      if (asNonEmptyString(lockSnap.get("payoutRequestId")) !== payoutRef.id) return;
+      if (lockSnap.get("providerReversal") === true || lockSnap.get("deliveryReconciliationRequired") === true) return;
+      transaction.set(lockRef, {
+        active: false,
+        releasedAt: now,
+        releaseReason: "FUNDING_REFUNDED_AFTER_REJECTED_DELIVERY",
+        updatedAt: now,
+      }, {merge: true});
+    });
+  }
+  return true;
 };
 
 /**
@@ -26696,6 +26792,8 @@ const recordStripeFundingReversal = async (event: Stripe.Event): Promise<void> =
     // A failed ACH charge before settlement is the normal failure path, handled by settlement reconciliation.
     if (event.type === "charge.failed" && !data.bankSettlementCompletedAt) continue;
     if (FUNDING_REVERSAL_UNEXPOSED_STATUSES.has(status)) continue;
+    if (event.type === "charge.refunded" &&
+      ["PENDING", "SUBMITTED"].includes(String(data.autoRefundStatus || "").toUpperCase())) continue;
     exposedPayoutIds.push(doc.id);
     await doc.ref.set({
       fundingReversed: true,
