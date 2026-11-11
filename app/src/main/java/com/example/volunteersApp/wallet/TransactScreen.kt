@@ -162,7 +162,13 @@ private fun WalletReceiptUi.withServerReceipt(
     receipt: Map<String, Any?>,
     fallbackStatus: String,
 ): WalletReceiptUi {
-    val status = normalizeTransferStatus((receipt["status"] as? String) ?: fallbackStatus)
+    val normalizedStatus = normalizeTransferStatus((receipt["status"] as? String) ?: fallbackStatus)
+    // Newer receipts carry the server's final outcome; it wins over a status this build does not know.
+    val status = when ((receipt["progressState"] as? String)?.trim()?.uppercase(Locale.US)) {
+        "DELIVERED" -> "Delivered"
+        "FAILED" -> normalizedStatus.takeIf { isTerminalTransferStatus(it) && it != "Delivered" } ?: "Failed"
+        else -> normalizedStatus
+    }
     return copy(
         statusLine = status,
         // The callable intentionally returns customer-safe status text only.

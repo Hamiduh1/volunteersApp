@@ -18,8 +18,12 @@ fun normalizeTransferStatus(statusRaw: String?): String {
             "PROCESSING_BANK_SETTLEMENT",
             "PROCESSING_BANK",
             "IN_PROGRESS",
-            "IN PROGRESS"
+            "IN PROGRESS",
+            "FUNDING_IN_PROGRESS",
+            "PAYMENT_PROCESSING",
+            "PENDING_PROVIDER_CONFIRMATION"
         ) -> "In progress"
+        upper in setOf("REFUND_PENDING", "REFUND_SUBMITTED") -> "Refund in progress"
         upper in setOf("COMPLETED", "PAID", "DELIVERED", "SUCCESS", "SUCCESSFUL") -> "Delivered"
         upper in setOf(
             "FUNDING_RECONCILIATION_REQUIRED",
@@ -31,6 +35,8 @@ fun normalizeTransferStatus(statusRaw: String?): String {
         upper == "RETURNED" -> "Returned"
         upper in setOf("REFUNDED", "REVERSED") -> "Refunded"
         upper in setOf("FAILED", "DECLINED", "CANCELLED", "CANCELED", "FUNDING_FAILED") -> "Failed"
+        upper.endsWith("RECONCILIATION_REQUIRED") || upper == "NEEDS SUPPORT" -> "Needs support"
+        upper.endsWith("_FAILED") || upper in setOf("REJECTED", "EXPIRED", "ERROR") -> "Failed"
         normalized.equals("Initiated", ignoreCase = true) -> "Initiated"
         normalized.equals("In progress", ignoreCase = true) -> "In progress"
         normalized.equals("Delivered", ignoreCase = true) -> "Delivered"
