@@ -14156,6 +14156,8 @@ const verifyBeneficiaryForServerSave = async (
       country: countryInput,
       accountLast4: accountNumber.slice(-4),
       type: "BANK_ACCOUNT",
+      providerChannel: "BANK_ACCOUNT",
+      afriexProviderChannel: "BANK_ACCOUNT",
       verificationStatus: resolved.accountNameVerified ?
         "VERIFIED_AFRIEX_BANK_NAME_CONFIRMED" : "CUSTOMER_CONFIRMED_AFRIEX_BANK_INSTITUTION",
       isAppUser: false,
@@ -14270,6 +14272,8 @@ const verifyBeneficiaryForServerSave = async (
       country: countryInput,
       accountLast4: accountNumber.slice(-4),
       type: "SWIFT_BANK",
+      providerChannel: "SWIFT",
+      afriexProviderChannel: "SWIFT",
       verificationStatus: "VERIFIED_AFRIEX_SWIFT_INSTITUTION_CONFIRMED",
       isAppUser: false,
       mobileNumber: null,
@@ -14502,6 +14506,17 @@ export const applyApprovedBankRecipientVerification = functions.runWith({enforce
       if (existingIdentity) {
         const existingRecipient = existingIdentity.data() || {};
         if (hasServerIssuedBeneficiaryProof(existingRecipient)) {
+          // Recipients saved before providerChannel was stored need it to quote on the right rail.
+          const routeChannel = type === "SWIFT_BANK" ? "SWIFT" : "BANK_ACCOUNT";
+          if (asNonEmptyString(existingRecipient.providerChannel) !== routeChannel) {
+            transaction.set(existingIdentity.ref, {
+              providerChannel: routeChannel,
+              afriexProviderChannel: routeChannel,
+              updatedAt: now,
+            }, {merge: true});
+            existingRecipient.providerChannel = routeChannel;
+            existingRecipient.afriexProviderChannel = routeChannel;
+          }
           transaction.set(verificationRef, {
             registrationBeneficiaryId: existingIdentity.id,
             registrationAppliedAt: now,
@@ -21226,7 +21241,8 @@ const initiateTransferHandlerWithQuoteHold = async (
 
     // --- Logic for direct MOBILE_MONEY funding (sender MM -> recipient MM) ---
   } else if (requestData.fundingSourceType === "EXTERNAL_MOBILE_MONEY") {
-    if (requestData.recipientId) {
+    // Saved-recipient sends may also carry the beneficiary id as recipientId.
+    if (requestData.recipientId && !requestData.recipientBeneficiary) {
       throw new functions.https.HttpsError("invalid-argument", "Direct mobile money funding is only supported for beneficiary transfers.");
     }
     if (!requestData.recipientBeneficiary) {
@@ -21463,7 +21479,7 @@ const initiateTransferHandlerWithQuoteHold = async (
 
     // --- Logic for EXTERNAL_CARD transfers ---
   } else if (requestData.fundingSourceType === "EXTERNAL_CARD") {
-    if (requestData.recipientId) {
+    if (requestData.recipientId && !requestData.recipientBeneficiary) {
       throw new functions.https.HttpsError("invalid-argument", "Card funding is not supported for app user transfers.");
     }
     if (!requestData.recipientBeneficiary) {
@@ -21927,7 +21943,7 @@ const initiateTransferHandlerWithQuoteHold = async (
 
     // --- Logic for EXTERNAL_BANK transfers (bank -> mobile money beneficiary) ---
   } else if (requestData.fundingSourceType === "EXTERNAL_BANK") {
-    if (requestData.recipientId) {
+    if (requestData.recipientId && !requestData.recipientBeneficiary) {
       throw new functions.https.HttpsError("invalid-argument", "Bank funding is not supported for app user transfers.");
     }
     if (!requestData.recipientBeneficiary) {
@@ -30853,6 +30869,25 @@ const buildTransferReceiptPayload = (
   } else if (receiptStatus.includes("PENDING")) {
     statusLabel = "Pending";
   }
+  let progressState = "PENDING";
+  if (statusLabel === "Delivered") {
+    progressState = "DELIVERED";
+  } else if (["Returned", "Refunded", "Needs support", "Failed"].includes(statusLabel)) {
+    progressState = "FAILED";
+  } else if (statusLabel === "In progress") {
+    progressState = "IN_PROGRESS";
+  }
+
+  const transferIntent = payoutData.transferIntent as Record<string, unknown> | undefined;
+  const sendLane = asNonEmptyString(payoutData.sendLane, transferIntent?.["sendLane"]);
+  const destinationRoute = String(asNonEmptyString(
+    payoutData.destinationRoute,
+    payoutData.afriexPayoutRoute,
+    transferIntent?.["destinationRoute"]
+  ) || "").toUpperCase();
+  const lane = String(sendLane || "").toUpperCase() === "APP_USER" ? "APP_USER" :
+    (["BANK", "BANK_ACCOUNT", "SWIFT"].includes(destinationRoute) ? "BANK_ACCOUNT" : "MOBILE_MONEY");
+
   // Provider diagnostics can include implementation details. Receipts expose
   // only a customer-safe outcome; detailed diagnostics stay server-side.
   const message = (() => {
@@ -30894,14 +30929,38 @@ const buildTransferReceiptPayload = (
     network: network || null,
     country: country || null,
     fundingSource: fundingSource || null,
-    sendLane: asNonEmptyString(
-      payoutData.sendLane,
-      (payoutData.transferIntent as Record<string, unknown> | undefined)?.["sendLane"]
-    ) || null,
+    sendLane: sendLane || null,
+    // Client receipt fields: iOS and Android read progressState/lane rather than status.
+    progressState,
+    lane,
+    fundingMethod: receiptFundingMethodLabel(fundingSource),
+    deliveryMethod: lane === "APP_USER" ? "App member" :
+      (lane === "BANK_ACCOUNT" ? (destinationRoute === "SWIFT" ? "SWIFT bank" : "Bank account") : "Mobile money"),
     type: asNonEmptyString(payoutData.type) || null,
     createdAtMs: toTimestampMillis(payoutData.createdAt),
     processedAtMs: toTimestampMillis(payoutData.processedAt),
   };
+};
+
+/**
+ * Customer-facing label for a payout's funding source.
+ * @param {string | undefined} fundingSource The stored fundingSource / fundingSourceType.
+ * @return {string} A readable funding method label.
+ */
+const receiptFundingMethodLabel = (fundingSource: string | undefined): string => {
+  switch (String(fundingSource || "").trim().toUpperCase()) {
+  case "EXTERNAL_CARD":
+    return "Card";
+  case "EXTERNAL_BANK":
+    return "US bank account (ACH)";
+  case "EXTERNAL_MOBILE_MONEY":
+  case "MOBILE_MONEY":
+    return "Mobile money";
+  case "WALLET":
+    return "Saved balance";
+  default:
+    return "Funding method";
+  }
 };
 
 const loadOwnedPayoutRequest = async (
