@@ -10787,31 +10787,6 @@ const asNonEmptyString = (...values: unknown[]): string | undefined => {
   return undefined;
 };
 
-// Number digits of a saved mobile-money recipient, whichever field older app versions wrote.
-const savedMobileMoneyPhoneDigits = (data: Record<string, unknown>): string =>
-  normalizeBeneficiaryPhoneDigits(asNonEmptyString(
-    data.mobileNumber,
-    data.recipientPhoneE164,
-    data.recipientPhone,
-    data.phoneNumber,
-    data.accountNumber,
-    data.phone
-  ));
-
-// One saved mobile-money recipient per number, including older records without an identity key.
-const findSavedMobileMoneyRecipientByPhone = (
-  docs: admin.firestore.QueryDocumentSnapshot[],
-  phone: unknown,
-  excludeBeneficiaryId?: string
-): admin.firestore.QueryDocumentSnapshot | undefined => {
-  const digits = normalizeBeneficiaryPhoneDigits(phone);
-  if (!digits) return undefined;
-  return docs.find((document) =>
-    document.id !== excludeBeneficiaryId &&
-    savedMobileMoneyPhoneDigits(document.data() || {}) === digits
-  );
-};
-
 // Debits a verified US ACH funding bank. Banks linked through Financial Connections store a
 // us_bank_account payment method in chargeSourceId and are charged with a PaymentIntent under
 // their mandate; older banks are charged as legacy bank sources. Pending until the debit settles.
@@ -13871,6 +13846,55 @@ const hasServerIssuedBeneficiaryProof = (stored: Record<string, unknown>): boole
   );
 };
 
+/**
+ * E.164 digits of a saved mobile money recipient; empty for bank and SWIFT recipients.
+ * @param {Record<string, unknown>} stored Saved recipient document.
+ * @return {string} Phone digits, or an empty string.
+ */
+const savedMobileMoneyRecipientDigits = (stored: Record<string, unknown>): string => {
+  const explicitType = String(stored.type || stored.recipientType || stored.deliveryRoute || "")
+    .trim().toUpperCase();
+  if (explicitType.includes("BANK") || explicitType.includes("SWIFT")) return "";
+  if (!explicitType && asNonEmptyString(stored.bankName) && asNonEmptyString(stored.accountNumber) &&
+    !asNonEmptyString(stored.mobileNumber)) {
+    return "";
+  }
+  const digits = normalizeBeneficiaryPhoneDigits(asNonEmptyString(
+    stored.mobileNumber,
+    stored.recipientPhone,
+    stored.recipientPhoneE164,
+    stored.phoneNumber,
+    stored.phone,
+    stored.accountNumber
+  ) || "");
+  return digits.length >= 7 ? digits : "";
+};
+
+const SAVED_RECIPIENT_SCAN_LIMIT = 500;
+
+/**
+ * One mobile number is one saved recipient for each sender. Returns the saved
+ * recipient for this number, preferring one with server-issued proof.
+ * @param {admin.firestore.QueryDocumentSnapshot[]} docs The sender's saved recipients.
+ * @param {string} phoneDigits E.164 digits to match.
+ * @param {string} excludeId Recipient id to ignore, such as the one being saved.
+ * @return {admin.firestore.QueryDocumentSnapshot | null} The matching recipient.
+ */
+const findSavedMobileMoneyRecipientByPhone = (
+  docs: admin.firestore.QueryDocumentSnapshot[],
+  phoneDigits: string,
+  excludeId?: string
+): admin.firestore.QueryDocumentSnapshot | null => {
+  if (!phoneDigits) return null;
+  const matches = docs.filter((document) =>
+    document.id !== excludeId &&
+    savedMobileMoneyRecipientDigits(document.data() || {}) === phoneDigits
+  );
+  return matches.find((document) => hasServerIssuedBeneficiaryProof(document.data() || {})) ||
+    matches[0] ||
+    null;
+};
+
 const verifiedBeneficiaryResponse = (
   beneficiaryId: string,
   stored: Record<string, unknown>
@@ -14287,18 +14311,22 @@ export const saveVerifiedBeneficiary = functions.runWith({enforceAppCheck: true}
       .where("recipientIdentityKey", "==", recipientIdentityKey)
       .limit(1)
       .get();
-    const isMobileMoney = String(stored.type || "").trim().toUpperCase() === "MOBILE_MONEY";
-    const samePhoneRecipient = !existing.docs[0] && isMobileMoney ?
+    const phoneDigits = savedMobileMoneyRecipientDigits(stored);
+    const samePhone = existing.empty && phoneDigits ?
       findSavedMobileMoneyRecipientByPhone(
-        (await beneficiaries.where("type", "==", "MOBILE_MONEY").get()).docs,
-        asNonEmptyString(stored.mobileNumber, stored.accountNumber, stored.phone)
+        (await beneficiaries.limit(SAVED_RECIPIENT_SCAN_LIMIT).get()).docs,
+        phoneDigits
       ) :
-      undefined;
-    const beneficiaryRef = existing.docs[0]?.ref || samePhoneRecipient?.ref || beneficiaries.doc();
+      null;
+    const existingDoc = existing.docs[0] || samePhone;
+    const beneficiaryRef = existingDoc?.ref || beneficiaries.doc();
+    const now = admin.firestore.Timestamp.now();
     const saved = {
       ...stored,
       recipientIdentityKey,
-      recipientSavedAtMs: Date.now(),
+      recipientSavedAtMs: now.toMillis(),
+      createdAt: existingDoc?.get("createdAt") || now,
+      updatedAt: now,
     };
     await beneficiaryRef.set(saved, {merge: true});
     return verifiedBeneficiaryResponse(beneficiaryRef.id, saved);
@@ -17885,49 +17913,43 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
       };
       const recipientIdentityKey = buildVerifiedBeneficiaryIdentityKey(recipient);
       recipient.recipientIdentityKey = recipientIdentityKey;
-      const existingIdentitySnap = await transaction.get(
+      const savedRecipientsSnap = await transaction.get(
         db.collection("users").doc(senderId).collection("beneficiaries")
-          .where("recipientIdentityKey", "==", recipientIdentityKey)
-          .limit(1)
+          .limit(SAVED_RECIPIENT_SCAN_LIMIT)
       );
-      const existingIdentity = existingIdentitySnap.docs
-        .find((document) => document.id !== beneficiaryId);
-      if (existingIdentity) {
-        const existingRecipient = existingIdentity.data() || {};
-        if (hasServerIssuedBeneficiaryProof(existingRecipient)) {
-          transaction.set(verificationRef, {
-            registrationBeneficiaryId: existingIdentity.id,
-            registrationAppliedAt: admin.firestore.Timestamp.now(),
-            updatedAt: admin.firestore.Timestamp.now(),
-          }, {merge: true});
-          return {
-            beneficiaryId: existingIdentity.id,
-            recipient: existingRecipient,
-          };
-        }
-      }
-      const savedMobileMoneySnap = await transaction.get(
-        db.collection("users").doc(senderId).collection("beneficiaries")
-          .where("type", "==", "MOBILE_MONEY")
-      );
-      const samePhoneRecipient = findSavedMobileMoneyRecipientByPhone(
-        savedMobileMoneySnap.docs,
-        phone,
+      const phoneDigits = normalizeBeneficiaryPhoneDigits(phone);
+      const samePhone = findSavedMobileMoneyRecipientByPhone(
+        savedRecipientsSnap.docs,
+        phoneDigits,
         beneficiaryId
       );
-      if (samePhoneRecipient) {
-        // Refresh the recipient already saved for this number instead of adding it again.
-        recipient.createdAt = samePhoneRecipient.get("createdAt") || now;
-        transaction.set(samePhoneRecipient.ref, recipient, {merge: true});
-        transaction.set(verificationRef, {
-          registrationBeneficiaryId: samePhoneRecipient.id,
-          registrationAppliedAt: admin.firestore.Timestamp.now(),
-          updatedAt: admin.firestore.Timestamp.now(),
-        }, {merge: true});
-        return {
-          beneficiaryId: samePhoneRecipient.id,
-          recipient: {...(samePhoneRecipient.data() || {}), ...recipient},
-        };
+      if (samePhone) {
+        const editedRecipientKeepsNumber = beneficiarySnap.exists &&
+          savedMobileMoneyRecipientDigits(beneficiarySnap.data() || {}) === phoneDigits;
+        if (replaceExisting && !editedRecipientKeepsNumber) {
+          const savedName = asNonEmptyString(samePhone.get("name")) || "another recipient";
+          throw new functions.https.HttpsError(
+            "already-exists",
+            `This number is already saved as ${savedName}. Use that recipient instead.`
+          );
+        }
+        if (!replaceExisting) {
+          // A second add of the same number refreshes the saved recipient instead of creating another.
+          const merged = {
+            ...recipient,
+            createdAt: samePhone.get("createdAt") || now,
+          };
+          transaction.set(samePhone.ref, merged, {merge: true});
+          transaction.set(verificationRef, {
+            registrationBeneficiaryId: samePhone.id,
+            registrationAppliedAt: now,
+            updatedAt: now,
+          }, {merge: true});
+          return {
+            beneficiaryId: samePhone.id,
+            recipient: {...(samePhone.data() || {}), ...merged},
+          };
+        }
       }
       transaction.set(beneficiaryRef, recipient, {merge: true});
       transaction.set(verificationRef, {
