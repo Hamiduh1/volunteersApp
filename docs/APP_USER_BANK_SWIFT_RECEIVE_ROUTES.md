@@ -47,23 +47,47 @@ also completes the external-recipient SWIFT path.
 
 ## Android work required
 
-1. **SWIFT forms must collect the correspondent bank.** Add "Correspondent bank
-   name" and "Correspondent bank account number" to:
-   - the external recipient SWIFT form (`createBankRecipientVerification` /
-     `saveVerifiedBeneficiary` payloads), and
-   - the App User SWIFT receive form (`saveAppUserReceiveRoute`).
+Android already saves receive routes through `saveAppUserReceiveRoute` and
+already sends to any bank with `payoutReady && appUserReceiveRouteVerified`.
+The remaining work is in the add-bank dialogs and the SWIFT forms. Line
+numbers are approximate.
 
-   Field names: `correspondentBankName`, `correspondentBankAccountNumber`.
-   Without them, SWIFT saves now fail with "Enter the correspondent
-   (intermediary) bank name and account number…".
-2. **Allow SWIFT and non-NG/GH local banks in the receive-route form.** Where
-   Afriex returns no name, show an "This account is in my name" confirmation and
-   send the entered `accountHolderName`. For US, send the 9-digit routing number
-   as `institutionCode`.
-3. **Remove client-side "account-owner verification" copy** that tells members
-   receiving activates later.
+1. **Local bank receive dialog**: `AddBankReceiveRouteDialog` in
+   `wallet/PaymentMethodsScreen.kt` (~1380).
+   - The country list is limited to NG/GH by
+     `.filter { afriexLocalBankSupportsAccountNameEnquiry(it) }`. Remove the
+     filter so every `afriexLocalBankPayoutLiveCountries()` country is listed,
+     and add United States.
+   - For US, replace the bank picker with a "Routing number (9 digits)" field
+     and send it as `institutionCode`. The server resolves it with Afriex.
+   - Add a required "This account is in my name" checkbox before Save. It
+     replaces the name lookup Afriex offers only for NG/GH. For NG/GH the
+     entered name must still match the name Afriex returns.
+   - Remove the copy "where the bank confirms the account holder name. US bank
+     accounts cannot receive member transfers yet."
+2. **SWIFT receive dialog**: `AddSwiftReceiveRouteDialog` in
+   `wallet/PaymentMethodsScreen.kt` (~1545) and `saveAppUserSwiftReceiveRoute`
+   in `wallet/PaymentsViewModel.kt` (~862).
+   - Add "Correspondent bank name" and "Correspondent bank account number"
+     fields, sent as `correspondentBankName` and
+     `correspondentBankAccountNumber`.
+   - Require both before Save, including for US SWIFT (`isUsSwift`).
+   - Add the same "This account is in my name" checkbox.
+3. **External SWIFT recipient form**: the SWIFT recipient form in
+   `wallet/TransactScreen.kt` (~4741) and the payload in
+   `wallet/TransactViewModel.kt` (~3806, next to `"bankAddress"`).
+   - Collect the same two correspondent fields and send them to
+     `createBankRecipientVerification` and `saveVerifiedBeneficiary`.
+   - Without them, saving fails with "Enter the correspondent (intermediary)
+     bank name and account number…".
 
-iOS already does all three (Payment Methods > Receive Methods > Add Receive
+No change needed:
+- `isRecipientPayoutReady` (`TransactScreen.kt` ~8687, `TransactViewModel.kt`
+  ~945) already checks `payoutReady && appUserReceiveRouteVerified`.
+- The `getRecipientPayoutMethods` parser (`TransactViewModel.kt` ~727) already
+  maps `deliveryRoute: "SWIFT"` to `SWIFT_BANK`.
+
+iOS already does all of this (Payment Methods > Receive Methods > Add Receive
 Bank).
 
 ## Configuration
