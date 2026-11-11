@@ -41318,6 +41318,7 @@ const syncAfriexPayoutDestinationForSavedMethod = async (params: {
   });
   const providerResolvedName = asNonEmptyString(resolved.recipientName);
   const accountNameVerified = !!providerResolvedName;
+  const receivesAppUserTransfers = countryCode !== "US";
   await markAfriexPayoutMethodSync({
     methodRef,
     state: "VERIFIED",
@@ -41337,14 +41338,19 @@ const syncAfriexPayoutDestinationForSavedMethod = async (params: {
       accountRouteVerified: true,
       accountNameVerified,
       providerResolvedName: providerResolvedName || admin.firestore.FieldValue.delete(),
-      // An App User destination requires an account-owner match, not merely a
-      // valid account number or institution. This reuses the one verified bank
-      // method instead of asking members to set up the route twice.
-      appUserReceiveRouteVerified: accountNameVerified,
-      appUserReceiveRouteLabel: accountNameVerified ?
+      // Afriex returns a holder name only where it has a lookup (NG/GH), and
+      // that name was matched above. Elsewhere the member's own confirmed
+      // name is what Afriex accepts, so the created destination can receive.
+      // US receive routes need the ABA routing number as the institution code,
+      // which only saveAppUserReceiveRoute records.
+      recipientNameConfirmationSource: accountNameVerified ?
+        "AFRIEX_LOCAL_BANK_NAME_ENQUIRY" :
+        "MEMBER_CONFIRMED_ACCOUNT_HOLDER",
+      appUserReceiveRouteVerified: receivesAppUserTransfers,
+      appUserReceiveRouteLabel: receivesAppUserTransfers ?
         `${resolved.institutionName || institution.institutionName || bankName} • ${accountNumber.slice(-4)}` :
         admin.firestore.FieldValue.delete(),
-      appUserReceiveRouteVerifiedAt: accountNameVerified ?
+      appUserReceiveRouteVerifiedAt: receivesAppUserTransfers ?
         admin.firestore.Timestamp.now() :
         admin.firestore.FieldValue.delete(),
     },

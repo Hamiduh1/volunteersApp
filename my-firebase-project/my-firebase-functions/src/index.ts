@@ -9126,6 +9126,8 @@ interface RecipientBeneficiary {
   recipientEmail?: string;
   recipientAddress?: string;
   bankAddress?: string;
+  correspondentBankName?: string;
+  correspondentBankAccountNumber?: string;
   invoiceReference?: string;
   providerChannel?: string;
   afriexProviderChannel?: string;
@@ -11161,18 +11163,9 @@ const buildRecipientPayoutMethodPublicPayload = (
 ): Record<string, unknown> | null => {
   // Shared iOS/Android documents use several historical type aliases. Normalize
   // before filtering so a verified route does not disappear on the other client.
-  const normalizedMethodType = normalizeMethodType(data.type || data.methodType);
-  const methodType = normalizedMethodType === "SWIFT" ? "SWIFT_BANK" : normalizedMethodType;
-  const deliveryRoute =
-    methodType === "SWIFT_BANK" ? "SWIFT" :
-      (methodType === "BANK" ? "BANK" :
-        (methodType === "MOBILE_MONEY" ? "MOBILE_MONEY" : null));
-  const requiresProviderNameMatch = deliveryRoute === "BANK" || deliveryRoute === "SWIFT";
-  const hasProviderNameMatch = data.accountNameVerified === true &&
-    !!asNonEmptyString(data.providerResolvedName);
+  const deliveryRoute = resolveAppUserReceiveRouteForMethod(data as Record<string, unknown>);
+  const methodType = deliveryRoute === "SWIFT" ? "SWIFT_BANK" : deliveryRoute;
   const isVerifiedReceiveRoute = data.appUserReceiveRouteVerified === true &&
-    (deliveryRoute === "BANK" || deliveryRoute === "MOBILE_MONEY" || deliveryRoute === "SWIFT") &&
-    (!requiresProviderNameMatch || hasProviderNameMatch) &&
     isAppUserReceiveRouteEnabled(data as Record<string, unknown>);
   if (!isVerifiedReceiveRoute || !deliveryRoute) {
     return null;
@@ -12330,6 +12323,16 @@ const assertSwiftBeneficiaryDetails = (beneficiary: RecipientBeneficiary): void 
   const bankName = asNonEmptyString(beneficiary.bankName, beneficiary.network);
   if (!bankName || !asNonEmptyString(beneficiary.accountNumber)) {
     throw new functions.https.HttpsError("invalid-argument", "Recipient bank and account number are required for SWIFT delivery.");
+  }
+  // Afriex refuses USD SWIFT payment methods without the intermediary bank.
+  if (
+    !asNonEmptyString(beneficiary.correspondentBankName) ||
+    !asNonEmptyString(beneficiary.correspondentBankAccountNumber)
+  ) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Enter the correspondent (intermediary) bank name and account number from the recipient bank's USD wire instructions."
+    );
   }
   if (country.iso2 === "US") {
     if (!routing || !/^\d{8,9}$/.test(routing)) {
@@ -13633,6 +13636,8 @@ interface SaveVerifiedBeneficiaryRequest {
   recipientEmail?: string;
   recipientAddress?: string;
   bankAddress?: string;
+  correspondentBankName?: string;
+  correspondentBankAccountNumber?: string;
   invoiceReference?: string;
   recipientDetailsConfirmed?: boolean;
   confirmedRecipientName?: string;
@@ -13938,6 +13943,8 @@ const verifiedBeneficiaryResponse = (
     recipientEmail: stored.recipientEmail || null,
     recipientAddress: stored.recipientAddress || null,
     bankAddress: stored.bankAddress || stored.institutionAddress || null,
+    correspondentBankName: stored.correspondentBankName || null,
+    correspondentBankAccountNumber: stored.correspondentBankAccountNumber || null,
     invoiceReference: stored.invoiceReference || null,
     providerResolvedName: stored.providerResolvedName || null,
     accountNameVerified: stored.accountNameVerified === true,
@@ -14201,6 +14208,8 @@ const verifyBeneficiaryForServerSave = async (
     const recipientEmail = asNonEmptyString(request.recipientEmail);
     const recipientAddress = asNonEmptyString(request.recipientAddress);
     const bankAddress = asNonEmptyString(request.bankAddress);
+    const correspondentBankName = asNonEmptyString(request.correspondentBankName);
+    const correspondentBankAccountNumber = asNonEmptyString(request.correspondentBankAccountNumber);
     const invoiceReference = asNonEmptyString(request.invoiceReference);
     const recipientPhone = normalizeAfriexIdentityPhone(asNonEmptyString(request.phone) || "");
     const confirmedRecipientPhone = normalizeAfriexIdentityPhone(
@@ -14246,6 +14255,8 @@ const verifyBeneficiaryForServerSave = async (
       recipientEmail,
       recipientAddress,
       bankAddress,
+      correspondentBankName,
+      correspondentBankAccountNumber,
       invoiceReference,
     });
     const verifiedInstitution = await verifyAfriexSwiftInstitution({
@@ -14285,6 +14296,8 @@ const verifyBeneficiaryForServerSave = async (
       recipientEmail: recipientEmail || null,
       recipientAddress: recipientAddress || null,
       bankAddress: bankAddress || null,
+      correspondentBankName: correspondentBankName || null,
+      correspondentBankAccountNumber: correspondentBankAccountNumber || null,
       invoiceReference: invoiceReference || null,
       providerResolvedName: null,
       accountNameVerified: false,
@@ -14739,6 +14752,8 @@ export const refreshSavedBeneficiaryVerification = functions.runWith({enforceApp
           recipientEmail: asNonEmptyString(legacy.recipientEmail) || undefined,
           recipientAddress: asNonEmptyString(legacy.recipientAddress) || undefined,
           bankAddress: asNonEmptyString(legacy.bankAddress) || undefined,
+          correspondentBankName: asNonEmptyString(legacy.correspondentBankName) || undefined,
+          correspondentBankAccountNumber: asNonEmptyString(legacy.correspondentBankAccountNumber) || undefined,
           invoiceReference: asNonEmptyString(legacy.invoiceReference) || undefined,
         };
         assertSwiftBeneficiaryDetails(recipient);
@@ -14761,6 +14776,8 @@ export const refreshSavedBeneficiaryVerification = functions.runWith({enforceApp
           recipientEmail: recipient.recipientEmail || null,
           recipientAddress: recipient.recipientAddress || null,
           bankAddress: recipient.bankAddress || null,
+          correspondentBankName: recipient.correspondentBankName || null,
+          correspondentBankAccountNumber: recipient.correspondentBankAccountNumber || null,
           invoiceReference: recipient.invoiceReference || null,
           providerResolvedName: null,
           accountNameVerified: false,
@@ -16062,8 +16079,9 @@ const assertAfriexBankSwiftProductionScope = (
         "This bank-account corridor is unavailable in the configured Afriex sandbox."
       );
     }
+    // US banks resolve by ABA routing number, not the institution catalog.
     const institutionCountries = configuredAfriexCountryAllowlist("AFRIEX_LOCAL_BANK_INSTITUTION_COUNTRIES");
-    if (institutionCountries.size > 0 && !institutionCountries.has(normalizedCountry)) {
+    if (normalizedCountry !== "US" && institutionCountries.size > 0 && !institutionCountries.has(normalizedCountry)) {
       throw new functions.https.HttpsError(
         "failed-precondition",
         "This country is not enabled for configured Afriex local-bank institution resolution."
@@ -16169,6 +16187,8 @@ const loadVerifiedBankSwiftBeneficiary = async (
     recipientEmail: asNonEmptyString(stored.recipientEmail, stored.beneficiaryEmail) || undefined,
     recipientAddress: asNonEmptyString(stored.recipientAddress, stored.recipientMailingAddress) || undefined,
     bankAddress: asNonEmptyString(stored.bankAddress, stored.institutionAddress, stored.bankMailingAddress) || undefined,
+    correspondentBankName: asNonEmptyString(stored.correspondentBankName) || undefined,
+    correspondentBankAccountNumber: asNonEmptyString(stored.correspondentBankAccountNumber) || undefined,
     invoiceReference: asNonEmptyString(stored.invoiceReference) || undefined,
   };
   if (route === "SWIFT") assertSwiftBeneficiaryDetails(beneficiary);
@@ -16288,6 +16308,120 @@ const resolveAfriexBankSwiftInstitution = async (
       "institutionAddress" in institution ? institution.institutionAddress : undefined
     ) || undefined,
   };
+};
+
+/**
+ * Builds a one-page PDF from plain text lines using a standard PDF font.
+ * @param {string[]} lines Text lines, top to bottom.
+ * @return {Buffer} PDF bytes.
+ */
+const buildPlainTextPdf = (lines: string[]): Buffer => {
+  const escapePdfText = (value: string): string => value
+    .replace(/[^\x20-\x7E]/g, "?")
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+  const content = [
+    "BT",
+    "/F1 11 Tf",
+    "16 TL",
+    "56 790 Td",
+    ...lines.map((line) => `(${escapePdfText(line)}) '`),
+    "ET",
+  ].join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${Buffer.byteLength(content, "latin1")} >>\nstream\n${content}\nendstream`,
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objects.forEach((body, index) => {
+    offsets.push(Buffer.byteLength(pdf, "latin1"));
+    pdf += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xrefOffset = Buffer.byteLength(pdf, "latin1");
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.forEach((offset) => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(pdf, "latin1");
+};
+
+/**
+ * Uploads the SWIFT transfer invoice to Afriex media storage. Afriex accepts
+ * only the returned object key as `meta.invoice` and checks that it exists.
+ * @param {object} params Invoice inputs.
+ * @param {AfriexBusinessApiConfig} params.config Afriex server configuration.
+ * @param {FirebaseFirestore.DocumentReference} params.payoutRef Payout request document.
+ * @param {FirebaseFirestore.DocumentData} params.data Payout request data.
+ * @param {RecipientBeneficiary} params.beneficiary SWIFT beneficiary.
+ * @param {AfriexInstitution} params.institution Verified SWIFT institution.
+ * @param {number} params.destinationAmount USD amount delivered.
+ * @return {Promise<string>} Afriex media key for the invoice.
+ */
+const uploadAfriexSwiftInvoice = async (params: {
+  config: AfriexBusinessApiConfig;
+  payoutRef: FirebaseFirestore.DocumentReference;
+  data: FirebaseFirestore.DocumentData;
+  beneficiary: RecipientBeneficiary;
+  institution: AfriexInstitution & {institutionAddress?: string};
+  destinationAmount: number;
+}): Promise<string> => {
+  const existingKey = asNonEmptyString(params.data.providerInvoiceKey);
+  if (existingKey) return existingKey;
+
+  const senderId = asNonEmptyString(params.data.senderId);
+  const senderSnap = senderId ? await db.collection("users").doc(senderId).get() : null;
+  const sender = (senderSnap?.data() || {}) as Record<string, unknown>;
+  const senderName = asNonEmptyString(sender.fullName, sender.displayName, sender.name) || "Sender";
+  const senderCountry = asNonEmptyString(sender.country, sender.countryCode, sender.profileCountry) || "";
+  const accountNumber = asNonEmptyString(params.beneficiary.accountNumber) || "";
+  const createdAtMs = toTimestampMillis(params.data.createdAt) || Date.now();
+  const lines = [
+    "SoftSolutions Technologies",
+    "International Transfer Invoice",
+    "",
+    `Invoice reference: ${params.payoutRef.id}`,
+    `Date: ${new Date(createdAtMs).toISOString().slice(0, 10)}`,
+    "",
+    `Payer: ${senderName}${senderCountry ? ` (${senderCountry})` : ""}`,
+    `Beneficiary: ${params.beneficiary.name}`,
+    `Beneficiary address: ${params.beneficiary.recipientAddress || ""}`,
+    `Beneficiary account: ****${accountNumber.slice(-4)}`,
+    `Beneficiary bank: ${params.institution.institutionName}`,
+    `SWIFT/BIC or routing: ${params.institution.institutionCode}`,
+    `Bank address: ${params.institution.institutionAddress || params.beneficiary.bankAddress || ""}`,
+    `Correspondent bank: ${params.beneficiary.correspondentBankName || ""}`,
+    `Destination country: ${params.beneficiary.country}`,
+    "",
+    `Amount: USD ${params.destinationAmount.toFixed(2)}`,
+    `Purpose: ${asNonEmptyString(params.data.note) || "Personal transfer between individuals"}`,
+  ];
+
+  const urlResponse = await axios.post(
+    `${params.config.baseUrl}/media/url`,
+    {fileName: `swift-invoice-${params.payoutRef.id}.pdf`, type: "transaction"},
+    {headers: params.config.headers, timeout: params.config.timeoutMs}
+  );
+  const urlData = parseAfriexDataObject(urlResponse.data);
+  const uploadUrl = asNonEmptyString(urlData["url"]);
+  const key = asNonEmptyString(urlData["key"]);
+  if (!uploadUrl || !key) {
+    throw new Error("Afriex did not return an invoice upload URL.");
+  }
+  await axios.put(uploadUrl, buildPlainTextPdf(lines), {
+    headers: {"Content-Type": "application/pdf"},
+    timeout: params.config.timeoutMs,
+  });
+  await params.payoutRef.set({
+    providerInvoiceKey: key,
+    providerInvoiceUploadedAt: admin.firestore.Timestamp.now(),
+  }, {merge: true});
+  return key;
 };
 
 const AFRIEX_BANK_SWIFT_SUBMISSION_LEASE_MS = 5 * 60 * 1000;
@@ -16510,6 +16644,10 @@ const processPendingAfriexBankSwiftPayout = async (
         institutionCode: institution.institutionCode,
         institutionName: institution.institutionName,
         ...(institution.institutionAddress ? {institutionAddress: institution.institutionAddress} : {}),
+        ...(route === "SWIFT" ? {
+          correspondentBankName: beneficiary.correspondentBankName,
+          correspondentBankAccountNumber: beneficiary.correspondentBankAccountNumber,
+        } : {}),
       },
       meta: {
         reference: payoutRef.id,
@@ -16549,6 +16687,16 @@ const processPendingAfriexBankSwiftPayout = async (
       }, {merge: true});
     }
 
+    const swiftInvoiceKey = route === "SWIFT" ?
+      await uploadAfriexSwiftInvoice({
+        config,
+        payoutRef,
+        data,
+        beneficiary,
+        institution,
+        destinationAmount,
+      }) :
+      null;
     const transactionPayload: Record<string, unknown> = {
       type: "WITHDRAW",
       sourceAmount: formatAfriexAmount(sourceAmount),
@@ -16561,9 +16709,9 @@ const processPendingAfriexBankSwiftPayout = async (
         idempotencyKey: `afriex_${route.toLowerCase()}_${payoutRef.id}`,
         narration: `VolunteersApp ${route === "SWIFT" ? "SWIFT" : "bank"} payout ${payoutRef.id}`,
         payoutRequestId: payoutRef.id,
-        ...(route === "SWIFT" ? {
+        ...(swiftInvoiceKey ? {
           invoiceReference: swiftInvoiceUrl || beneficiary.invoiceReference,
-          invoice: swiftInvoiceUrl || beneficiary.invoiceReference,
+          invoice: swiftInvoiceKey,
         } : {}),
       },
     };
@@ -18758,6 +18906,25 @@ const normalizeAppUserReceiveRouteType = (
   return null;
 };
 
+/**
+ * Both apps list a member's SWIFT bank as a BANK document whose delivery route
+ * or provider channel is SWIFT, so the route cannot be read from `type` alone.
+ * @param {Record<string, unknown>} methodData Saved payment-method data.
+ * @return {"BANK" | "MOBILE_MONEY" | "SWIFT" | null} Receive route.
+ */
+const resolveAppUserReceiveRouteForMethod = (
+  methodData: Record<string, unknown>
+): "BANK" | "MOBILE_MONEY" | "SWIFT" | null => {
+  const route = normalizeAppUserReceiveRouteType(methodData.type || methodData.methodType);
+  if (route !== "BANK") return route;
+  const channel = normalizeMethodType(asNonEmptyString(
+    methodData.deliveryRoute,
+    methodData.providerChannel,
+    methodData.afriexProviderChannel
+  ));
+  return channel === "SWIFT" ? "SWIFT" : "BANK";
+};
+
 const isAppUserReceiveRouteEnabled = (methodData: Record<string, unknown>): boolean => {
   const routeStatus = String(methodData.status || "").trim().toUpperCase();
   return routeStatus !== "DISABLED" && routeStatus !== "REVOKED";
@@ -18767,9 +18934,7 @@ const assertReadyAppUserReceiveRoute = async (params: {
   methodData: Record<string, unknown>;
   recipientCountry: string;
 }): Promise<{route: "BANK" | "MOBILE_MONEY" | "SWIFT"; recipient: RecipientBeneficiary}> => {
-  const route = normalizeAppUserReceiveRouteType(
-    params.methodData.type || params.methodData.methodType
-  );
+  const route = resolveAppUserReceiveRouteForMethod(params.methodData);
   if (!route || params.methodData.appUserReceiveRouteVerified !== true) {
     throw new functions.https.HttpsError(
       "failed-precondition",
@@ -18781,17 +18946,6 @@ const assertReadyAppUserReceiveRoute = async (params: {
     throw new functions.https.HttpsError(
       "failed-precondition",
       "The recipient's receive route is no longer enabled. Ask them to update it before retrying."
-    );
-  }
-
-  if (
-    (route === "BANK" || route === "SWIFT") &&
-    (params.methodData.accountNameVerified !== true ||
-      !asNonEmptyString(params.methodData.providerResolvedName))
-  ) {
-    throw new functions.https.HttpsError(
-      "failed-precondition",
-      "This bank route is saved for direct bank payouts, but it cannot receive App User transfers because the payment partner could not confirm the account holder name for this corridor."
     );
   }
 
@@ -18866,7 +19020,9 @@ const assertReadyAppUserReceiveRoute = async (params: {
       routingCode: asNonEmptyString(params.methodData.routingCode, params.methodData.routingNumber),
       recipientEmail: asNonEmptyString(params.methodData.recipientEmail, params.methodData.email),
       recipientAddress: asNonEmptyString(params.methodData.recipientAddress, params.methodData.address),
-      bankAddress: asNonEmptyString(params.methodData.bankAddress),
+      bankAddress: asNonEmptyString(params.methodData.bankAddress, params.methodData.institutionAddress),
+      correspondentBankName: asNonEmptyString(params.methodData.correspondentBankName),
+      correspondentBankAccountNumber: asNonEmptyString(params.methodData.correspondentBankAccountNumber),
       mobileNumber: recipientPhone || undefined,
     };
     assertSwiftBeneficiaryDetails(swiftRecipient);
@@ -27915,10 +28071,14 @@ interface SaveAppUserReceiveRouteRequest {
   recipientEmail?: unknown;
   recipientAddress?: unknown;
   bankAddress?: unknown;
+  correspondentBankName?: unknown;
+  correspondentBankAccountNumber?: unknown;
 }
 
 /**
  * Saves a member-owned local-bank or SWIFT receive route after resolving it with Afriex.
+ * Afriex returns an account holder name only for NG/GH local banks; elsewhere
+ * the member confirms their own name, as Afriex accepts for every payout.
  * Stripe ACH funding methods are intentionally not accepted as receive routes.
  */
 export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true})
@@ -27970,23 +28130,72 @@ export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true}
         recipientEmail: asNonEmptyString(request.recipientEmail),
         recipientAddress: asNonEmptyString(request.recipientAddress),
         bankAddress: asNonEmptyString(request.bankAddress),
+        correspondentBankName: asNonEmptyString(request.correspondentBankName),
+        correspondentBankAccountNumber: asNonEmptyString(request.correspondentBankAccountNumber),
         mobileNumber: phone || undefined,
       };
       assertSwiftBeneficiaryDetails(recipient);
-      await resolveAfriexBankSwiftInstitution(
+      const institution = await resolveAfriexBankSwiftInstitution(
         config,
         "SWIFT",
         country.iso2,
         recipient
       );
-      // The provider can validate SWIFT institution details but does not
-      // confirm that the named account holder owns this account. Keep SWIFT
-      // available for direct bank payouts, but do not expose it as a
-      // member-to-member receive route without that ownership proof.
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "This SWIFT bank route can be used for direct bank payouts, but it cannot receive App User transfers because the payment partner cannot confirm the account holder name for this corridor."
-      );
+      const swiftIdentity = `SWIFT:${country.iso2}:${institution.institutionCode}:${accountNumber}`;
+      const swiftRouteIdentity = createHash("sha256").update(swiftIdentity).digest("hex");
+      const swiftExisting = await methodsRef
+        .where("appUserReceiveRouteIdentity", "==", swiftRouteIdentity)
+        .limit(1)
+        .get();
+      const swiftMethodRef = swiftExisting.empty ? methodsRef.doc() : swiftExisting.docs[0].ref;
+      const swiftLabel = `${institution.institutionName} • ${accountNumber.slice(-4)}`;
+      const swiftBatch = db.batch();
+      swiftBatch.set(paymentMethodPrivateRef(context.auth.uid, swiftMethodRef.id), {
+        accountNumberRaw: accountNumber,
+        updatedAt: now,
+      }, {merge: true});
+      swiftBatch.set(swiftMethodRef, {
+        type: "BANK",
+        deliveryRoute: "SWIFT",
+        providerChannel: "SWIFT",
+        afriexProviderChannel: "SWIFT",
+        label: swiftLabel,
+        bankName: institution.institutionName,
+        accountHolderName,
+        accountNumber: maskedBankAccountNumber(accountNumber),
+        last4: accountNumber.slice(-4),
+        country: country.country,
+        currency: "USD",
+        institutionCode: institution.institutionCode,
+        institutionName: institution.institutionName,
+        swiftCode: institution.institutionCode,
+        routingCode: recipient.routingCode || null,
+        recipientEmail: recipient.recipientEmail || null,
+        recipientAddress: recipient.recipientAddress || null,
+        bankAddress: institution.institutionAddress || recipient.bankAddress || null,
+        correspondentBankName: recipient.correspondentBankName,
+        correspondentBankAccountNumber: recipient.correspondentBankAccountNumber,
+        phoneNumber: phone || null,
+        providerResolvedName: null,
+        accountNameVerified: false,
+        accountRouteVerified: true,
+        recipientNameConfirmationSource: "MEMBER_CONFIRMED_ACCOUNT_HOLDER",
+        appUserReceiveRouteVerified: true,
+        appUserReceiveRouteLabel: swiftLabel,
+        appUserReceiveRouteVerifiedAt: now,
+        appUserReceiveRouteIdentity: swiftRouteIdentity,
+        status: "VERIFIED",
+        ...(swiftExisting.empty ? {createdAt: now} : {}),
+        updatedAt: now,
+      }, {merge: true});
+      await swiftBatch.commit();
+
+      return {
+        success: true,
+        paymentMethodId: swiftMethodRef.id,
+        deliveryRoute: "SWIFT",
+        message: "SWIFT receive route saved.",
+      };
     }
 
     const resolved = await resolveAfriexBankAccount({
@@ -27995,12 +28204,6 @@ export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true}
       accountNumber,
       institutionCode,
     });
-    if (!resolved.accountNameVerified || !asNonEmptyString(resolved.recipientName)) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "This bank route is saved for direct bank payouts, but it cannot receive App User transfers because the payment partner could not confirm the account holder name for this corridor."
-      );
-    }
     if (
       resolved.accountNameVerified &&
       normalizeBeneficiaryName(accountHolderName) !== normalizeBeneficiaryName(resolved.recipientName || "")
@@ -28040,6 +28243,8 @@ export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true}
       providerResolvedName: resolved.accountNameVerified ? resolved.recipientName : null,
       accountNameVerified: resolved.accountNameVerified,
       accountRouteVerified: resolved.accountRouteVerified,
+      recipientNameConfirmationSource: resolved.accountNameVerified ?
+        "AFRIEX_LOCAL_BANK_NAME_ENQUIRY" : "MEMBER_CONFIRMED_ACCOUNT_HOLDER",
       appUserReceiveRouteVerified: true,
       appUserReceiveRouteLabel: `${resolved.institutionName} • ${accountNumber.slice(-4)}`,
       appUserReceiveRouteVerifiedAt: now,
@@ -28054,7 +28259,7 @@ export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true}
       success: true,
       paymentMethodId: methodRef.id,
       deliveryRoute: "BANK",
-      message: "Verified bank receive route saved.",
+      message: "Bank receive route saved.",
     };
   });
 
