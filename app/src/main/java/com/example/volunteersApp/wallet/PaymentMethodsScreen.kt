@@ -62,7 +62,9 @@ import com.google.firebase.functions.FirebaseFunctionsException
 import java.util.Locale
 
 private const val US_INSTANT_LINK_WATCHDOG_MS = 20_000L
-private const val ENABLE_US_INSTANT_BANK_LINK = false
+private const val ENABLE_US_INSTANT_BANK_LINK = true
+// Manual entry creates a legacy bank source that needs micro-deposit verification the app cannot complete.
+private const val ENABLE_US_MANUAL_BANK_LINK = false
 
 enum class StripeConnectOnboardingCallback {
     COMPLETED,
@@ -1805,6 +1807,7 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
     val scrollState = rememberScrollState()
     val currentUserEmail = Firebase.auth.currentUser?.email
     val hostActivity = remember(context) { context.findActivity() }
+    val bankLinkLifecycleOwner = LocalLifecycleOwner.current
 
     val collectBankAccountLauncher = remember(hostActivity) {
         val registryOwner = hostActivity as? ActivityResultRegistryOwner
@@ -1836,7 +1839,8 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                                     val saveResult = viewModel.addUsBankAccountFromFinancialConnections(
                                         stripePaymentMethodId = stripePaymentMethodId,
                                         label = label,
-                                        accountHolderName = holderName
+                                        accountHolderName = holderName,
+                                        setupIntentId = setupIntent?.id
                                     )
                                     Toast.makeText(
                                         context,
@@ -2001,6 +2005,7 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                 )
 
                 if (selectedCountryCode == "US" && ENABLE_US_INSTANT_BANK_LINK) {
+                    if (ENABLE_US_MANUAL_BANK_LINK) {
                     Text("US Bank Linking Mode", style = MaterialTheme.typography.labelMedium)
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -2029,9 +2034,15 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                             label = { Text("Manual Entry") }
                         )
                     }
+                    }
                     if (useInstantUsLink) {
                         Text(
                             text = "Instant mode uses a secure bank-link provider to verify your US bank account.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "By linking this account, you authorize SoftSolutions to debit it through Stripe for each transfer you approve, for the amount shown before you confirm, and to credit it to correct any erroneous debit. You can revoke this authorization by removing the bank in Payment Methods or contacting support.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -2092,10 +2103,14 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     if (launcher == null) {
                         Toast.makeText(
                             context,
-                            "Instant linking unavailable. Switched to Manual Entry.",
+                            if (ENABLE_US_MANUAL_BANK_LINK) {
+                                "Instant linking unavailable. Switched to Manual Entry."
+                            } else {
+                                "Secure bank linking is unavailable right now. Try again later."
+                            },
                             Toast.LENGTH_LONG
                         ).show()
-                        useInstantUsLink = false
+                        if (ENABLE_US_MANUAL_BANK_LINK) useInstantUsLink = false
                         return@Button
                     }
 
@@ -2134,16 +2149,24 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                             instantLaunchWatchdogJob?.cancel()
                             instantLaunchWatchdogJob = scope.launch {
                                 delay(US_INSTANT_LINK_WATCHDOG_MS)
-                                if (isAwaitingInstantResult && isSaving) {
+                                // While Stripe's bank login is on screen this screen is not resumed;
+                                // only a swallowed hand-off leaves it resumed.
+                                val linkScreenNotShown = bankLinkLifecycleOwner.lifecycle.currentState
+                                    .isAtLeast(Lifecycle.State.RESUMED)
+                                if (isAwaitingInstantResult && isSaving && linkScreenNotShown) {
                                     Log.w("PaymentMethods", "US instant bank linking watchdog timed out; switching to manual entry.")
                                     isAwaitingInstantResult = false
                                     isSaving = false
                                     pendingUsBankLabel = null
                                     pendingUsBankHolderName = null
-                                    useInstantUsLink = false
+                                    if (ENABLE_US_MANUAL_BANK_LINK) useInstantUsLink = false
                                     Toast.makeText(
                                         context,
-                                        "Instant linking did not open. Switched to Manual Entry. Your details are kept.",
+                                        if (ENABLE_US_MANUAL_BANK_LINK) {
+                                            "Instant linking did not open. Switched to Manual Entry. Your details are kept."
+                                        } else {
+                                            "Secure bank linking did not open. Your details are kept. Try again."
+                                        },
                                         Toast.LENGTH_LONG
                                     ).show()
                                 }
@@ -2161,7 +2184,7 @@ fun AddBankDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                             instantLaunchWatchdogJob = null
                             pendingUsBankLabel = null
                             pendingUsBankHolderName = null
-                            useInstantUsLink = false
+                            if (ENABLE_US_MANUAL_BANK_LINK) useInstantUsLink = false
                         }
                     }
                     return@Button

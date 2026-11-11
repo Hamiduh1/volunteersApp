@@ -706,14 +706,16 @@ class PaymentsViewModel : ViewModel() {
     suspend fun addUsBankAccountFromFinancialConnections(
         stripePaymentMethodId: String,
         label: String,
-        accountHolderName: String
+        accountHolderName: String,
+        setupIntentId: String? = null
     ): PaymentMethodActionResult {
-        val payload = mapOf(
-            "stripePaymentMethodId" to stripePaymentMethodId,
-            "label" to label,
-            "accountHolderName" to accountHolderName,
-            "isDefault" to _cards.value.isEmpty()
-        )
+        val payload = buildMap {
+            put("stripePaymentMethodId", stripePaymentMethodId)
+            put("label", label)
+            put("accountHolderName", accountHolderName)
+            put("isDefault", _cards.value.isEmpty())
+            if (!setupIntentId.isNullOrBlank()) put("setupIntentId", setupIntentId)
+        }
         return try {
             val rawMap = FunctionsClient.callMap(CallableFunction.ADD_US_BANK_ACCOUNT_FROM_FINANCIAL_CONNECTIONS, payload)
                 ?: throw IllegalStateException("No response from server.")

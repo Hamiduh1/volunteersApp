@@ -313,6 +313,8 @@ dependencies {
     implementation(libs.converter.gson)
     implementation(libs.gson)
     implementation(libs.stripe.android)
+    // CollectBankAccountLauncher silently shows nothing without the Financial Connections sheet.
+    implementation(libs.stripe.financial.connections)
 
     // Testing
     testImplementation(libs.junit)

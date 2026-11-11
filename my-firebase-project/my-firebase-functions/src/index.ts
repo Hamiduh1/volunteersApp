@@ -10812,6 +10812,61 @@ const findSavedMobileMoneyRecipientByPhone = (
   );
 };
 
+// Debits a verified US ACH funding bank. Banks linked through Financial Connections store a
+// us_bank_account payment method in chargeSourceId and are charged with a PaymentIntent under
+// their mandate; older banks are charged as legacy bank sources. Pending until the debit settles.
+const createAchFundingCharge = async (params: {
+  method: Record<string, unknown>;
+  customerId: string;
+  amountCents: number;
+  description: string;
+  metadata: Record<string, string>;
+  idempotencyKey: string;
+}): Promise<Stripe.Charge> => {
+  const chargeSourceId = asNonEmptyString(params.method.chargeSourceId);
+  if (!chargeSourceId) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "This bank account is missing ACH charge details. Re-link the account and try again."
+    );
+  }
+  if (!chargeSourceId.startsWith("pm_")) {
+    return getStripe().charges.create({
+      amount: params.amountCents,
+      currency: "usd",
+      customer: params.customerId,
+      source: chargeSourceId,
+      description: params.description,
+      metadata: params.metadata,
+    }, {idempotencyKey: params.idempotencyKey});
+  }
+  const mandateId = asNonEmptyString(params.method.achMandateId);
+  if (!mandateId) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "This bank account needs a new ACH authorization. Link it again in Payment Methods."
+    );
+  }
+  const intent = await getStripe().paymentIntents.create({
+    amount: params.amountCents,
+    currency: "usd",
+    customer: params.customerId,
+    payment_method: chargeSourceId,
+    payment_method_types: ["us_bank_account"],
+    mandate: mandateId,
+    confirm: true,
+    description: params.description,
+    metadata: params.metadata,
+    expand: ["latest_charge"],
+  }, {idempotencyKey: params.idempotencyKey});
+  const charge = intent.latest_charge;
+  if (charge && typeof charge !== "string") return charge;
+  if (intent.status === "requires_payment_method" || intent.status === "canceled") {
+    return {id: intent.id, status: "failed"} as Stripe.Charge;
+  }
+  throw new Error(`ACH PaymentIntent ${intent.id} has no charge yet (status: ${intent.status}).`);
+};
+
 type AfriexBusinessCustomer = {
   customerId: string;
   reference: string | null;
@@ -19541,14 +19596,14 @@ const initiateExternallyFundedAppUserTransfer = async (params: {
 
   let bankCharge: Stripe.Charge;
   try {
-    bankCharge = await getStripe().charges.create({
-      amount: Math.round(params.totalDeduction * 100),
-      currency: "usd",
-      customer: chargeCustomerId,
-      source: chargeSourceId,
+    bankCharge = await createAchFundingCharge({
+      method: fundingData,
+      customerId: chargeCustomerId,
+      amountCents: Math.round(params.totalDeduction * 100),
       description: `App User transfer to ${destination.recipientName}`,
       metadata: {senderId, payoutRequestId: payoutRef.id, fundingMethodId},
-    }, {idempotencyKey: `app_user_bank_${payoutRef.id}`});
+      idempotencyKey: `app_user_bank_${payoutRef.id}`,
+    });
   } catch (error) {
     const stripeError = error as Stripe.errors.StripeError;
     const confirmedFailure = stripeError?.type === "StripeCardError" ||
@@ -20032,14 +20087,14 @@ const initiateAfriexBankSwiftTransfer = async (params: {
     await recordFundingAttempt();
     let bankCharge: Stripe.Charge;
     try {
-      bankCharge = await getStripe().charges.create({
-        amount: amountInCents,
-        currency: "usd",
-        customer: chargeCustomerId,
-        source: chargeSourceId,
+      bankCharge = await createAchFundingCharge({
+        method: fundingData,
+        customerId: chargeCustomerId,
+        amountCents: amountInCents,
         description: `${params.destinationRoute === "SWIFT" ? "SWIFT" : "Bank"} transfer to ${recipientName}`,
         metadata: {senderId: params.senderId, payoutRequestId: payoutRef.id, fundingMethodId},
-      }, {idempotencyKey: `afriex_${params.destinationRoute.toLowerCase()}_bank_${payoutRef.id}`});
+        idempotencyKey: `afriex_${params.destinationRoute.toLowerCase()}_bank_${payoutRef.id}`,
+      });
     } catch (error) {
       const stripeError = error as Stripe.errors.StripeError;
       const confirmedFundingFailure = stripeError?.type === "StripeCardError" ||
@@ -21994,11 +22049,10 @@ const initiateTransferHandlerWithQuoteHold = async (
 
     let bankCharge: Stripe.Charge;
     try {
-      bankCharge = await getStripe().charges.create({
-        amount: amountToCharge,
-        currency: "usd",
-        customer: chargeCustomerId,
-        source: chargeSourceId,
+      bankCharge = await createAchFundingCharge({
+        method: fundingData,
+        customerId: chargeCustomerId,
+        amountCents: amountToCharge,
         description: `Bank-funded transfer to ${normalizedRecipient.name}`,
         metadata: {
           senderId,
@@ -22006,7 +22060,6 @@ const initiateTransferHandlerWithQuoteHold = async (
           fundingMethodId,
           beneficiaryVerificationId,
         },
-      }, {
         idempotencyKey: `bank_transfer_${payoutRequestRef.id}`,
       });
     } catch (error) {
@@ -23164,7 +23217,8 @@ export const createUsBankAccountSetupIntent = functions.runWith({enforceAppCheck
         usage: "off_session",
         payment_method_options: {
           us_bank_account: {
-            verification_method: "automatic",
+            // Micro-deposit verification has no in-app completion step, so only instant bank login is offered.
+            verification_method: "instant",
           },
         },
         metadata: {
@@ -23199,6 +23253,7 @@ export const createUsBankAccountSetupIntent = functions.runWith({enforceAppCheck
 
 interface AddUsBankAccountFromFinancialConnectionsRequest {
   stripePaymentMethodId?: string;
+  setupIntentId?: string;
   label?: string;
   accountHolderName?: string;
   isDefault?: boolean;
@@ -23232,6 +23287,67 @@ export const addUsBankAccountFromFinancialConnections = functions.runWith({enfor
       });
       customerId = customer.id;
       await setUserPrivateProfileFields(userId, {paymentCustomerId: customerId});
+    }
+
+    // ACH debits need a confirmed SetupIntent and its mandate (the customer's debit authorization).
+    let setupIntent: Stripe.SetupIntent | undefined;
+    try {
+      const requestedSetupIntentId = asNonEmptyString(request.setupIntentId);
+      setupIntent = requestedSetupIntentId ?
+        await getStripe().setupIntents.retrieve(requestedSetupIntentId) :
+        (await getStripe().setupIntents.list({
+          customer: customerId,
+          payment_method: stripePaymentMethodId,
+          limit: 1,
+        })).data[0];
+      if (setupIntent && setupIntent.status === "requires_confirmation") {
+        const userAgent = String(context.rawRequest?.headers?.["user-agent"] || "").trim();
+        const ipAddress = String(context.rawRequest?.ip || "").trim();
+        if (!userAgent || !ipAddress) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "We could not record your bank debit authorization. Try linking the bank again."
+          );
+        }
+        setupIntent = await getStripe().setupIntents.confirm(setupIntent.id, {
+          mandate_data: {
+            customer_acceptance: {
+              type: "online",
+              online: {ip_address: ipAddress, user_agent: userAgent},
+            },
+          },
+        });
+      }
+    } catch (error) {
+      if (error instanceof functions.https.HttpsError) throw error;
+      const stripeError = error as Stripe.errors.StripeError | undefined;
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        stripeError?.message || "Could not confirm the linked bank account with Stripe."
+      );
+    }
+    const setupIntentCustomerId = typeof setupIntent?.customer === "string" ?
+      setupIntent.customer :
+      setupIntent?.customer?.id;
+    const setupIntentPaymentMethodId = typeof setupIntent?.payment_method === "string" ?
+      setupIntent.payment_method :
+      setupIntent?.payment_method?.id;
+    const achMandateId = typeof setupIntent?.mandate === "string" ?
+      setupIntent.mandate :
+      setupIntent?.mandate?.id;
+    if (
+      !setupIntent ||
+      setupIntentCustomerId !== customerId ||
+      setupIntentPaymentMethodId !== stripePaymentMethodId ||
+      setupIntent.status !== "succeeded" ||
+      !achMandateId
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        setupIntent?.status === "requires_action" ?
+          "This bank needs micro-deposit verification, which is not supported yet. Link a bank you can sign in to." :
+          "The bank link was not completed. Link the bank again from this account."
+      );
     }
 
     let paymentMethod: Stripe.PaymentMethod;
@@ -23312,6 +23428,11 @@ export const addUsBankAccountFromFinancialConnections = functions.runWith({enfor
       isDefault: shouldBeDefault,
       chargePaymentMethodId: stripePaymentMethodId,
       chargeCustomerId: customerId,
+      // Same verified-ACH fields as legacy banks, so every funding check accepts this bank;
+      // createAchFundingCharge charges a pm_ id with a PaymentIntent under achMandateId.
+      chargeSourceId: stripePaymentMethodId,
+      chargeSourceStatus: "verified",
+      achMandateId,
       achDebitEnabled: true,
       requiresRelinkForCharges: false,
       chargeSetupCheckedAt: admin.firestore.Timestamp.now(),
