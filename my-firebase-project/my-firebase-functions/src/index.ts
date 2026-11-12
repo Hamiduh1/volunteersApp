@@ -13406,12 +13406,31 @@ export const getMobileMoneySupportedCountries = functions.runWith({enforceAppChe
       getRecipientRegistrationCountriesForProvider(providerName);
     const countries = purpose === "RECIPIENT_REGISTRATION" ?
       recipientRegistrationCountries : supportedCountries;
+    const bankSwiftLists = getAfriexSendableBankSwiftCountryLists();
+    const toCountryNames = (codes: string[]): string[] => codes
+      .map(transferCountryNameFromIso2)
+      .filter((name) => name.length > 0)
+      .sort((lhs, rhs) => lhs.localeCompare(rhs));
+    const bankPayoutSupportedCountries = toCountryNames(bankSwiftLists.bankCountryCodes);
+    const swiftPayoutSupportedCountries = toCountryNames(bankSwiftLists.swiftCountryCodes);
+    const bankInstitutionListCountries = toCountryNames(bankSwiftLists.bankInstitutionCountryCodes);
     return {
       providerName,
       purpose,
       countries,
       supportedCountries,
       recipientRegistrationCountries,
+      bankPayoutSupportedCountries,
+      bankPayoutSupportedCountryCodes: bankSwiftLists.bankCountryCodes,
+      bankPayoutDefaultCountry: bankPayoutSupportedCountries.includes("Nigeria") ?
+        "Nigeria" : bankPayoutSupportedCountries[0] || null,
+      swiftPayoutSupportedCountries,
+      swiftPayoutSupportedCountryCodes: bankSwiftLists.swiftCountryCodes,
+      swiftPayoutDefaultCountry: bankSwiftLists.swiftCountryCodes.includes("US") ?
+        "United States" : swiftPayoutSupportedCountries[0] || null,
+      bankInstitutionListCountries,
+      bankInstitutionListDefaultCountry: bankInstitutionListCountries.includes("Nigeria") ?
+        "Nigeria" : bankInstitutionListCountries[0] || null,
     };
   });
 
@@ -13535,11 +13554,42 @@ export const searchRecipientAddress = functions.runWith({enforceAppCheck: true})
  * resolves a routing/BIC code before a payout destination can be saved. The
  * client never receives an Afriex key.
  */
+const RECIPIENT_LOOKUP_RATE_LIMIT_COLLECTION = "recipient_lookup_rate_limits";
+const RECIPIENT_LOOKUPS_PER_HOUR_PER_SENDER = 20;
+
+// Hourly per-sender quota so account-name lookups cannot be used to enumerate bank or wallet holders.
+const reserveRecipientLookupQuota = async (
+  uid: string,
+  action: "RESOLVE_ACCOUNT" | "BANK_RECIPIENT_VERIFICATION"
+): Promise<void> => {
+  const hour = new Date().toISOString().slice(0, 13);
+  const ref = db.collection(RECIPIENT_LOOKUP_RATE_LIMIT_COLLECTION).doc(`${action}_${uid}_${hour}`);
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    const count = Math.trunc(Number(snap.get("count") || 0));
+    if (count >= RECIPIENT_LOOKUPS_PER_HOUR_PER_SENDER) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        "Too many recipient lookups. Please wait up to an hour and try again."
+      );
+    }
+    transaction.set(ref, {
+      uid,
+      action,
+      hour,
+      count: count + 1,
+      updatedAt: admin.firestore.Timestamp.now(),
+      expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 2 * 60 * 60 * 1000),
+    }, {merge: true});
+  });
+};
+
 export const resolveAfriexAccount = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be signed in to verify a recipient.");
     }
+    await reserveRecipientLookupQuota(context.auth.uid, "RESOLVE_ACCOUNT");
     const request = (data || {}) as ResolveAfriexAccountRequest;
     const channel = String(request.channel || "").trim().toUpperCase();
     if (channel !== "MOBILE_MONEY" && channel !== "BANK_ACCOUNT" && channel !== "SWIFT") {
@@ -14141,11 +14191,18 @@ const verifyBeneficiaryForServerSave = async (
         "Enter the recipient's full name. Afriex validates this local-bank corridor without returning the account name."
       );
     }
+    // A bank-verified account name is authoritative; it replaces the typed name instead of failing the save.
+    const bankProviderNameOverridden = resolved.accountNameVerified && (
+      normalizeBeneficiaryName(confirmedRecipientName) !== normalizeBeneficiaryName(storedRecipientName) ||
+      normalizeBeneficiaryName(requestedRecipientName || "") !== normalizeBeneficiaryName(storedRecipientName)
+    );
     if (
-      normalizeBeneficiaryName(confirmedRecipientName) !==
+      (!resolved.accountNameVerified && (
+        normalizeBeneficiaryName(confirmedRecipientName) !==
         normalizeBeneficiaryName(storedRecipientName) ||
       normalizeBeneficiaryName(requestedRecipientName || "") !==
-        normalizeBeneficiaryName(storedRecipientName) ||
+        normalizeBeneficiaryName(storedRecipientName)
+      )) ||
       confirmedAccountNumber !== accountNumber ||
       normalizeBeneficiaryPhoneDigits(confirmedRecipientPhone) !==
         normalizeBeneficiaryPhoneDigits(recipientPhone) ||
@@ -14187,6 +14244,8 @@ const verifyBeneficiaryForServerSave = async (
         "AFRIEX_LOCAL_BANK_NAME_ENQUIRY" : "CUSTOMER_CONFIRMED_LOCAL_BANK_DETAILS",
       recipientNameConfirmedAtMs: Date.now(),
       providerVerifiedAtMs: Date.now(),
+      providerNameOverridden: bankProviderNameOverridden,
+      customerEnteredRecipientName: bankProviderNameOverridden ? requestedRecipientName || null : null,
     };
   } else if (type === "SWIFT_BANK") {
     const country = assertTransferDestinationCorridor("SWIFT", countryInput);
@@ -14381,6 +14440,9 @@ export const createBankRecipientVerification = functions.runWith({enforceAppChec
         "invalid-argument",
         "The selected bank verification channel does not match the recipient route."
       );
+    }
+    if (context.auth?.uid) {
+      await reserveRecipientLookupQuota(context.auth.uid, "BANK_RECIPIENT_VERIFICATION");
     }
 
     const {senderId, stored} = await verifyBeneficiaryForServerSave(data, context);
@@ -16121,6 +16183,59 @@ const assertAfriexBankSwiftProductionScope = (
       "This local-bank country is not in the explicitly approved production allowlist."
     );
   }
+};
+
+const regionDisplayNames = (() => {
+  const DisplayNamesCtor = (Intl as unknown as {
+    DisplayNames?: new (locales: string[], options: {type: string}) => {of: (code: string) => string | undefined};
+  }).DisplayNames;
+  try {
+    return DisplayNamesCtor ? new DisplayNamesCtor(["en"], {type: "region"}) : null;
+  } catch (_error) {
+    return null;
+  }
+})();
+
+const transferCountryNameFromIso2 = (iso2: string): string => {
+  const canonical = Object.entries(afriexCountryIso2ByCanonical)
+    .find(([, code]) => code === iso2)?.[0];
+  if (canonical) return canonical;
+  if (iso2 === "US") return "United States";
+  const displayName = regionDisplayNames?.of(iso2) || "";
+  return displayName && displayName !== iso2 ? displayName : "";
+};
+
+// Countries are listed only when the send-time scope check would accept them.
+const getAfriexSendableBankSwiftCountryLists = (): {
+  bankCountryCodes: string[];
+  swiftCountryCodes: string[];
+  bankInstitutionCountryCodes: string[];
+} => {
+  const empty = {bankCountryCodes: [], swiftCountryCodes: [], bankInstitutionCountryCodes: []};
+  if (getMobileMoneyProviderName() !== "AFRIEX" || !isAfriexBankSwiftPayoutExecutionEnabled()) return empty;
+  let config: AfriexBusinessApiConfig;
+  try {
+    config = resolveAfriexBusinessApiConfig();
+  } catch (_error) {
+    return empty;
+  }
+  const passesScope = (route: "BANK" | "SWIFT", code: string): boolean => {
+    try {
+      assertAfriexBankSwiftProductionScope(config, route, code);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  };
+  const bankCountryCodes = [...configuredAfriexCountryAllowlist("AFRIEX_LOCAL_BANK_PRODUCTION_COUNTRIES")]
+    .filter((code) => passesScope("BANK", code))
+    .sort();
+  const swiftCountryCodes = [...configuredAfriexCountryAllowlist("AFRIEX_SWIFT_PAYOUT_PRODUCTION_COUNTRIES")]
+    .filter((code) => passesScope("SWIFT", code))
+    .sort();
+  // US banks use an ABA routing number instead of the institution picker.
+  const bankInstitutionCountryCodes = bankCountryCodes.filter((code) => code !== "US");
+  return {bankCountryCodes, swiftCountryCodes, bankInstitutionCountryCodes};
 };
 
 const loadVerifiedBankSwiftBeneficiary = async (
@@ -18474,7 +18589,11 @@ export const requestMobileMoneyMethodVerification = functions.runWith({enforceAp
     }
 
     if (getMobileMoneyProviderName() === "AFRIEX") {
-      assertAfriexLiveMobileMoneyDepositForCountry(country);
+      // Ownership needs only a live mobile-money corridor; funding paths enforce deposit support separately.
+      const canonicalCountry = canonicalMobileMoneyCountry(country) || country;
+      if (!getSupportedCountriesForProvider("AFRIEX").includes(canonicalCountry)) {
+        assertAfriexLiveMobileMoneyDepositForCountry(country);
+      }
     }
 
     const otpVerification = await assertMobileMoneyPhoneOtpVerified({

@@ -33343,6 +33343,19 @@ export const syncConnectPayoutMethods = functions.runWith({enforceAppCheck: true
       userId,
       (userSnap.data() || {}) as Record<string, unknown>
     );
+    const storedAccountId =
+      trimStringValue(userData.payoutAccountId) || trimStringValue(userData.stripeAccountId);
+    if (storedAccountId) {
+      try {
+        const storedAccount = await getStripe().accounts.retrieve(storedAccountId) as Stripe.Account;
+        // Express seller accounts belong to current seller onboarding and must never be cleared here.
+        if (!isStripeManagedRiskCommerceAccount(storedAccount)) {
+          return {syncedCount: 0, removedCount: 0, payoutsEnabled: storedAccount.payouts_enabled === true};
+        }
+      } catch (_error) {
+        // Unreadable accounts keep the existing resolution and cleanup below.
+      }
+    }
     const accountId = await resolveUsableStripeConnectAccountId(userId, userData);
     if (!accountId) {
       return {syncedCount: 0, removedCount: 0, payoutsEnabled: false};
