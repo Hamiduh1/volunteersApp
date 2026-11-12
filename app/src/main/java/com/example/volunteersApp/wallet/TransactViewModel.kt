@@ -3804,6 +3804,8 @@ class TransactViewModel : ViewModel() {
                     "recipientEmail" to beneficiary.recipientEmail,
                     "recipientAddress" to beneficiary.recipientAddress,
                     "bankAddress" to beneficiary.bankAddress,
+                    "correspondentBankName" to beneficiary.correspondentBankName,
+                    "correspondentBankAccountNumber" to beneficiary.correspondentBankAccountNumber,
                     "invoiceReference" to beneficiary.invoiceReference,
                     "recipientDetailsConfirmed" to beneficiary.recipientDetailsConfirmed,
                     "confirmedRecipientName" to beneficiary.name,
@@ -3915,6 +3917,10 @@ class TransactViewModel : ViewModel() {
                         ?: beneficiary.recipientAddress,
                     bankAddress = (result?.get("bankAddress") as? String)?.takeIf { it.isNotBlank() }
                         ?: beneficiary.bankAddress,
+                    correspondentBankName = (result?.get("correspondentBankName") as? String)
+                        ?.takeIf { it.isNotBlank() } ?: beneficiary.correspondentBankName,
+                    correspondentBankAccountNumber = (result?.get("correspondentBankAccountNumber") as? String)
+                        ?.takeIf { it.isNotBlank() } ?: beneficiary.correspondentBankAccountNumber,
                     invoiceReference = (result?.get("invoiceReference") as? String)?.takeIf { it.isNotBlank() }
                         ?: beneficiary.invoiceReference,
                     verificationStatus = verificationStatus?.takeIf { it.isNotBlank() }

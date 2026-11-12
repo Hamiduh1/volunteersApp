@@ -2817,6 +2817,8 @@ fun BeneficiaryRegistrationSheet(
     var swiftEmail by remember { mutableStateOf("") }
     var swiftAddress by remember { mutableStateOf("") }
     var swiftBankAddress by remember { mutableStateOf("") }
+    var swiftCorrespondentBankName by remember { mutableStateOf("") }
+    var swiftCorrespondentAccountNumber by remember { mutableStateOf("") }
     var transferDetails by remember { mutableStateOf("") }
     var accountNumber by remember { mutableStateOf("") }
     var accountNumberConfirmation by remember { mutableStateOf("") }
@@ -2982,6 +2984,8 @@ fun BeneficiaryRegistrationSheet(
             swiftEmail = ""
             swiftAddress = ""
             swiftBankAddress = ""
+            swiftCorrespondentBankName = ""
+            swiftCorrespondentAccountNumber = ""
             transferDetails = ""
             accountNumber = ""
             accountNumberConfirmation = ""
@@ -3663,6 +3667,33 @@ fun BeneficiaryRegistrationSheet(
                         }
                     )
                 }
+                OutlinedTextField(
+                    value = swiftCorrespondentBankName,
+                    onValueChange = {
+                        swiftCorrespondentBankName = it.take(140)
+                        clearSwiftRecipientConfirmation()
+                    },
+                    label = { Text("Correspondent bank name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = bankOutlinedFieldColors(),
+                    supportingText = {
+                        Text("Required: the intermediary bank from the recipient bank's USD wire instructions.")
+                    }
+                )
+                OutlinedTextField(
+                    value = swiftCorrespondentAccountNumber,
+                    onValueChange = {
+                        swiftCorrespondentAccountNumber = it.filter { ch -> ch.isLetterOrDigit() }.take(34)
+                        clearSwiftRecipientConfirmation()
+                    },
+                    label = { Text("Correspondent bank account number") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = bankOutlinedFieldColors(),
+                )
                 if (isAfriexSwiftOnlyPayoutCountry(country)) {
                     Text(
                         "SWIFT-only corridor: USD payout. Your quote applies any country pricing overrides before you confirm.",
@@ -4533,6 +4564,8 @@ fun BeneficiaryRegistrationSheet(
                             swiftAddress.isNotBlank() &&
                                 swiftBankAddress.isNotBlank()
                         }) &&
+                        swiftCorrespondentBankName.isNotBlank() &&
+                        swiftCorrespondentAccountNumber.isNotBlank() &&
                         country.isNotBlank() &&
                         accountError == null &&
                         !isResolvingBankInstitution &&
@@ -4756,6 +4789,9 @@ fun BeneficiaryRegistrationSheet(
                         recipientEmail = swiftEmail.trim().takeIf { it.isNotBlank() },
                         recipientAddress = swiftAddress.trim().takeIf { it.isNotBlank() },
                         bankAddress = swiftBankAddress.trim().takeIf { it.isNotBlank() },
+                        correspondentBankName = swiftCorrespondentBankName.trim().takeIf { isSwift && it.isNotBlank() },
+                        correspondentBankAccountNumber = swiftCorrespondentAccountNumber.trim()
+                            .takeIf { isSwift && it.isNotBlank() },
                         invoiceReference = transferDetails.trim().takeIf { it.isNotBlank() },
                         providerResolvedName = if (isProviderVerifiedLocalName) recipientName else null,
                         recipientDetailsConfirmed = true,

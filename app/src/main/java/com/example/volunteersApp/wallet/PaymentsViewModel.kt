@@ -869,6 +869,8 @@ class PaymentsViewModel : ViewModel() {
         recipientEmail: String? = null,
         recipientAddress: String? = null,
         bankAddress: String? = null,
+        correspondentBankName: String? = null,
+        correspondentBankAccountNumber: String? = null,
     ): PaymentMethodActionResult {
         return try {
             val payload = hashMapOf<String, Any>(
@@ -884,6 +886,10 @@ class PaymentsViewModel : ViewModel() {
             recipientEmail?.trim()?.takeIf { it.isNotEmpty() }?.let { payload["recipientEmail"] = it }
             recipientAddress?.trim()?.takeIf { it.isNotEmpty() }?.let { payload["recipientAddress"] = it }
             bankAddress?.trim()?.takeIf { it.isNotEmpty() }?.let { payload["bankAddress"] = it }
+            correspondentBankName?.trim()?.takeIf { it.isNotEmpty() }?.let { payload["correspondentBankName"] = it }
+            correspondentBankAccountNumber?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                payload["correspondentBankAccountNumber"] = it
+            }
             val rawMap = FunctionsClient.callMap(
                 CallableFunction.SAVE_APP_USER_RECEIVE_ROUTE,
                 payload

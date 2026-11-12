@@ -87,6 +87,8 @@ data class Beneficiary(
     val recipientEmail: String? = null,
     val recipientAddress: String? = null,
     val bankAddress: String? = null,
+    val correspondentBankName: String? = null,
+    val correspondentBankAccountNumber: String? = null,
     val invoiceReference: String? = null,
     val providerResolvedName: String? = null,
     // `true` only after the sender explicitly confirms the exact saved payout details.
@@ -187,6 +189,8 @@ internal fun DocumentSnapshot.toSharedBeneficiary(): Beneficiary {
         recipientEmail = text("recipientEmail"),
         recipientAddress = text("recipientAddress"),
         bankAddress = text("bankAddress", "institutionAddress"),
+        correspondentBankName = text("correspondentBankName"),
+        correspondentBankAccountNumber = text("correspondentBankAccountNumber"),
         invoiceReference = text("invoiceReference"),
         providerResolvedName = text("providerResolvedName"),
         recipientDetailsConfirmed = flag(

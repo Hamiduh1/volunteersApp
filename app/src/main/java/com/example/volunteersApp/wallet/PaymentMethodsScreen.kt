@@ -1384,13 +1384,14 @@ private fun AddBankReceiveRouteDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // The server saves a receive route only when the payout partner confirms the account holder name.
-    val countries = remember {
-        afriexLocalBankPayoutLiveCountries().filter { afriexLocalBankSupportsAccountNameEnquiry(it) }
-    }
+    // Only Nigeria and Ghana banks return the holder name; elsewhere the member confirms the account is theirs.
+    val countries = remember { afriexLocalBankPayoutLiveCountries() }
     var selectedCountry by remember { mutableStateOf(countries.firstOrNull().orEmpty()) }
     var accountHolderName by remember { mutableStateOf("") }
     var accountNumber by remember { mutableStateOf("") }
+    var routingNumber by remember { mutableStateOf("") }
+    var accountInMyName by remember { mutableStateOf(false) }
+    val isUsBank = remember(selectedCountry) { normalizeGlobalCountryIso(selectedCountry) == "US" }
     var institutions by remember { mutableStateOf<List<BankInstitutionOption>>(emptyList()) }
     var selectedInstitution by remember { mutableStateOf<BankInstitutionOption?>(null) }
     var countryExpanded by remember { mutableStateOf(false) }
@@ -1404,7 +1405,9 @@ private fun AddBankReceiveRouteDialog(
         institutions = emptyList()
         selectedInstitution = null
         loadError = null
-        if (countryCode.isBlank()) return@LaunchedEffect
+        routingNumber = ""
+        // US banks are identified by routing number instead of a bank list.
+        if (countryCode.isBlank() || countryCode == "US") return@LaunchedEffect
         isLoadingInstitutions = true
         try {
             institutions = viewModel.getAfriexBankInstitutions(countryCode)
@@ -1434,7 +1437,7 @@ private fun AddBankReceiveRouteDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    "Bank receive routes are available in ${countries.joinToString(" and ")}, where the bank confirms the account holder name. US bank accounts cannot receive member transfers yet.",
+                    "Bank receive routes are available in ${countries.joinToString(", ")}. Nigeria and Ghana banks confirm the account holder name; elsewhere you confirm the account is in your name.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1462,7 +1465,17 @@ private fun AddBankReceiveRouteDialog(
                         }
                     }
                 }
-                ExposedDropdownMenuBox(
+                if (isUsBank) {
+                    OutlinedTextField(
+                        value = routingNumber,
+                        onValueChange = { routingNumber = it.filter { ch -> ch.isDigit() }.take(9) },
+                        label = { Text("Routing number (9 digits)") },
+                        singleLine = true,
+                        isError = routingNumber.isNotEmpty() && routingNumber.length != 9,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else ExposedDropdownMenuBox(
                     expanded = institutionExpanded,
                     onExpandedChange = {
                         if (!isLoadingInstitutions && institutions.isNotEmpty()) institutionExpanded = it
@@ -1509,21 +1522,23 @@ private fun AddBankReceiveRouteDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                AccountInMyNameCheckbox(checked = accountInMyName, onCheckedChange = { accountInMyName = it })
             }
         },
         confirmButton = {
             Button(
-                enabled = !isSaving && selectedInstitution != null &&
+                enabled = !isSaving && accountInMyName &&
+                    (if (isUsBank) routingNumber.length == 9 else selectedInstitution != null) &&
                     accountHolderName.isNotBlank() && accountNumber.isNotBlank(),
                 onClick = {
-                    val institution = selectedInstitution ?: return@Button
+                    val institutionCode = if (isUsBank) routingNumber else selectedInstitution?.code ?: return@Button
                     isSaving = true
                     scope.launch {
                         val result = viewModel.saveAppUserBankReceiveRoute(
                             country = selectedCountry,
                             accountHolderName = accountHolderName,
                             accountNumber = accountNumber,
-                            institutionCode = institution.code
+                            institutionCode = institutionCode
                         )
                         isSaving = false
                         Toast.makeText(
@@ -1559,6 +1574,9 @@ private fun AddSwiftReceiveRouteDialog(
     var recipientEmail by remember { mutableStateOf("") }
     var recipientAddress by remember { mutableStateOf("") }
     var bankAddress by remember { mutableStateOf("") }
+    var correspondentBankName by remember { mutableStateOf("") }
+    var correspondentBankAccountNumber by remember { mutableStateOf("") }
+    var accountInMyName by remember { mutableStateOf(false) }
     var resolvedInstitution by remember { mutableStateOf<BankInstitutionOption?>(null) }
     var countryExpanded by remember { mutableStateOf(false) }
     var isResolving by remember { mutableStateOf(false) }
@@ -1727,12 +1745,22 @@ private fun AddSwiftReceiveRouteDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+                CorrespondentBankFields(
+                    bankName = correspondentBankName,
+                    onBankNameChange = { correspondentBankName = it },
+                    accountNumber = correspondentBankAccountNumber,
+                    onAccountNumberChange = { correspondentBankAccountNumber = it },
+                )
+                AccountInMyNameCheckbox(checked = accountInMyName, onCheckedChange = { accountInMyName = it })
             }
         },
         confirmButton = {
             Button(
                 enabled = !isSaving &&
                     resolvedInstitution != null &&
+                    accountInMyName &&
+                    correspondentBankName.isNotBlank() &&
+                    correspondentBankAccountNumber.isNotBlank() &&
                     accountHolderName.isNotBlank() &&
                     accountNumber.isNotBlank() &&
                     phone.isNotBlank() &&
@@ -1757,6 +1785,8 @@ private fun AddSwiftReceiveRouteDialog(
                             recipientEmail = recipientEmail.takeUnless { isUsSwift || it.isBlank() },
                             recipientAddress = recipientAddress.takeUnless { isUsSwift || it.isBlank() },
                             bankAddress = bankAddress.takeUnless { isUsSwift || it.isBlank() },
+                            correspondentBankName = correspondentBankName,
+                            correspondentBankAccountNumber = correspondentBankAccountNumber,
                         )
                         isSaving = false
                         Toast.makeText(
@@ -1770,6 +1800,48 @@ private fun AddSwiftReceiveRouteDialog(
             ) { Text(if (isSaving) "Verifying" else "Verify SWIFT route") }
         },
         dismissButton = { TextButton(enabled = !isSaving, onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun AccountInMyNameCheckbox(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+    ) {
+        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        Text("This account is in my name", style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** The payout partner needs the intermediary bank from the recipient bank's USD wire instructions. */
+@Composable
+fun CorrespondentBankFields(
+    bankName: String,
+    onBankNameChange: (String) -> Unit,
+    accountNumber: String,
+    onAccountNumberChange: (String) -> Unit,
+) {
+    Text(
+        "Find the correspondent (intermediary) bank in the recipient bank's USD wire instructions.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    OutlinedTextField(
+        value = bankName,
+        onValueChange = onBankNameChange,
+        label = { Text("Correspondent bank name") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    OutlinedTextField(
+        value = accountNumber,
+        onValueChange = { onAccountNumberChange(it.filter { ch -> ch.isLetterOrDigit() }.take(34)) },
+        label = { Text("Correspondent bank account number") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
     )
 }
 
