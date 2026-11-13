@@ -13560,7 +13560,8 @@ const RECIPIENT_LOOKUPS_PER_HOUR_PER_SENDER = 20;
 // Hourly per-sender quota so account-name lookups cannot be used to enumerate bank or wallet holders.
 const reserveRecipientLookupQuota = async (
   uid: string,
-  action: "RESOLVE_ACCOUNT" | "BANK_RECIPIENT_VERIFICATION"
+  action: "RESOLVE_ACCOUNT" | "BANK_RECIPIENT_VERIFICATION" | "SAVE_VERIFIED_RECIPIENT" |
+    "MOBILE_RECIPIENT_VERIFICATION"
 ): Promise<void> => {
   const hour = new Date().toISOString().slice(0, 13);
   const ref = db.collection(RECIPIENT_LOOKUP_RATE_LIMIT_COLLECTION).doc(`${action}_${uid}_${hour}`);
@@ -14380,6 +14381,9 @@ const verifyBeneficiaryForServerSave = async (
  */
 export const saveVerifiedBeneficiary = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
+    if (context.auth?.uid) {
+      await reserveRecipientLookupQuota(context.auth.uid, "SAVE_VERIFIED_RECIPIENT");
+    }
     const {senderId, stored} = await verifyBeneficiaryForServerSave(data, context);
     const recipientIdentityKey = buildVerifiedBeneficiaryIdentityKey(stored);
     const beneficiaries = db.collection("users").doc(senderId).collection("beneficiaries");
@@ -17931,6 +17935,9 @@ export const createBeneficiaryVerification = functions.runWith({enforceAppCheck:
       payload.recipientId
     );
     const isRecipientRegistration = !savedBeneficiaryId;
+    if (isRecipientRegistration) {
+      await reserveRecipientLookupQuota(senderId, "MOBILE_RECIPIENT_VERIFICATION");
+    }
     const reuseSavedRecipientVerification = payload.reuseSavedRecipientVerification === true;
     if (reuseSavedRecipientVerification && isRecipientRegistration) {
       throw new functions.https.HttpsError(
