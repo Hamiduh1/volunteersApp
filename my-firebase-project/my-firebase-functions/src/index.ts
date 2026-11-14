@@ -89,6 +89,7 @@ export {
 } from "./legacyDeployedFunctions/index.js";
 
 export {reconcileStaleLiveSessions};
+export {askAppAssistant, submitAIAssistantEscalation} from "./appAssistant.js";
 
 // The recovered legacy module may load first; share the default Firebase app.
 if (!admin.apps.length) {
