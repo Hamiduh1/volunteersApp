@@ -1331,6 +1331,8 @@ fun TransactScreen(
                 ) {
                 if (isMobileMoneyMode) {
                     MobileMoneyAmountStep(
+                        localCurrency = localReferenceCurrency,
+                        senderCountry = uiState.senderCountry,
                         amount = amount,
                         amountValue = amountValue,
                         senderCurrency = SEND_MONEY_CHARGE_CURRENCY,
@@ -1354,6 +1356,7 @@ fun TransactScreen(
                     )
                 } else if (isBankMode) {
                     BankAmountStep(
+                        localCurrency = localReferenceCurrency,
                         amount = amount,
                         amountValue = amountValue,
                         senderCurrency = SEND_MONEY_CHARGE_CURRENCY,
@@ -1378,6 +1381,8 @@ fun TransactScreen(
                     )
                 } else if (isAppUserMode) {
                     TransferAmountStep(
+                        localCurrency = localReferenceCurrency,
+                        senderCountry = uiState.senderCountry,
                         amount = amount,
                         amountValue = amountValue,
                         senderCurrency = SEND_MONEY_CHARGE_CURRENCY,
@@ -1424,6 +1429,8 @@ fun TransactScreen(
                 )
                 if (selectedRecipient is Beneficiary && amountValue > 0) {
                     MobileMoneyRoutingPreview(
+                        localCurrency = localReferenceCurrency,
+                        senderCountry = uiState.senderCountry,
                         recipient = selectedRecipient as Beneficiary,
                         amount = amountValue,
                         sourceCurrency = SEND_MONEY_CHARGE_CURRENCY,
@@ -6703,6 +6710,14 @@ private fun localSpendReferenceCurrencyOptions(defaultCurrency: String): List<St
     return (listOf(defaultCurrency, SEND_MONEY_CHARGE_CURRENCY) + catalog).distinct()
 }
 
+/** Sender's local currency leg (when it is not USD) followed by the USD transfer leg. */
+private fun sendMoneySourceLegs(senderCountry: String, localCurrency: String): String {
+    val local = localCurrency.trim().uppercase(Locale.US)
+    val usdLeg = "${countryFlag("US")} $SEND_MONEY_CHARGE_CURRENCY".trim()
+    if (local.isBlank() || local == SEND_MONEY_CHARGE_CURRENCY) return usdLeg
+    return "${"${countryFlag(senderCountry)} $local".trim()} → $usdLeg"
+}
+
 private fun localSpendReferenceCurrencyLabel(code: String): String {
     val name = runCatching { Currency.getInstance(code).getDisplayName(Locale.US) }.getOrNull()
     return if (name.isNullOrBlank() || name == code) code else "$code - $name"
@@ -6723,12 +6738,14 @@ private fun TransferAmountStep(
     selectedSource: PaymentMethod?,
     onRetryPricing: () -> Unit,
     onAmountChange: (String) -> Unit,
+    senderCountry: String = "",
+    localCurrency: String = senderCurrency,
 ) {
     val senderSymbol = runCatching { Currency.getInstance(senderCurrency).symbol }.getOrElse { "$" }
     TransferAmountInput(amount, senderCurrency, senderSymbol, onAmountChange)
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AssistChip(onClick = {}, enabled = false, label = { Text("You send $senderCurrency") }, modifier = Modifier.weight(1f))
-        AssistChip(onClick = {}, enabled = false, label = { Text("They get ${targetCurrency ?: "—"}") }, modifier = Modifier.weight(1f))
+        AssistChip(onClick = {}, enabled = false, label = { Text("You send ${sendMoneySourceLegs(senderCountry, localCurrency)}") }, modifier = Modifier.weight(1f))
+        AssistChip(onClick = {}, enabled = false, label = { Text("They get ${"${countryFlag(recipientCountry)} ${targetCurrency ?: "—"}".trim()}") }, modifier = Modifier.weight(1f))
     }
     if (amountValue > 0) {
         when {
@@ -6769,6 +6786,7 @@ private fun TransferAmountStep(
 
 @Composable
 private fun BankAmountStep(
+    localCurrency: String = SEND_MONEY_CHARGE_CURRENCY,
     amount: String,
     amountValue: Double,
     senderCurrency: String,
@@ -6828,7 +6846,7 @@ private fun BankAmountStep(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         SendMoneyInfoBadge(
-            text = "${countryFlag(senderCountry)} $senderCurrency",
+            text = sendMoneySourceLegs(senderCountry, localCurrency),
             modifier = Modifier.weight(1f),
             containerColor = BankAccentContainer,
             contentColor = BankText,
@@ -6847,6 +6865,7 @@ private fun BankAmountStep(
                 beneficiary = it,
                 sourceCurrency = senderCurrency,
                 sourceCountry = senderCountry,
+                localCurrency = localCurrency,
                 targetCurrency = targetCurrency,
                 selectedSource = selectedSource
             )
@@ -6860,6 +6879,7 @@ private fun BankAmountStep(
                 onRetry = onRetryPricing,
             )
             quote != null && beneficiary != null -> BankQuotePreviewCard(
+                localCurrency = localCurrency,
                 beneficiary = beneficiary,
                 quote = quote,
                 amount = amountValue,
@@ -6890,6 +6910,7 @@ private fun BankAmountStep(
 
 @Composable
 private fun BankRoutingPreview(
+    localCurrency: String = SEND_MONEY_CHARGE_CURRENCY,
     beneficiary: Beneficiary,
     sourceCurrency: String,
     sourceCountry: String,
@@ -6907,7 +6928,7 @@ private fun BankRoutingPreview(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Route preview", fontWeight = FontWeight.Bold, color = BankText)
             Text(
-                "${countryFlag(sourceCountry)} $sourceCurrency → ${countryFlag(beneficiary.country)} ${targetCurrency ?: "USD"}",
+                "${sendMoneySourceLegs(sourceCountry, localCurrency)} → ${countryFlag(beneficiary.country)} ${targetCurrency ?: "USD"}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = SendMoneyTextPrimary
             )
@@ -6965,6 +6986,7 @@ private fun TransferQuotePendingCard(message: String, onRetry: (() -> Unit)? = n
 
 @Composable
 private fun BankQuotePreviewCard(
+    localCurrency: String = SEND_MONEY_CHARGE_CURRENCY,
     beneficiary: Beneficiary,
     quote: WalletTransferQuote,
     amount: Double,
@@ -6988,7 +7010,7 @@ private fun BankQuotePreviewCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Live transfer quote", fontWeight = FontWeight.Bold, color = BankText)
             Text(
-                "${countryFlag(senderCountry)} $senderCurrency → ${countryFlag(beneficiary.country)} ${targetCurrency ?: quote.recipientCurrency ?: "USD"}",
+                "${sendMoneySourceLegs(senderCountry, localCurrency)} → ${countryFlag(beneficiary.country)} ${targetCurrency ?: quote.recipientCurrency ?: "USD"}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = SendMoneyTextPrimary
             )
@@ -7055,6 +7077,8 @@ private fun BankQuotePreviewCard(
 
 @Composable
 private fun MobileMoneyQuotePreviewCard(
+    localCurrency: String = SEND_MONEY_CHARGE_CURRENCY,
+    senderCountry: String = "",
     beneficiary: Beneficiary,
     quote: WalletTransferQuote,
     amount: Double,
@@ -7076,7 +7100,7 @@ private fun MobileMoneyQuotePreviewCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Live transfer quote", fontWeight = FontWeight.Bold, color = MobileMoneyText)
             Text(
-                "${countryFlag(beneficiary.country)} $senderCurrency → ${beneficiary.network} → ${targetCurrency ?: quote.recipientCurrency ?: "—"}",
+                "${sendMoneySourceLegs(senderCountry, localCurrency)} → ${beneficiary.network} → ${countryFlag(beneficiary.country)} ${targetCurrency ?: quote.recipientCurrency ?: "—"}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = SendMoneyTextPrimary
             )
@@ -7378,6 +7402,8 @@ private fun MobileMoneySelectedRecipientCard(
 
 @Composable
 private fun MobileMoneyAmountStep(
+    localCurrency: String = SEND_MONEY_CHARGE_CURRENCY,
+    senderCountry: String = "",
     amount: String,
     amountValue: Double,
     senderCurrency: String,
@@ -7436,7 +7462,7 @@ private fun MobileMoneyAmountStep(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         SendMoneyInfoBadge(
-            text = "You send $senderCurrency",
+            text = "You send ${sendMoneySourceLegs(senderCountry, localCurrency)}",
             modifier = Modifier.weight(1f),
             containerColor = MobileMoneyAccentContainer,
             contentColor = MobileMoneyText,
@@ -7452,6 +7478,8 @@ private fun MobileMoneyAmountStep(
     beneficiary?.let {
         if (quote == null && !isQuoteLoading) {
             MobileMoneyRoutingPreview(
+                localCurrency = localCurrency,
+                senderCountry = senderCountry,
                 recipient = it,
                 amount = amountValue,
                 sourceCurrency = senderCurrency,
@@ -7469,6 +7497,8 @@ private fun MobileMoneyAmountStep(
                 onRetry = onRetryPricing,
             )
             quote != null && beneficiary != null -> MobileMoneyQuotePreviewCard(
+                localCurrency = localCurrency,
+                senderCountry = senderCountry,
                 beneficiary = beneficiary,
                 quote = quote,
                 amount = amountValue,
@@ -7839,6 +7869,8 @@ private fun LaneFlowHeader(
 
 @Composable
 private fun MobileMoneyRoutingPreview(
+    localCurrency: String = SEND_MONEY_CHARGE_CURRENCY,
+    senderCountry: String = "",
     recipient: Beneficiary,
     amount: Double,
     sourceCurrency: String,
@@ -7868,7 +7900,7 @@ private fun MobileMoneyRoutingPreview(
                 color = SendMoneyTextPrimary
             )
             Text(
-                "$fundingLabel $sourceCurrency → ${recipient.network} (${countryFlag(recipient.country)} ${recipient.country}) → ${targetCurrency ?: "—"}",
+                "$fundingLabel ${sendMoneySourceLegs(senderCountry, localCurrency)} → ${recipient.network} (${countryFlag(recipient.country)} ${recipient.country}) → ${targetCurrency ?: "—"}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = SendMoneyTextPrimary
             )
