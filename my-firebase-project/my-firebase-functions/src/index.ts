@@ -1975,7 +1975,9 @@ const isFirstPartyMobileMoneyFeeCollection = (
 
 const normalizeFirstPartyFeePaymentRail = (value: unknown): "STRIPE" | "MOBILE_MONEY" => {
   const normalized = String(value || "STRIPE").trim().toUpperCase();
-  if (normalized === "STRIPE" || normalized === "MOBILE_MONEY") return normalized;
+  if (normalized === "STRIPE" || normalized === "STRIPE_CARD") return "STRIPE";
+  // iOS builds before Nov 2026 send the funding preference names for this field.
+  if (normalized === "MOBILE_MONEY" || normalized === "AFRIEX_MOBILE_MONEY") return "MOBILE_MONEY";
   throw new functions.https.HttpsError("invalid-argument", "Choose a supported payment method.");
 };
 
@@ -11160,7 +11162,8 @@ export const verifyAfriexCustomer = functions.runWith({enforceAppCheck: true})
 
 const buildRecipientPayoutMethodPublicPayload = (
   id: string,
-  data: FirebaseFirestore.DocumentData
+  data: FirebaseFirestore.DocumentData,
+  fallbackCountry?: string | null
 ): Record<string, unknown> | null => {
   // Shared iOS/Android documents use several historical type aliases. Normalize
   // before filtering so a verified route does not disappear on the other client.
@@ -11192,7 +11195,7 @@ const buildRecipientPayoutMethodPublicPayload = (
       ...base,
       bankName: asNonEmptyString(data.bankName, data.bank, data.institutionName) ||
         (deliveryRoute === "SWIFT" ? "SWIFT Bank" : "Bank Account"),
-      country: asNonEmptyString(data.country, data.countryCode) || "",
+      country: asNonEmptyString(data.country, data.countryCode, fallbackCountry) || "",
       institutionCode: asNonEmptyString(data.institutionCode, data.swiftCode, data.swiftBic) || "",
       swiftBic: asNonEmptyString(data.swiftCode, data.swiftBic) || "",
     };
@@ -11202,7 +11205,7 @@ const buildRecipientPayoutMethodPublicPayload = (
     return {
       ...base,
       network: asNonEmptyString(data.institutionName, data.network) || "Mobile Money",
-      country: asNonEmptyString(data.country, data.countryCode) || "",
+      country: asNonEmptyString(data.country, data.countryCode, fallbackCountry) || "",
       registeredName: asNonEmptyString(data.providerResolvedName, data.registeredName) || "",
     };
   }
@@ -19372,12 +19375,7 @@ const resolveAppUserPayoutDestination = async (params: {
   if (rawRoutingNumber) {
     methodData.routingNumber = rawRoutingNumber;
   }
-  const recipientCountry = asNonEmptyString(
-    methodData.country,
-    recipientData.country,
-    recipientData.profileCountry,
-    recipientData.homeCountry
-  );
+  const recipientCountry = resolveAppUserReceiveRouteCountry(methodData, recipientData);
   if (!recipientCountry) {
     throw new functions.https.HttpsError(
       "failed-precondition",
@@ -19550,6 +19548,12 @@ const initiateMobileMoneyFundedAppUserTransfer = async (params: {
       "Mobile money funding source is not verified. Complete verification before sending."
     );
   }
+  const senderSnapForLocale = await params.senderRef.get();
+  assertFundingMatchesSenderLocale({
+    fundingSourceType: "EXTERNAL_MOBILE_MONEY",
+    fundingMethod: fundingData,
+    senderData: (senderSnapForLocale.data() || {}) as Record<string, unknown>,
+  });
 
   const fundingPhone = asNonEmptyString(fundingData.phoneNumber);
   const fundingNetwork = asNonEmptyString(fundingData.network);
@@ -19722,47 +19726,12 @@ const initiateExternallyFundedAppUserTransfer = async (params: {
   if (!fundingMethodId) {
     throw new functions.https.HttpsError("failed-precondition", "Select a funding method.");
   }
-  const fundingMethodSnap = await senderRef.collection("payment_methods").doc(fundingMethodId).get();
-  if (!fundingMethodSnap.exists) {
-    throw new functions.https.HttpsError("not-found", "The selected funding method was not found.");
-  }
-  const fundingData = (fundingMethodSnap.data() || {}) as Record<string, unknown>;
-  const fundingMethodType = normalizeMethodType(fundingData.type || fundingData.methodType);
-  if (request.fundingSourceType === "EXTERNAL_CARD") {
-    const cardPaymentMethodId = asNonEmptyString(
-      fundingData.chargePaymentMethodId,
-      fundingData.stripePaymentMethodId
-    );
-    const cardCustomerId = asNonEmptyString(fundingData.chargeCustomerId, params.senderData.paymentCustomerId);
-    if (
-      fundingMethodType !== "CARD" ||
-      !cardPaymentMethodId ||
-      !cardCustomerId ||
-      fundingData.requiresRelinkForCharges === true
-    ) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Use a linked card that is ready for transfer funding."
-      );
-    }
-  }
-  if (request.fundingSourceType === "EXTERNAL_BANK") {
-    const bankCountry = resolveStripeConnectCountryCode(
-      asNonEmptyString(fundingData.country, fundingData.billingCountry)
-    );
-    if (
-      fundingMethodType !== "BANK" ||
-      !asNonEmptyString(fundingData.chargeSourceId) ||
-      !asNonEmptyString(fundingData.chargeCustomerId, params.senderData.paymentCustomerId) ||
-      String(fundingData.chargeSourceStatus || "").trim().toLowerCase() !== "verified" ||
-      bankCountry !== "US"
-    ) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Use a verified US ACH bank account for App User funding."
-      );
-    }
-  }
+  // Shared loader enforces charge-ready card / US ACH / sender-country locale.
+  const fundingData = await loadReadyExternalTransferFundingMethod({
+    senderId,
+    fundingSourceType: request.fundingSourceType,
+    fundingPaymentMethodId: fundingMethodId,
+  });
   const payoutRef = db.collection("payout_requests").doc();
   const now = admin.firestore.Timestamp.now();
   await payoutRef.set({
@@ -21660,6 +21629,11 @@ const initiateTransferHandlerWithQuoteHold = async (
         "Mobile money funding source is not verified. Complete a successful verification/deposit first."
       );
     }
+    assertFundingMatchesSenderLocale({
+      fundingSourceType: "EXTERNAL_MOBILE_MONEY",
+      fundingMethod: fundingData as Record<string, unknown>,
+      senderData: ((await senderRef.get()).data() || {}) as Record<string, unknown>,
+    });
 
     const recipient = requestData.recipientBeneficiary;
     const canonicalCountry = assertCountrySupportedForConfiguredProvider(recipient.country);
@@ -21929,20 +21903,24 @@ const initiateTransferHandlerWithQuoteHold = async (
         throw new functions.https.HttpsError("failed-precondition", "Select a funding card to cover the remaining balance.");
       }
 
-      const fundingMethodSnap = await senderRef.collection("payment_methods").doc(fundingMethodId).get();
-
-      // Enhanced error handling for missing payment method
-      if (!fundingMethodSnap.exists) {
-        functions.logger.error(`Payment method ${fundingMethodId} not found for user ${senderId}`);
-        throw new functions.https.HttpsError("not-found", "The selected funding card was not found. Please select another card.");
+      let fundingData: Record<string, unknown>;
+      try {
+        fundingData = await loadReadyExternalTransferFundingMethod({
+          senderId,
+          fundingSourceType: "EXTERNAL_CARD",
+          fundingPaymentMethodId: fundingMethodId,
+        });
+      } catch (error) {
+        functions.logger.error(`Payment method ${fundingMethodId} not ready for user ${senderId}`, error);
+        throw error;
       }
 
-      const fundingData = fundingMethodSnap.data() || {};
-
-      // Log the payment method data for debugging
       functions.logger.log(`Payment method data: type=${fundingData.type}, hasChargeId=${!!fundingData.chargePaymentMethodId}, hasStripeId=${!!fundingData.stripePaymentMethodId}`);
 
-      const chargePaymentMethodId = fundingData.chargePaymentMethodId || fundingData.stripePaymentMethodId;
+      const chargePaymentMethodId = asNonEmptyString(
+        fundingData.chargePaymentMethodId,
+        fundingData.stripePaymentMethodId,
+      );
       if (!chargePaymentMethodId) {
         // Provide context-aware error messages
         if (fundingData.requiresRelinkForCharges === true) {
@@ -22385,26 +22363,12 @@ const initiateTransferHandlerWithQuoteHold = async (
       throw new functions.https.HttpsError("failed-precondition", "Select an ACH-enabled bank account to fund this transfer.");
     }
 
-    const fundingMethodSnap = await senderRef.collection("payment_methods").doc(fundingMethodId).get();
-    if (!fundingMethodSnap.exists) {
-      throw new functions.https.HttpsError("not-found", "The selected bank account was not found.");
-    }
-
-    const fundingData = fundingMethodSnap.data() || {};
-    const fundingType = String(fundingData.type || "").toUpperCase();
-    if (fundingType !== "BANK") {
-      throw new functions.https.HttpsError("failed-precondition", "Selected funding method is not a bank account.");
-    }
-
-    const chargeSourceStatus = String(fundingData.chargeSourceStatus || "").trim().toLowerCase();
-    const achEnabled = !!asNonEmptyString(fundingData.chargeSourceId) &&
-        chargeSourceStatus === "verified";
-    if (!achEnabled) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "This bank account must be verified for ACH funding. Re-link and verify it in Payment Methods."
-      );
-    }
+    // Shared loader: verified US ACH only + sender profile must be US.
+    const fundingData = await loadReadyExternalTransferFundingMethod({
+      senderId,
+      fundingSourceType: "EXTERNAL_BANK",
+      fundingPaymentMethodId: fundingMethodId,
+    });
 
     const chargeSourceId = asNonEmptyString(fundingData.chargeSourceId);
     const chargeCustomerId = asNonEmptyString(
@@ -28513,13 +28477,16 @@ export const getRecipientPayoutMethods = functions.runWith({enforceAppCheck: tru
     }
 
     const methodsSnap = await recipientRef.collection("payment_methods").get();
+    const recipientData = (recipientSnap.data() || {}) as Record<string, unknown>;
 
     const methods = methodsSnap.docs.reduce<Array<Record<string, unknown>>>((acc, doc) => {
       const methodData = (doc.data() || {}) as Record<string, unknown>;
       // Cards and ACH funding records never become another member's receive
       // route. Only enabled, server-verified local bank, SWIFT, or mobile money
       // routes appear. Public payload construction enforces that filter.
-      const publicMethod = buildRecipientPayoutMethodPublicPayload(doc.id, methodData);
+      // Country resolution matches resolveAppUserPayoutDestination.
+      const fallbackCountry = resolveAppUserReceiveRouteCountry(methodData, recipientData);
+      const publicMethod = buildRecipientPayoutMethodPublicPayload(doc.id, methodData, fallbackCountry);
       if (publicMethod) acc.push(publicMethod);
       return acc;
     }, []);
@@ -31574,6 +31541,106 @@ const resolveTransferCorridorFees = async (args: {
  * @param {Object} params Sender, funding source type and payment method id.
  * @return {Promise<Record<string, unknown>>} The ready funding method document.
  */
+
+/**
+ * Single country resolution for App User receive routes so quote listing and
+ * send/resolution never disagree (method country first, then profile).
+ * @param {Record<string, unknown>} methodData Saved receive-route fields.
+ * @param {Record<string, unknown>|null|undefined} recipientData Recipient profile.
+ * @return {string|null} Resolved country name/code, or null when missing.
+ */
+const resolveAppUserReceiveRouteCountry = (
+  methodData: Record<string, unknown>,
+  recipientData?: Record<string, unknown> | null,
+): string | null => {
+  return asNonEmptyString(
+    methodData.country,
+    methodData.countryCode,
+    recipientData?.country,
+    recipientData?.profileCountry,
+    recipientData?.homeCountry,
+    recipientData?.countryCode,
+  ) || null;
+};
+
+/**
+ * Sender-country gate for funding. Cards are global. US ACH requires a US
+ * profile. Mobile money collection must use a verified number in the sender's
+ * profile country. Clients enforce the same rule; this blocks crafted calls.
+ * @param {{fundingSourceType: string, fundingMethod: Record<string, unknown>,
+ *   senderData: Record<string, unknown>}} params Funding type, method, sender.
+ */
+const assertFundingMatchesSenderLocale = (params: {
+  fundingSourceType: string;
+  fundingMethod: Record<string, unknown>;
+  senderData: Record<string, unknown>;
+}): void => {
+  const fundingType = String(params.fundingSourceType || "").trim().toUpperCase();
+  if (fundingType === "EXTERNAL_CARD") {
+    return;
+  }
+
+  const senderCountryRaw = asNonEmptyString(
+    params.senderData.country,
+    params.senderData.profileCountry,
+    params.senderData.homeCountry,
+    params.senderData.countryCode,
+  );
+  if (!senderCountryRaw) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Add your country in Profile before funding Send Money."
+    );
+  }
+  let senderIso: string;
+  try {
+    senderIso = resolveTransferCountry(senderCountryRaw).iso2;
+  } catch (_error) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Your profile country is not supported for Send Money funding. Update it in Profile."
+    );
+  }
+
+  if (fundingType === "EXTERNAL_BANK") {
+    if (senderIso !== "US") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "US ACH bank funding is only available when your profile country is the United States. Use a linked card instead."
+      );
+    }
+    return;
+  }
+
+  if (fundingType === "EXTERNAL_MOBILE_MONEY") {
+    const methodCountryRaw = asNonEmptyString(
+      params.fundingMethod.country,
+      params.fundingMethod.countryCode,
+    );
+    if (!methodCountryRaw) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Selected mobile money funding method is missing a country."
+      );
+    }
+    let methodIso: string;
+    try {
+      methodIso = resolveTransferCountry(methodCountryRaw).iso2;
+    } catch (_error) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Selected mobile money funding country is not supported."
+      );
+    }
+    if (methodIso !== senderIso) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Mobile money funding must use a verified number in your profile country. Use a linked card or update Payment Methods."
+      );
+    }
+  }
+};
+
 const loadReadyExternalTransferFundingMethod = async (params: {
   senderId: string;
   fundingSourceType: string;
@@ -31596,12 +31663,11 @@ const loadReadyExternalTransferFundingMethod = async (params: {
   const method = (methodSnap.data() || {}) as Record<string, unknown>;
   const methodType = normalizeMethodType(method.type || method.methodType);
   const fundingType = String(params.fundingSourceType || "").trim().toUpperCase();
+  const senderSnap = await db.collection("users").doc(params.senderId).get();
+  const senderData = (senderSnap.data() || {}) as Record<string, unknown>;
   const requiresBillingCustomer = fundingType === "EXTERNAL_CARD" || fundingType === "EXTERNAL_BANK";
   const senderPaymentCustomerId = requiresBillingCustomer ?
-    await readUserPaymentCustomerId(
-      params.senderId,
-      (await db.collection("users").doc(params.senderId).get()).data()
-    ) :
+    await readUserPaymentCustomerId(params.senderId, senderData) :
     undefined;
   const chargeCustomerId = asNonEmptyString(method.chargeCustomerId, senderPaymentCustomerId);
 
@@ -31620,6 +31686,11 @@ const loadReadyExternalTransferFundingMethod = async (params: {
         "Select a linked card that is ready to fund Send Money before requesting a live quote."
       );
     }
+    assertFundingMatchesSenderLocale({
+      fundingSourceType: fundingType,
+      fundingMethod: method,
+      senderData,
+    });
     return method;
   }
 
@@ -31640,6 +31711,11 @@ const loadReadyExternalTransferFundingMethod = async (params: {
         "Only verified US ACH bank accounts can fund Send Money. Use a linked card or verified mobile money instead."
       );
     }
+    assertFundingMatchesSenderLocale({
+      fundingSourceType: fundingType,
+      fundingMethod: method,
+      senderData,
+    });
     return method;
   }
 
@@ -31658,6 +31734,12 @@ const loadReadyExternalTransferFundingMethod = async (params: {
         "Select a verified mobile money funding method with a phone number, network, and country before requesting a live quote."
       );
     }
+    assertAfriexLiveMobileMoneyDepositForCountry(country);
+    assertFundingMatchesSenderLocale({
+      fundingSourceType: fundingType,
+      fundingMethod: method,
+      senderData,
+    });
     return method;
   }
 
