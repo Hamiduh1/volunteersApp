@@ -81,7 +81,7 @@ export const APP_ASSISTANT_GUIDE = `Screen and button names below come from the 
 ## Sponsored (Ads and Garage Sales)
 - Community Hub > Sponsored. Tabs: Overview, Ads, Garage.
 - Post an ad: + > "Post an ad" (4 steps): 1 Type (Lost, Found, Notice, Document, Ad); 2 title (up to 120 characters), description (up to 2,000), place, up to 4 photos; 3 Contact (Chat, Call and/or WhatsApp); 4 Duration (7 or 30 days).
-- Lost, Found, Notice and Document posts are free, up to 5 live at once. The "Ad" type may have a listing fee paid by card ("Continue to payment"); default $0. Found documents can't include photos and use in-app chat only.
+- Lost, Found, Notice and Document posts are free, up to 5 live at once. The "Ad" type may have a listing fee (default $0). Pay by card ("Continue to payment" opens secure Stripe checkout) or, where available, by verified mobile money ("Pay with mobile money" sends a prompt to your phone; the ad goes live after you approve it). Found documents can't include photos and use in-app chat only.
 - "Mark as resolved" / "Mark as found" takes the ad down 24 hours later. "My ads" has Edit and Delete.
 - Post a sale: + > "Post a sale" (4 steps, free): 1 kind of sale and dates (up to 7 days); 2 title, description, up to 8 categories, up to 8 photos/videos; 3 address and contact; 4 how buyers can pay (Cash, Card in app, Mobile money, Bank transfer; "Card in app" needs a payout account) > "Publish sale".
 - Sales are removed automatically the day after they end; "End sale now" or Delete anytime.
@@ -94,7 +94,11 @@ export const APP_ASSISTANT_GUIDE = `Screen and button names below come from the 
 - Search Creators (at least 2 characters); Follow/Unfollow on their profile; your profile is "My MindLoom". Post menu: Edit Post, Delete Post, Report Post, Block.
 - Upload limits: images under 12 MB, videos under 40 MB, PDFs under 16 MB.
 - Community Alerts (Menu): invitation updates, stream notices, announcements; tap "Watch Live" alerts to join.
-- Gallery Uploads isn't available in this version.
+- Event Gallery (Community Hub > Event Gallery): a shared photo feed of events members hosted or volunteered at.
+  - Browse a grid of photos; filter by event name; search events or members.
+  - Add photos: tap + (agree to Community Guidelines first) > Event name (reuse an existing name so photos are grouped) > Choose photos (up to 10) > Upload.
+  - Open a photo to share it, delete your own, or Report / Block another member. Platform admins can delete any photo.
+  - Photos are visible to every signed-in member. Only share photos you took or have permission to share.
 
 ## Social Inbox, Chat, Calls and Blocking
 - Social Inbox sections: Chats, Invitations, Calls.

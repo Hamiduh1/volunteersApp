@@ -3396,8 +3396,25 @@ service cloud.firestore {
     // iOS/Android shared Gallery feed metadata collection.
     match /galleryUploads/{uploadId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.uploaderId == request.auth.uid;
-      allow update, delete: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['name', 'imageUrl', 'imagePathInStorage', 'uploaderId',
+          'uploaderName', 'eventId', 'timestamp'])
+        && request.resource.data.keys().hasAll(['name', 'imageUrl', 'imagePathInStorage', 'uploaderId'])
+        && request.resource.data.uploaderId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.imagePathInStorage is string
+        && request.resource.data.imagePathInStorage.matches('gallery_uploads/' + request.auth.uid + '/[^/]+')
+        && request.resource.data.imageUrl is string
+        && request.resource.data.imageUrl.matches('https://firebasestorage[.]googleapis[.]com/.*')
+        && (!('uploaderName' in request.resource.data)
+          || (request.resource.data.uploaderName is string && request.resource.data.uploaderName.size() <= 80))
+        && (!('eventId' in request.resource.data)
+          || request.resource.data.eventId == null || request.resource.data.eventId is string)
+        && (!('timestamp' in request.resource.data) || request.resource.data.timestamp == request.time);
+      allow update: if false;
+      allow delete: if isSignedIn() && (resource.data.uploaderId == request.auth.uid || isPlatformAdmin());
     }
 
     match /purchase_requests/{requestId} {
