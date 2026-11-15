@@ -1,5 +1,5 @@
 /* eslint-disable max-len */
-import axios, {isAxiosError} from "axios";
+import axios from "axios";
 import {createHash} from "crypto";
 import * as admin from "firebase-admin";
 import * as functions from "firebase-functions/v1";
@@ -220,7 +220,9 @@ const generateAssistantReply = async (params: {
     ...params.history.map((turn) => ({role: turn.role, parts: [{text: turn.text}]})),
     {role: "user", parts: [{text: params.question}]},
   ];
-  const response = await axios.post(
+  const response = await axios.post<{
+    candidates?: Array<{content?: {parts?: Array<{text?: string}>}}>;
+  }>(
     vertexEndpoint(params.config),
     {
       systemInstruction: {parts: [{text: params.systemInstruction}]},
@@ -247,9 +249,9 @@ const generateAssistantReply = async (params: {
     }
   );
 
-  const candidate = response.data?.candidates?.[0];
-  const text = Array.isArray(candidate?.content?.parts) ?
-    candidate.content.parts.map((part: {text?: string}) => part.text || "").join("").trim() :
+  const parts = response.data?.candidates?.[0]?.content?.parts;
+  const text = Array.isArray(parts) ?
+    parts.map((part: {text?: string}) => part.text || "").join("").trim() :
     "";
   if (!text) {
     return {answer: "", answered: false};
@@ -440,12 +442,16 @@ export const askAppAssistant = functions
         history,
         question,
       });
-    } catch (error) {
-      const status = isAxiosError(error) ? error.response?.status : undefined;
+    } catch (error: unknown) {
+      const axiosError = error as {
+        isAxiosError?: boolean;
+        response?: {status?: number; data?: unknown};
+      };
+      const status = axiosError?.isAxiosError ? axiosError.response?.status : undefined;
       functions.logger.error("AI assistant model call failed", {
         status,
         model: config.model,
-        body: isAxiosError(error) ? error.response?.data : undefined,
+        body: axiosError?.isAxiosError ? axiosError.response?.data : undefined,
       });
       throw new functions.https.HttpsError("unavailable", "The assistant could not answer right now. Please try again.");
     }
