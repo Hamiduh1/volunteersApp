@@ -23,6 +23,8 @@ import com.example.volunteersApp.jokes.JokesFeatureScreen
 import com.example.volunteersApp.jokes.JokesViewModel
 import com.example.volunteersApp.jokes.UserProfileScreen
 import com.example.volunteersApp.marketplace.MarketplaceScreen
+import com.example.volunteersApp.ui.gallery.GalleryScreen
+import com.example.volunteersApp.ui.gallery.GalleryViewModel
 import com.example.volunteersApp.ui.profile.AccountSettingsActivity
 import com.example.volunteersApp.ui.profile.AiAssistantScreen
 import com.example.volunteersApp.ui.profile.AmlCftGuideScreen
@@ -103,6 +105,13 @@ fun NavGraphBuilder.addMirroredLoopDestinations(
     composable("ads") {
         AdvertisementFeatureScreen(
             viewModel = viewModel()
+        )
+    }
+
+    composable("gallery") {
+        GalleryScreen(
+            viewModel = viewModel<GalleryViewModel>(),
+            onBack = { navController.popBackStack() },
         )
     }
 

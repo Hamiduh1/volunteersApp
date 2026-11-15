@@ -54,17 +54,40 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.withStyle
+import com.example.volunteersApp.AssistantSupportReceipt
+import com.example.volunteersApp.AssistantTurn
 import com.example.volunteersApp.VertexViewModel
+import com.google.firebase.functions.FirebaseFunctionsException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
+private const val ASSISTANT_SUPPORT_EMAIL = "support@softsolutionstech.com"
 
 private data class ChatTurn(
     val text: String,
-    val fromUser: Boolean
+    val fromUser: Boolean,
+    val isNote: Boolean = false,
+    val question: String? = null,
+    val historyBefore: List<AssistantTurn> = emptyList(),
+    val offerSupport: Boolean = false,
+    val offerEmail: Boolean = false,
 )
 
 @Composable
 fun AiAssistantScreen(
     onBack: () -> Unit,
-    vertexViewModel: VertexViewModel
+    vertexViewModel: VertexViewModel,
+    screen: String = "AI Assistant",
 ) {
     val commonQuestions = remember {
         listOf(
@@ -85,6 +108,73 @@ fun AiAssistantScreen(
     var pendingPrompt by remember { mutableStateOf<String?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val inputFocusRequester = remember { FocusRequester() }
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var assistantBusy by remember { mutableStateOf(false) }
+
+    fun assistantHistory(): List<AssistantTurn> =
+        conversation
+            .filter { !it.isNote }
+            .map { AssistantTurn(text = it.text, fromUser = it.fromUser) }
+
+    fun addSupportOutcome(receipt: AssistantSupportReceipt) {
+        val note = when {
+            receipt.emailSent -> "Sent to support. They'll reply by email."
+            receipt.alreadyEscalated -> "Already sent to support. They'll reply by email."
+            else -> "Saved for the support team."
+        }
+        conversation.add(ChatTurn(text = note, fromUser = false, isNote = true))
+    }
+
+    fun requestSupport(
+        question: String,
+        aiAnswer: String?,
+        history: List<AssistantTurn>,
+        note: String? = null,
+    ) {
+        assistantBusy = true
+        coroutineScope.launch {
+            try {
+                addSupportOutcome(
+                    vertexViewModel.requestAssistantSupport(
+                        question = question,
+                        screen = screen,
+                        aiAnswer = aiAnswer,
+                        history = history,
+                        note = note,
+                    )
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                conversation.add(
+                    ChatTurn(
+                        text = "I couldn't reach support right now. You can email $ASSISTANT_SUPPORT_EMAIL instead.",
+                        fromUser = false,
+                        isNote = true,
+                        offerEmail = true,
+                    )
+                )
+            } finally {
+                assistantBusy = false
+            }
+        }
+    }
+
+    fun emailSupport() {
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$ASSISTANT_SUPPORT_EMAIL"))
+        try {
+            context.startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            conversation.add(
+                ChatTurn(
+                    text = "No email app found. Please write to $ASSISTANT_SUPPORT_EMAIL.",
+                    fromUser = false,
+                    isNote = true,
+                )
+            )
+        }
+    }
 
     val filteredQuestions = remember(promptInput, commonQuestions) {
         val query = promptInput.trim()
@@ -97,16 +187,77 @@ fun AiAssistantScreen(
 
     fun sendPrompt(rawPrompt: String) {
         val cleanPrompt = rawPrompt.trim()
-        if (cleanPrompt.isBlank() || vertexState.isLoading) return
+        if (cleanPrompt.isBlank() || assistantBusy) return
 
+        val history = assistantHistory()
         conversation.add(ChatTurn(text = cleanPrompt, fromUser = true))
-        pendingPrompt = cleanPrompt
+        assistantBusy = true
         faqExpanded = false
         promptInput = ""
 
-        vertexViewModel.generate(
-            buildInAppOnlyPrompt(cleanPrompt)
-        )
+        coroutineScope.launch {
+            try {
+                val reply = vertexViewModel.askAppAssistant(
+                    question = cleanPrompt,
+                    screen = screen,
+                    history = history,
+                )
+                conversation.add(
+                    ChatTurn(
+                        text = reply.answer.ifBlank { "I'm not sure about that one." },
+                        fromUser = false,
+                        question = cleanPrompt,
+                        historyBefore = history,
+                        offerSupport = !reply.escalated,
+                    )
+                )
+                if (reply.escalated) {
+                    conversation.add(
+                        ChatTurn(
+                            text = if (reply.emailSent) {
+                                "Sent to support. They'll reply by email."
+                            } else {
+                                "Saved for the support team."
+                            },
+                            fromUser = false,
+                            isNote = true,
+                        )
+                    )
+                }
+                assistantBusy = false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val code = (e as? FirebaseFunctionsException)?.code
+                if (code == FirebaseFunctionsException.Code.RESOURCE_EXHAUSTED) {
+                    conversation.add(
+                        ChatTurn(
+                            text = "You've reached the assistant limit for now. Please try again later, or send this question to support.",
+                            fromUser = false,
+                            isNote = true,
+                            question = cleanPrompt,
+                            historyBefore = history,
+                            offerSupport = true,
+                        )
+                    )
+                    assistantBusy = false
+                } else {
+                    conversation.add(
+                        ChatTurn(
+                            text = "I could not answer right now, so I'm sending your question to support.",
+                            fromUser = false,
+                            isNote = true,
+                        )
+                    )
+                    requestSupport(
+                        question = cleanPrompt,
+                        aiAnswer = null,
+                        history = history,
+                        note = "The assistant could not answer (${code ?: "error"}).",
+                    )
+                }
+            }
+        }
         inputFocusRequester.requestFocus()
         keyboardController?.show()
     }
@@ -148,6 +299,7 @@ fun AiAssistantScreen(
                         onClick = {
                             conversation.clear()
                             pendingPrompt = null
+                            assistantBusy = false
                             vertexViewModel.clearResponse()
                         }
                     ) {
@@ -185,7 +337,7 @@ fun AiAssistantScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(
                                 onClick = { sendPrompt(promptInput) },
-                                enabled = promptInput.isNotBlank() && !vertexState.isLoading
+                                enabled = promptInput.isNotBlank() && !assistantBusy
                             ) {
                                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                             }
@@ -230,7 +382,7 @@ fun AiAssistantScreen(
                             DropdownMenuItem(
                                 text = { Text(question) },
                                 onClick = {
-                                    promptInput = question
+                                    sendPrompt(question)
                                     faqExpanded = false
                                     inputFocusRequester.requestFocus()
                                     keyboardController?.show()
@@ -254,7 +406,7 @@ fun AiAssistantScreen(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
             ) {
-                if (conversation.isEmpty() && !vertexState.isLoading) {
+                if (conversation.isEmpty() && !assistantBusy) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -274,29 +426,75 @@ fun AiAssistantScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(conversation) { turn ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = if (turn.fromUser) Arrangement.End else Arrangement.Start
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = if (turn.fromUser) {
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-                                    } else {
-                                        MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f)
-                                    },
-                                    modifier = Modifier.widthIn(max = 320.dp)
-                                ) {
+                            val isLatest = turn === conversation.lastOrNull()
+                            if (turn.isNote) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Text(
                                         text = turn.text,
-                                        modifier = Modifier.padding(10.dp),
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontStyle = FontStyle.Italic,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 4.dp)
                                     )
+                                    if (isLatest && !assistantBusy && turn.offerSupport && turn.question != null) {
+                                        TextButton(
+                                            onClick = {
+                                                requestSupport(
+                                                    question = turn.question,
+                                                    aiAnswer = null,
+                                                    history = turn.historyBefore,
+                                                )
+                                            }
+                                        ) {
+                                            Text("Send to support")
+                                        }
+                                    }
+                                    if (isLatest && turn.offerEmail) {
+                                        TextButton(onClick = { emailSupport() }) {
+                                            Text("Email $ASSISTANT_SUPPORT_EMAIL")
+                                        }
+                                    }
+                                }
+                                return@items
+                            }
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = if (turn.fromUser) Arrangement.End else Arrangement.Start
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (turn.fromUser) {
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                        } else {
+                                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f)
+                                        },
+                                        modifier = Modifier.widthIn(max = 320.dp)
+                                    ) {
+                                        Text(
+                                            text = if (turn.fromUser) AnnotatedString(turn.text) else assistantMarkdown(turn.text),
+                                            modifier = Modifier.padding(10.dp),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                                if (isLatest && !assistantBusy && !turn.fromUser && turn.offerSupport && turn.question != null) {
+                                    TextButton(
+                                        onClick = {
+                                            requestSupport(
+                                                question = turn.question,
+                                                aiAnswer = turn.text,
+                                                history = turn.historyBefore,
+                                            )
+                                        }
+                                    ) {
+                                        Text("Didn't help? Send to support")
+                                    }
                                 }
                             }
                         }
 
-                        if (vertexState.isLoading) {
+                        if (assistantBusy) {
                             item {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -322,6 +520,39 @@ fun AiAssistantScreen(
     }
 }
 
+/** Renders the assistant's simple Markdown: **bold**, bullet and numbered lists. */
+private fun assistantMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+    val lines = text.replace("\r\n", "\n").split("\n")
+    lines.forEachIndexed { index, rawLine ->
+        val trimmed = rawLine.trimStart()
+        val line = when {
+            trimmed.startsWith("- ") || trimmed.startsWith("* ") -> "\u2022 " + trimmed.substring(2)
+            trimmed.startsWith("#") -> trimmed.trimStart('#').trimStart()
+            else -> rawLine.trimEnd()
+        }
+        appendWithBold(line)
+        if (index < lines.lastIndex) append('\n')
+    }
+}
+
+private fun AnnotatedString.Builder.appendWithBold(line: String) {
+    var cursor = 0
+    while (cursor < line.length) {
+        val start = line.indexOf("**", cursor)
+        val end = if (start >= 0) line.indexOf("**", start + 2) else -1
+        if (start < 0 || end < 0) {
+            append(line.substring(cursor))
+            return
+        }
+        append(line.substring(cursor, start))
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+            append(line.substring(start + 2, end))
+        }
+        cursor = end + 2
+    }
+}
+
+@Suppress("unused")
 private fun buildInAppOnlyPrompt(userPrompt: String): String {
     return """
         You are the in-app assistant for LVCAapp.

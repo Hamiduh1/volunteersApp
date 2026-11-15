@@ -204,6 +204,8 @@ object CallableFunction {
 
     // Social inbox push (iOS SessionManager parity)
     const val REGISTER_USER_PUSH_TOKENS = "registerUserPushTokens"
+    const val ASK_APP_ASSISTANT = "askAppAssistant"
+    const val SUBMIT_AI_ASSISTANT_ESCALATION = "submitAIAssistantEscalation"
     const val GET_CONVERSATION_MESSAGING_AVAILABILITY = "getConversationMessagingAvailability"
     const val GET_CONVERSATION_CALL_AVAILABILITY = "getConversationCallAvailability"
     const val GET_SOCIAL_INBOX_PUSH_DIAGNOSTICS = "getSocialInboxPushDiagnostics"

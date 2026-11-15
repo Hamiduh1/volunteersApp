@@ -966,6 +966,7 @@ fun CommunityHubScreen(onNavigate: (String) -> Unit) {
         CommunityTile("Dating Hub", "Discover & Blind Date", Icons.Default.Favorite, "date_eva", com.example.volunteersApp.date.DateA11yPalette.accentDiscover),
         CommunityTile("MindLoom", "Share and discover content", Icons.Default.SentimentVerySatisfied, "jokes", Color(0xFFE69F00)),
         CommunityTile("Sponsored", "Advertisements and garage sales", Icons.Default.Campaign, "ads", com.example.volunteersApp.advertisement.SponsoredA11yPalette.accentAds),
+        CommunityTile("Gallery Uploads", "Share event photos", Icons.Default.PhotoLibrary, "gallery", Color(0xFF5B8DEF)),
         CommunityTile("Social Inbox", "Chats, invitations, and calls", Icons.Default.Chat, SocialInboxNav.GRAPH_ROUTE, InboxEntry),
         CommunityTile("User Directory", "Browse app users and connect", Icons.Default.People, "browse_users", com.example.volunteersApp.chat.DirectoryA11yPalette.accent)
     )

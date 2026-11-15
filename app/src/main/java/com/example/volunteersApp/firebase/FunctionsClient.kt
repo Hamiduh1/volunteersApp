@@ -69,6 +69,8 @@ object FunctionsClient {
         CallableFunction.CREATE_LIVE_SHARE_ACCESS_LINK,
         CallableFunction.CREATE_LIVE_REPLAY_ACCESS_LINK,
         CallableFunction.REGISTER_USER_PUSH_TOKENS,
+        CallableFunction.ASK_APP_ASSISTANT,
+        CallableFunction.SUBMIT_AI_ASSISTANT_ESCALATION,
     )
 
     private suspend fun awaitAuthenticatedUser(timeoutMs: Long = AUTH_READY_TIMEOUT_MS): FirebaseUser {

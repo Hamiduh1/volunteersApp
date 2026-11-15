@@ -64,7 +64,7 @@ fun GalleryScreen(
             TopAppBar(
                 title = { 
                     Column {
-                        Text("Event Gallery", fontWeight = FontWeight.Bold)
+                        Text("Gallery Uploads", fontWeight = FontWeight.Bold)
                         Text("Share and view event photos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },

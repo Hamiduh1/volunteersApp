@@ -3,6 +3,8 @@ package com.example.volunteersApp
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.firebase.CallableFunction
+import com.example.volunteersApp.firebase.FunctionsClient
 import com.google.firebase.Firebase
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.vertexai.vertexAI
@@ -115,4 +117,85 @@ class VertexViewModel : ViewModel() {
     fun clearResponse() {
         _uiState.update { it.copy(generatedResponse = null, error = null) }
     }
+
+    /**
+     * In-app help assistant. Answers come from the server-side `askAppAssistant`
+     * callable (grounded in the app guide); unanswered questions are escalated there.
+     */
+    suspend fun askAppAssistant(
+        question: String,
+        screen: String,
+        history: List<AssistantTurn>,
+    ): AssistantAnswer {
+        val result = FunctionsClient.callMap(
+            CallableFunction.ASK_APP_ASSISTANT,
+            mapOf(
+                "question" to question,
+                "screen" to screen,
+                "platform" to "android",
+                "history" to assistantHistoryPayload(history),
+            ),
+        ).orEmpty()
+        return AssistantAnswer(
+            answer = (result["answer"] as? String)?.trim().orEmpty(),
+            answered = result["answered"] == true,
+            escalated = result["escalated"] == true,
+            emailSent = result["emailSent"] == true,
+        )
+    }
+
+    suspend fun requestAssistantSupport(
+        question: String,
+        screen: String,
+        aiAnswer: String?,
+        history: List<AssistantTurn>,
+        note: String? = null,
+    ): AssistantSupportReceipt {
+        val payload = buildMap<String, Any> {
+            put("question", question)
+            put("screen", screen)
+            put("platform", "android")
+            aiAnswer?.takeIf { it.isNotBlank() }?.let { put("aiAnswer", it) }
+            put("history", assistantHistoryPayload(history))
+            note?.takeIf { it.isNotBlank() }?.let { put("note", it) }
+        }
+        val result = FunctionsClient.callMap(
+            CallableFunction.SUBMIT_AI_ASSISTANT_ESCALATION,
+            payload,
+        ).orEmpty()
+        return AssistantSupportReceipt(
+            emailSent = result["emailSent"] == true,
+            alreadyEscalated = result["alreadyEscalated"] == true,
+        )
+    }
+
+    private fun assistantHistoryPayload(history: List<AssistantTurn>): List<Map<String, String>> =
+        history
+            .filter { it.text.isNotBlank() }
+            .takeLast(ASSISTANT_HISTORY_TURNS)
+            .map { turn ->
+                mapOf(
+                    "role" to if (turn.fromUser) "user" else "model",
+                    "text" to turn.text,
+                )
+            }
+
+    companion object {
+        const val ASSISTANT_HISTORY_TURNS = 10
+    }
 }
+
+/** One turn of the help-assistant conversation, oldest first. */
+data class AssistantTurn(val text: String, val fromUser: Boolean)
+
+data class AssistantAnswer(
+    val answer: String,
+    val answered: Boolean,
+    val escalated: Boolean,
+    val emailSent: Boolean,
+)
+
+data class AssistantSupportReceipt(
+    val emailSent: Boolean,
+    val alreadyEscalated: Boolean,
+)

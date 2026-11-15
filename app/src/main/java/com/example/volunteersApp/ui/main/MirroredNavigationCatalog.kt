@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Policy
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.SentimentVerySatisfied
@@ -33,6 +34,7 @@ object MirroredNavigationCatalog {
         MirroredNavItem("marketplace", "Marketplace"),
         MirroredNavItem("jokes", "MindLoom"),
         MirroredNavItem("ads", "Sponsored"),
+        MirroredNavItem("gallery", "Gallery Uploads"),
         MirroredNavItem("date_eva", "Dating Hub")
     )
 
@@ -60,6 +62,7 @@ object MirroredNavigationCatalog {
         "marketplace" to "Marketplace",
         "jokes" to "MindLoom",
         "ads" to "Sponsored",
+        "gallery" to "Gallery Uploads",
         "date_eva" to "Dating Hub",
         "account_settings" to "Account Settings",
         "privacy_settings" to "Security & Privacy",
@@ -86,6 +89,7 @@ object MirroredNavigationCatalog {
         "marketplace" -> Icons.Default.Storefront
         "jokes" -> Icons.Default.SentimentVerySatisfied
         "ads" -> Icons.Default.Campaign
+        "gallery" -> Icons.Default.PhotoLibrary
         "date_eva" -> Icons.Default.Event
         "account_settings" -> Icons.Default.ManageAccounts
         "privacy_settings" -> Icons.Default.Lock
