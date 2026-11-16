@@ -43389,6 +43389,26 @@ export const requestPasswordResetLink = functions.runWith({enforceAppCheck: true
 
     const maskedEmail = maskEmailAddress(email);
 
+    // App Check alone is not enough: throttle per email so a crafted client
+    // cannot mail-bomb a victim's inbox with reset links.
+    const hourKey = new Date().toISOString().slice(0, 13);
+    const emailKey = createHash("sha256").update(email).digest("hex").slice(0, 32);
+    const rateRef = db.collection("password_reset_rate_limits").doc(`${emailKey}_${hourKey}`);
+    await db.runTransaction(async (transaction) => {
+      const snap = await transaction.get(rateRef);
+      const count = Math.max(0, Math.trunc(Number((snap.data() || {}).count || 0)));
+      if (count >= 3) {
+        throw new functions.https.HttpsError(
+          "resource-exhausted",
+          "Too many password reset requests. Try again later."
+        );
+      }
+      transaction.set(rateRef, {
+        count: count + 1,
+        updatedAt: admin.firestore.Timestamp.now(),
+      }, {merge: true});
+    });
+
     try {
       const resetLink = await admin.auth().generatePasswordResetLink(email);
       await sendPasswordResetLinkMessage({toEmail: email, resetLink});

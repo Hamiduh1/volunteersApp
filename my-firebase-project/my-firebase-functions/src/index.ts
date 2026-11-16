@@ -28806,6 +28806,8 @@ const EMAIL_VERIFICATION_CODE_LENGTH = 6;
 const EMAIL_VERIFICATION_TTL_MS = 10 * 60 * 1000;
 const EMAIL_VERIFICATION_RESEND_COOLDOWN_MS = 2 * 60 * 1000;
 const EMAIL_VERIFICATION_MAX_ATTEMPTS = 5;
+const EMAIL_VERIFICATION_DAILY_SENDS_PER_USER = 10;
+const EMAIL_VERIFICATION_RATE_LIMIT_COLLECTION = "email_verification_rate_limits";
 
 const getEmailVerificationConfig = (): {
   provider: string;
@@ -28820,8 +28822,13 @@ const getEmailVerificationConfig = (): {
   const fromEmail = asNonEmptyString(process.env.EMAIL_FROM_ADDRESS, process.env.RESEND_FROM_EMAIL);
   const codeSecret =
     asNonEmptyString(process.env.EMAIL_VERIFICATION_CODE_SECRET) ||
-    asNonEmptyString(process.env.ADMIN_PAYOUT_REVERSAL_SECRET) ||
-    "volunteersapp-email-verification-default-secret";
+    asNonEmptyString(process.env.ADMIN_PAYOUT_REVERSAL_SECRET);
+  if (!codeSecret) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "EMAIL_VERIFICATION_CODE_SECRET is not configured."
+    );
+  }
   return {
     provider,
     resendApiKey: resendApiKey || undefined,
@@ -28905,6 +28912,31 @@ const sendEmailVerificationCodeMessage = async (params: {
   );
 };
 
+const utcDayKey = (ms: number = Date.now()): string =>
+  new Date(ms).toISOString().slice(0, 10);
+
+const reserveEmailVerificationSendQuota = async (uid: string): Promise<void> => {
+  const dayKey = utcDayKey();
+  const ref = db.collection(EMAIL_VERIFICATION_RATE_LIMIT_COLLECTION).doc(`user_${uid}_${dayKey}`);
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    const data = (snap.data() || {}) as Record<string, unknown>;
+    const count = Math.max(0, Math.trunc(Number(data.count || 0)));
+    if (count >= EMAIL_VERIFICATION_DAILY_SENDS_PER_USER) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        "Too many verification emails requested today. Try again tomorrow."
+      );
+    }
+    transaction.set(ref, {
+      uid,
+      dayKey,
+      count: count + 1,
+      updatedAt: admin.firestore.Timestamp.now(),
+    }, {merge: true});
+  });
+};
+
 const requestEmailVerificationCodeCore = async (uid: string): Promise<{
   success: boolean;
   alreadyVerified: boolean;
@@ -28953,6 +28985,8 @@ const requestEmailVerificationCodeCore = async (uid: string): Promise<{
       }
     }
   }
+
+  await reserveEmailVerificationSendQuota(uid);
 
   const code = generateSixDigitEmailVerificationCode();
   const codeHash = hashEmailVerificationCode({uid, email, code});
@@ -29936,19 +29970,6 @@ export const verifyEmailVerificationCode = functions.runWith({enforceAppCheck: t
       );
     }
 
-    const attempts = Math.max(0, Math.trunc(Number(codeData.attempts || 0)));
-    const maxAttempts = Math.max(1, Math.trunc(Number(codeData.maxAttempts || EMAIL_VERIFICATION_MAX_ATTEMPTS)));
-    if (attempts >= maxAttempts) {
-      await codeRef.set({
-        status: "LOCKED",
-        updatedAt: admin.firestore.Timestamp.now(),
-      }, {merge: true});
-      throw new functions.https.HttpsError(
-        "permission-denied",
-        "Too many invalid attempts. Request a new verification code."
-      );
-    }
-
     const storedHash = asNonEmptyString(codeData.codeHash);
     if (!storedHash) {
       throw new functions.https.HttpsError(
@@ -29963,38 +29984,94 @@ export const verifyEmailVerificationCode = functions.runWith({enforceAppCheck: t
       code: rawCode,
     });
 
-    if (incomingHash !== storedHash) {
-      const nextAttempts = attempts + 1;
-      const remainingAttempts = Math.max(0, maxAttempts - nextAttempts);
-      const shouldLock = nextAttempts >= maxAttempts;
-      await codeRef.set({
-        attempts: nextAttempts,
-        status: shouldLock ? "LOCKED" : status,
-        lastAttemptAt: admin.firestore.Timestamp.now(),
-        updatedAt: admin.firestore.Timestamp.now(),
-      }, {merge: true});
-
-      if (shouldLock) {
+    // Count attempts inside a transaction so parallel guesses cannot exceed the cap.
+    const reservation = await db.runTransaction(async (transaction) => {
+      const snap = await transaction.get(codeRef);
+      if (!snap.exists) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Verification code not found. Request a new code."
+        );
+      }
+      const live = (snap.data() || {}) as Record<string, unknown>;
+      const liveStatus = String(live.status || "SENT").trim().toUpperCase();
+      if (liveStatus === "VERIFIED") {
+        return {alreadyVerified: true as const};
+      }
+      if (liveStatus === "LOCKED") {
         throw new functions.https.HttpsError(
           "permission-denied",
           "Too many invalid attempts. Request a new verification code."
         );
       }
-      throw new functions.https.HttpsError(
-        "permission-denied",
-        `Invalid code. ${remainingAttempts} attempt(s) remaining.`
+      const liveExpires = toMillisTimestamp(live.expiresAt) || Number(live.expiresAtMs || 0);
+      if (!Number.isFinite(liveExpires) || liveExpires <= Date.now()) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Verification code expired. Request a new code."
+        );
+      }
+      const attempts = Math.max(0, Math.trunc(Number(live.attempts || 0)));
+      const maxAttempts = Math.max(
+        1,
+        Math.trunc(Number(live.maxAttempts || EMAIL_VERIFICATION_MAX_ATTEMPTS))
       );
+      if (attempts >= maxAttempts) {
+        transaction.set(codeRef, {
+          status: "LOCKED",
+          updatedAt: admin.firestore.Timestamp.now(),
+        }, {merge: true});
+        throw new functions.https.HttpsError(
+          "permission-denied",
+          "Too many invalid attempts. Request a new verification code."
+        );
+      }
+      const liveHash = asNonEmptyString(live.codeHash);
+      if (!liveHash || liveHash !== incomingHash) {
+        const nextAttempts = attempts + 1;
+        const shouldLock = nextAttempts >= maxAttempts;
+        transaction.set(codeRef, {
+          attempts: nextAttempts,
+          status: shouldLock ? "LOCKED" : liveStatus,
+          lastAttemptAt: admin.firestore.Timestamp.now(),
+          updatedAt: admin.firestore.Timestamp.now(),
+        }, {merge: true});
+        if (shouldLock) {
+          throw new functions.https.HttpsError(
+            "permission-denied",
+            "Too many invalid attempts. Request a new verification code."
+          );
+        }
+        const remainingAttempts = Math.max(0, maxAttempts - nextAttempts);
+        throw new functions.https.HttpsError(
+          "permission-denied",
+          `Invalid code. ${remainingAttempts} attempt(s) remaining.`
+        );
+      }
+      const now = admin.firestore.Timestamp.now();
+      transaction.set(codeRef, {
+        status: "VERIFIED",
+        verifiedAt: now,
+        verifiedAtMs: Date.now(),
+        attempts: attempts + 1,
+        updatedAt: now,
+      }, {merge: true});
+      return {alreadyVerified: false as const, attempts: attempts + 1};
+    });
+
+    if (reservation.alreadyVerified) {
+      await admin.auth().updateUser(uid, {emailVerified: true});
+      const now = admin.firestore.Timestamp.now();
+      await db.collection("users").doc(uid).set({
+        emailVerified: true,
+        emailVerifiedAt: now,
+        updatedAt: now,
+      }, {merge: true});
+      return {success: true, alreadyVerified: true};
     }
 
     const now = admin.firestore.Timestamp.now();
     await admin.auth().updateUser(uid, {emailVerified: true});
-    await codeRef.set({
-      status: "VERIFIED",
-      verifiedAt: now,
-      verifiedAtMs: nowMs,
-      attempts: attempts + 1,
-      updatedAt: now,
-    }, {merge: true});
     await db.collection("users").doc(uid).set({
       emailVerified: true,
       emailVerifiedAt: now,
@@ -30013,13 +30090,39 @@ export const requestMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tr
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
     const uid = context.auth.uid;
-    const payload = (data || {}) as {phoneNumber?: unknown; dialCode?: unknown};
+    const payload = (data || {}) as {phoneNumber?: unknown; dialCode?: unknown; purpose?: unknown};
     const phoneE164 = normalizeMobileMoneyPhoneE164(payload.phoneNumber, payload.dialCode);
     const phoneDigits = normalizeDigits(phoneE164);
     if (phoneDigits.length < 8 || phoneDigits.length > 15) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Provide a valid phone number in international format."
+      );
+    }
+
+    const purpose = String(payload.purpose || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
+    const userSnapForPhone = await db.collection("users").doc(uid).get();
+    const userDataForPhone = (userSnapForPhone.data() || {}) as Record<string, unknown>;
+    const profilePhoneDigits = normalizeDigits(
+      userDataForPhone.phoneNumber || userDataForPhone.phone || userDataForPhone.mobile || ""
+    );
+    if (purpose === "ACCOUNT_PHONE" || purpose === "ACCOUNT_VERIFICATION") {
+      // Signup / login phone unlock must prove the profile number, not an arbitrary SMS target.
+      if (!profilePhoneDigits || profilePhoneDigits !== phoneDigits) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Account phone verification must use the phone number saved on your profile."
+        );
+      }
+    } else {
+      // Payment-method / funding OTP: require an already-verified account so
+      // throwaway signups cannot SMS-pump arbitrary numbers.
+      await assertAccountVerified(
+        context,
+        "Verify your email or account phone before verifying a payment-method phone number."
       );
     }
 
