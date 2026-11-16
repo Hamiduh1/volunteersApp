@@ -27,6 +27,7 @@ object FunctionsClient {
         CallableFunction.REQUEST_MOBILE_MONEY_PHONE_OTP,
         CallableFunction.VERIFY_MOBILE_MONEY_PHONE_OTP,
         CallableFunction.UPDATE_ACCOUNT_PHONE_NUMBER,
+        CallableFunction.ENROLL_AS_ORGANIZER,
         CallableFunction.REQUEST_EMAIL_VERIFICATION_CODE,
         CallableFunction.VERIFY_EMAIL_VERIFICATION_CODE,
         CallableFunction.AGENT_LOOKUP_CUSTOMER_BY_PHONE,

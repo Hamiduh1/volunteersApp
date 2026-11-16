@@ -2,23 +2,18 @@ package com.example.volunteersApp.organizer
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.firebase.CallableFunction
+import com.example.volunteersApp.firebase.FunctionsClient
 import com.example.volunteersApp.models.Resource
-import com.example.volunteersApp.models.UserType
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.SetOptions
-import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import java.util.Locale
-import com.example.volunteersApp.firebase.FirestoreCollection
 
 class BecomeOrganizerViewModel : ViewModel() {
-    private val db = Firebase.firestore
     private val auth = Firebase.auth
 
     private val _isLoading = MutableStateFlow(false)
@@ -33,44 +28,33 @@ class BecomeOrganizerViewModel : ViewModel() {
             viewModelScope.launch { _registrationResult.emit(Resource.Error("User not logged in.")) }
             return
         }
+        val organizationName = name.trim()
+        if (organizationName.length < 2) {
+            viewModelScope.launch {
+                _registrationResult.emit(Resource.Error("Enter your organization name."))
+            }
+            return
+        }
 
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                // This is the data for the public-facing organizer profile.
-                val organizerProfileData = mapOf(
-                    "uid" to user.uid,
-                    "name" to user.displayName, // Use the user's display name as a default
-                    "organizationName" to name,
-                    "email" to email,
-                    "bio" to description
+                // Server sets users.role + organizers/{uid} together (client role writes are blocked).
+                FunctionsClient.callMap(
+                    CallableFunction.ENROLL_AS_ORGANIZER,
+                    mapOf(
+                        "organizationName" to organizationName,
+                        "email" to email.trim(),
+                        "bio" to description.trim(),
+                    )
                 )
-
-                // Keep backend role fields aligned (role, userRole, userType).
-                val normalizedRole = UserType.ORGANIZER.name.lowercase(Locale.ROOT)
-                val userRoleUpdate = mapOf(
-                    "role" to normalizedRole,
-                    "userRole" to normalizedRole,
-                    "userType" to normalizedRole
-                )
-
-                // Use a batch write to ensure both documents are updated atomically.
-                // This is the key to making the user a "real" organizer.
-                db.runBatch { batch ->
-                    val organizerRef = db.collection(FirestoreCollection.ORGANIZERS).document(user.uid)
-                    val userRef = db.collection(FirestoreCollection.USERS).document(user.uid)
-
-                    // Create the public organizer document.
-                    batch.set(organizerRef, organizerProfileData, SetOptions.merge())
-
-                    // Update the user's role in their private document.
-                    batch.set(userRef, userRoleUpdate, SetOptions.merge())
-                }.await()
-
                 _registrationResult.emit(Resource.Success(Unit))
             } catch (e: Exception) {
                 _registrationResult.emit(
-                    Resource.Error("We could not create your organizer profile. Please review your details and try again.")
+                    Resource.Error(
+                        e.localizedMessage
+                            ?: "We could not create your organizer profile. Please review your details and try again."
+                    )
                 )
             } finally {
                 _isLoading.value = false

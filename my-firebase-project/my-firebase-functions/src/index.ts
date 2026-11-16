@@ -5678,6 +5678,37 @@ export const cashOutOwnerRevenue = functions.runWith({enforceAppCheck: true})
 //  3C2. OWNER AFRIEEX BUSINESS WALLET MIRROR + CONFIG SAVES
 // =============================================================================
 
+/**
+ * Wallet and funding callables require a verified account: Firebase Auth
+ * emailVerified, or server-set users/{uid}.phoneVerified from profile-phone OTP.
+ */
+const assertAccountVerified = async (
+  context: functions.https.CallableContext,
+  message = "Verify your email or phone before continuing."
+): Promise<string> => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+  }
+  const uid = context.auth.uid;
+  if (context.auth.token?.email_verified === true) {
+    return uid;
+  }
+  try {
+    const authUser = await admin.auth().getUser(uid);
+    if (authUser.emailVerified) {
+      return uid;
+    }
+  } catch (error) {
+    functions.logger.warn("assertAccountVerified could not load Auth user.", {uid, error});
+  }
+  const userSnap = await db.collection("users").doc(uid).get();
+  const userData = (userSnap.data() || {}) as Record<string, unknown>;
+  if (userData.phoneVerified === true || userData.phoneVerifiedAt) {
+    return uid;
+  }
+  throw new functions.https.HttpsError("failed-precondition", message);
+};
+
 const assertOwnerCaller = async (context: functions.https.CallableContext): Promise<string> => {
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
@@ -11061,6 +11092,7 @@ export const ensureAfriexCustomer = functions.runWith({enforceAppCheck: true})
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
+    await assertAccountVerified(context);
     const customer = await ensureAfriexCustomerForUser(context.auth.uid);
     return {success: true, customer: toAfriexCustomerCallablePayload(customer)};
   });
@@ -13594,6 +13626,7 @@ export const resolveAfriexAccount = functions.runWith({enforceAppCheck: true})
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be signed in to verify a recipient.");
     }
+    await assertAccountVerified(context);
     await reserveRecipientLookupQuota(context.auth.uid, "RESOLVE_ACCOUNT");
     const request = (data || {}) as ResolveAfriexAccountRequest;
     const channel = String(request.channel || "").trim().toUpperCase();
@@ -14385,6 +14418,7 @@ const verifyBeneficiaryForServerSave = async (
  */
 export const saveVerifiedBeneficiary = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
+    await assertAccountVerified(context);
     if (context.auth?.uid) {
       await reserveRecipientLookupQuota(context.auth.uid, "SAVE_VERIFIED_RECIPIENT");
     }
@@ -14433,6 +14467,7 @@ interface ApplyApprovedBankRecipientVerificationRequest {
  */
 export const createBankRecipientVerification = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
+    await assertAccountVerified(context);
     const request = (data || {}) as CreateBankRecipientVerificationRequest;
     const requestedType = String(request.type || "").trim().toUpperCase();
     if (requestedType !== "BANK_ACCOUNT" && requestedType !== "SWIFT_BANK") {
@@ -14498,7 +14533,7 @@ export const createBankRecipientVerification = functions.runWith({enforceAppChec
 /** Creates a bank recipient only from its matching unexpired server approval. */
 export const applyApprovedBankRecipientVerification = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
-    const senderId = context.auth?.uid;
+    const senderId = await assertAccountVerified(context);
     if (!senderId) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in to save a recipient.");
     }
@@ -14638,7 +14673,7 @@ interface RefreshSavedBeneficiaryVerificationRequest {
  */
 export const refreshSavedBeneficiaryVerification = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
-    const senderId = context.auth?.uid;
+    const senderId = await assertAccountVerified(context);
     if (!senderId) {
       throw new functions.https.HttpsError("unauthenticated", "You must be signed in to verify a saved recipient.");
     }
@@ -17931,7 +17966,7 @@ export const createBeneficiaryVerification = functions.runWith({enforceAppCheck:
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
-    const senderId = context.auth.uid;
+    const senderId = await assertAccountVerified(context);
     const payload = (data || {}) as CreateBeneficiaryVerificationRequest;
     const savedBeneficiaryId = asNonEmptyString(
       payload.recipientBeneficiary?.id,
@@ -18084,7 +18119,7 @@ export const createBeneficiaryVerification = functions.runWith({enforceAppCheck:
 /** Creates a mobile-money recipient only from a current approved verification. */
 export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
-    const senderId = context.auth?.uid;
+    const senderId = await assertAccountVerified(context);
     if (!senderId) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in to save a recipient.");
     }
@@ -18291,6 +18326,7 @@ export const requestMobileMoneyCashIn = functions.runWith({enforceAppCheck: true
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
+    await assertAccountVerified(context);
     assertInternalWalletCustodyAllowed("Mobile money cash-in");
 
     const senderId = context.auth.uid;
@@ -18388,6 +18424,7 @@ export const requestExternalDeposit = functions.runWith({enforceAppCheck: true})
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
+    await assertAccountVerified(context);
     assertInternalWalletCustodyAllowed("Card and bank wallet deposits");
 
     const userId = context.auth.uid;
@@ -18462,6 +18499,7 @@ export const requestMobileMoneyCashOut = functions.runWith({enforceAppCheck: tru
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
+    await assertAccountVerified(context);
     assertInternalWalletCustodyAllowed("Mobile money cash-out");
 
     const senderId = context.auth.uid;
@@ -20608,7 +20646,10 @@ const initiateTransferHandlerWithQuoteHold = async (
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError("unauthenticated", "You must be logged in to transfer.");
   }
-  const senderId = context.auth.uid;
+  const senderId = await assertAccountVerified(
+    context,
+    "Verify your email or phone before sending money."
+  );
   const requestData = data as InitiateTransferRequest;
   const providerWalletOnlyMode = !isInternalWalletCustodyAllowed();
 
@@ -23391,8 +23432,7 @@ export const createCardFundingSetupIntent = functions.runWith({enforceAppCheck: 
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
-
-    const userId = context.auth.uid;
+    const userId = await assertAccountVerified(context);
     const userRef = db.collection("users").doc(userId);
     const userSnap = await userRef.get();
     if (!userSnap.exists) {
@@ -23856,7 +23896,7 @@ export const addUsBankAccountFromFinancialConnections = functions.runWith({enfor
 export const attachExternalAccount = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
-    const userId = context.auth.uid;
+    const userId = await assertAccountVerified(context);
     const request = data as AttachExternalAccountRequest;
     if (!request?.externalAccountToken || !request?.paymentMethodId) {
       throw new functions.https.HttpsError("invalid-argument", "Missing external account token or payment method id.");
@@ -24004,6 +24044,7 @@ export const updateBankPaymentMethod = functions.runWith({enforceAppCheck: true}
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
+    await assertAccountVerified(context);
 
     const request = (data || {}) as UpdateBankPaymentMethodRequest;
     const paymentMethodId = asNonEmptyString(request.paymentMethodId);
@@ -28063,7 +28104,7 @@ const assertMobileMoneyPhoneOtpVerified = async (params: {
 export const addPaymentMethod = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) throw new functions.https.HttpsError("unauthenticated", "You must be logged in to add a payment method.");
-    const userId = context.auth.uid;
+    const userId = await assertAccountVerified(context);
     const requestData = (data || {}) as AddPaymentMethodRequest;
     const methodType = normalizeMethodType(requestData.type);
     if (!methodType) throw new functions.https.HttpsError("invalid-argument", "Payment method data is incomplete.");
@@ -28275,6 +28316,7 @@ export const saveAppUserReceiveRoute = functions.runWith({enforceAppCheck: true}
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
+    await assertAccountVerified(context);
     const request = (data || {}) as SaveAppUserReceiveRouteRequest;
     const requestedType = normalizeAppUserReceiveRouteType(request.type);
     if (requestedType !== "BANK" && requestedType !== "SWIFT") {
@@ -28457,6 +28499,7 @@ export const getRecipientPayoutMethods = functions.runWith({enforceAppCheck: tru
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
+    await assertAccountVerified(context);
 
     const recipientId = asNonEmptyString((data || {})["recipientId"]);
     if (!recipientId) {
@@ -28504,8 +28547,7 @@ export const setDefaultPaymentMethod = functions.runWith({enforceAppCheck: true}
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
-
-    const userId = context.auth.uid;
+    const userId = await assertAccountVerified(context);
     const paymentMethodId = asNonEmptyString((data || {})["paymentMethodId"]);
     if (!paymentMethodId) {
       throw new functions.https.HttpsError("invalid-argument", "paymentMethodId is required.");
@@ -28542,8 +28584,7 @@ export const deletePaymentMethod = functions.runWith({enforceAppCheck: true})
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
-
-    const userId = context.auth.uid;
+    const userId = await assertAccountVerified(context);
     const paymentMethodId = asNonEmptyString((data || {})["paymentMethodId"]);
     if (!paymentMethodId) {
       throw new functions.https.HttpsError("invalid-argument", "paymentMethodId is required.");
@@ -30253,6 +30294,81 @@ export const updateAccountPhoneNumber = functions.runWith({enforceAppCheck: true
     };
   });
 
+/**
+ * Atomically enrolls the signed-in member as an organizer: sets users.role and
+ * creates organizers/{uid}. Client Firestore role elevation is blocked by rules.
+ */
+export const enrollAsOrganizer = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    const uid = await assertAccountVerified(
+      context,
+      "Verify your email or phone before becoming an organizer."
+    );
+    const payload = (data || {}) as {
+      organizationName?: unknown;
+      name?: unknown;
+      email?: unknown;
+      bio?: unknown;
+      description?: unknown;
+    };
+    const organizationName = asNonEmptyString(payload.organizationName, payload.name)?.trim();
+    if (!organizationName || organizationName.length < 2 || organizationName.length > 120) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Enter your organization name (2–120 characters)."
+      );
+    }
+    const email = asNonEmptyString(payload.email) ||
+      asNonEmptyString(context.auth?.token?.email) ||
+      "";
+    const bio = (asNonEmptyString(payload.bio, payload.description) || "").trim().slice(0, 2000);
+    const userRef = db.collection("users").doc(uid);
+    const organizerRef = db.collection("organizers").doc(uid);
+    const [userSnap, organizerSnap] = await Promise.all([userRef.get(), organizerRef.get()]);
+    if (!userSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "User profile not found.");
+    }
+    const userData = (userSnap.data() || {}) as Record<string, unknown>;
+    const currentRole = asNonEmptyString(
+      userData.role,
+      userData.userRole,
+      userData.userType
+    )?.toLowerCase() || "";
+    if (currentRole === "owner" || currentRole === "admin" || currentRole === "support") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Staff accounts cannot enroll as organizers from the app."
+      );
+    }
+    const now = admin.firestore.Timestamp.now();
+    const displayName = asNonEmptyString(userData.name, context.auth?.token?.name) || organizationName;
+    const alreadyOrganizer = currentRole === "organizer" && organizerSnap.exists;
+    const batch = db.batch();
+    batch.set(userRef, {
+      role: "organizer",
+      userRole: "organizer",
+      userType: "organizer",
+      organizationName,
+      updatedAt: now,
+    }, {merge: true});
+    batch.set(organizerRef, {
+      uid,
+      name: displayName,
+      organizationName,
+      email: email || null,
+      bio,
+      createdAt: organizerSnap.exists ? (organizerSnap.get("createdAt") || now) : now,
+      updatedAt: now,
+    }, {merge: true});
+    await batch.commit();
+    return {
+      success: true,
+      alreadyEnrolled: alreadyOrganizer,
+      role: "organizer",
+      organizationName,
+    };
+  });
+
 const isMobileMoneyPayoutType = (value: unknown): boolean => {
   const type = String(value || "").trim().toUpperCase();
   return type === "CASH_OUT" || type === "CASH_IN" || type === "BENEFICIARY_TRANSFER";
@@ -31814,6 +31930,7 @@ export const getWalletTransferQuote = functions.runWith({enforceAppCheck: true})
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
+    await assertAccountVerified(context);
     const payload = (data || {}) as WalletTransferQuoteRequestPayload;
     const amount = roundMoney(Number(payload.amount || 0));
     if (!Number.isFinite(amount) || amount <= 0) {
