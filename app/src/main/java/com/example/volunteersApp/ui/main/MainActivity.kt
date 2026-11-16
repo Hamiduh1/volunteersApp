@@ -1,5 +1,6 @@
 package com.example.volunteersApp.ui.main
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
@@ -15,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.volunteersApp.R
 import com.example.volunteersApp.employer.ui.main.EmployerMainScreen
 import com.example.volunteersApp.general.LoginActivity
 import com.example.volunteersApp.jokes.MindLoomNav
@@ -31,6 +33,26 @@ import java.util.Locale
 class MainActivity : FragmentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+
+    private fun promptSignOut() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.logout_confirmation_title)
+            .setMessage(R.string.logout_confirmation_message)
+            .setPositiveButton(R.string.logout_confirm) { _, _ ->
+                viewModel.signOut()
+                redirectToLogin()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun redirectToLogin() {
+        val intent = Intent(this, LoginActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        startActivity(intent)
+        finish()
+    }
 
     private fun offerNavigationFromLaunchIntent(intent: Intent?) {
         SocialInboxNav.pendingRouteFromLaunchIntent(intent)?.let { route ->
@@ -92,17 +114,17 @@ class MainActivity : FragmentActivity() {
                         when (roleValue) {
                             "employer" -> EmployerMainScreen(
                                 uiState = uiState,
-                                onSignOut = { viewModel.signOut() },
+                                onSignOut = { promptSignOut() },
                                 activityMainViewModel = viewModel
                             )
                             "organizer" -> OrganizerMainScreen(
                                 uiState = uiState,
-                                onSignOut = { viewModel.signOut() },
+                                onSignOut = { promptSignOut() },
                                 activityMainViewModel = viewModel
                             )
                             else -> MainScreen(
                                 uiState = uiState,
-                                onSignOut = { viewModel.signOut() },
+                                onSignOut = { promptSignOut() },
                                 activityMainViewModel = viewModel
                             )
                         }

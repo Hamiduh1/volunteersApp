@@ -295,7 +295,7 @@ fun PaymentMethodsScreen(
                 },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add remittance funding", tint = Color.White)
+                Icon(Icons.Default.Add, contentDescription = "Add a funding method", tint = Color.White)
             }
         }
     ) { padding ->
@@ -949,10 +949,40 @@ private fun PaymentMethodMetricPill(value: String, label: String, modifier: Modi
     }
 }
 
+private fun friendlyBrandLabel(brand: String): String {
+    val cleaned = brand.trim()
+    if (cleaned.isBlank() || cleaned.equals("CARD", ignoreCase = true)) return "Card"
+    return cleaned.lowercase(Locale.US).replaceFirstChar {
+        if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString()
+    }
+}
+
+private fun maskedLast4(last4: String): String? {
+    val digits = last4.filter { it.isDigit() }.takeLast(4)
+    return if (digits.length == 4) "•••• $digits" else null
+}
+
+private fun cardListSubtitle(last4: String, holderName: String?): String {
+    val mask = maskedLast4(last4)
+    val name = holderName?.trim()?.takeIf { it.isNotBlank() }
+    return when {
+        mask != null && name != null -> "$name · $mask"
+        mask != null -> mask
+        name != null -> name
+        else -> "Saved card"
+    }
+}
+
+private fun bankListSubtitle(kind: String, last4: String): String {
+    val mask = maskedLast4(last4) ?: "••••"
+    return "$kind · $mask"
+}
+
 @Composable
 fun CreditCardItem(card: PaymentMethod.CreditCard, onDelete: () -> Unit, onSetDefault: () -> Unit) {
     val last4 = card.last4.takeIf { it.isNotBlank() }
         ?: card.cardNumber.filter { it.isDigit() }.takeLast(4)
+    val holderName = card.cardHolderName.ifBlank { card.holderName.orEmpty() }
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -974,17 +1004,17 @@ fun CreditCardItem(card: PaymentMethod.CreditCard, onDelete: () -> Unit, onSetDe
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    text = card.brand.ifBlank { "Card" },
+                    text = friendlyBrandLabel(card.brand),
                     fontWeight = FontWeight.Bold,
                     color = WalletTextPrimary
                 )
                 Text(
-                    text = if (last4.isBlank()) "Linked card" else "Card ending in $last4",
+                    text = cardListSubtitle(last4, holderName),
                     style = MaterialTheme.typography.bodySmall,
                     color = WalletTextSecondary
                 )
                 if (card.isDefault) {
-                    Text("Default funding method", style = MaterialTheme.typography.labelSmall, color = WalletAccent)
+                    Text("Default for Send Money", style = MaterialTheme.typography.labelSmall, color = WalletAccent)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1011,24 +1041,25 @@ fun BankAccountItem(bank: PaymentMethod.BankAccount, onDelete: () -> Unit, onSet
         )
     ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
         ListItem(
-            headlineContent = { Text(bank.bankName, fontWeight = FontWeight.Bold) },
+            headlineContent = { Text(bank.bankName.ifBlank { "Bank account" }, fontWeight = FontWeight.Bold) },
             supportingContent = {
                 Text(
                     when {
                         isSwiftReceive ->
-                            "SWIFT payout/withdraw only — cannot fund. Ending ${accountLast4.ifBlank { "----" }}"
+                            bankListSubtitle("SWIFT receive only — not for funding", accountLast4)
                         bank.appUserReceiveRouteVerified ->
-                            "Verified bank receive route - ending ${accountLast4.ifBlank { "----" }}"
+                            bankListSubtitle("Verified receive account", accountLast4)
                         else ->
-                            "US ACH funding bank - ending ${accountLast4.ifBlank { "----" }}"
-                    }
+                            bankListSubtitle("US bank for funding", accountLast4)
+                    },
+                    color = WalletTextSecondary
                 )
             },
-            leadingContent = { Icon(Icons.Default.AccountBalance, null) },
+            leadingContent = { Icon(Icons.Default.AccountBalance, null, tint = WalletAccent) },
             trailingContent = {
                 Row {
                     if (!bank.isDefault) {
-                        TextButton(onClick = onSetDefault) { Text("Set Default") }
+                        TextButton(onClick = onSetDefault) { Text("Set default") }
                     }
                     IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }
                 }
@@ -1078,11 +1109,19 @@ fun MobileMoneyItem(
                 ) {
                     Icon(Icons.Default.PhoneAndroid, null)
                     Column {
-                        Text(mobile.label, fontWeight = FontWeight.Bold)
-                        Text(mobile.registeredName, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            mobile.network.ifBlank { mobile.label }.ifBlank { "Mobile money" },
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (mobile.phoneNumber.isNotBlank()) {
+                            Text(mobile.phoneNumber, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (mobile.registeredName.isNotBlank()) {
+                            Text(mobile.registeredName, style = MaterialTheme.typography.bodySmall)
+                        }
                         if (mobile.appUserReceiveRouteVerified) {
                             Text(
-                                "Verified receive route",
+                                "Verified for receiving",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -1096,7 +1135,7 @@ fun MobileMoneyItem(
                 }
                 Row {
                     if (!mobile.isDefault) {
-                        TextButton(onClick = onSetDefault) { Text("Set Default") }
+                        TextButton(onClick = onSetDefault) { Text("Set default") }
                     }
                     IconButton(onClick = onDelete) {
                         Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
@@ -1119,11 +1158,11 @@ fun MobileMoneyItem(
                             color = Color.White
                         )
                     } else {
-                        Text(if (canRequestVerification) "Verify Now" else "Awaiting Confirmation")
+                        Text(if (canRequestVerification) "Verify phone" else "Waiting for confirmation")
                     }
                 }
                 Text(
-                    text = "Mobile-money funding requires OTP ownership verification. A provider collection is requested only for a specific transfer.",
+                    text = "Confirm this phone with a one-time code before using it to fund Send Money.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1207,14 +1246,14 @@ private fun normalizeVerificationStatus(rawStatus: String?, isVerified: Boolean)
 private fun AddMethodSelectionDialog(onDismiss: () -> Unit, onCardSelected: () -> Unit, onBankSelected: () -> Unit, onMobileMoneySelected: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add remittance funding") },
+        title = { Text("Add a funding method") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Choose a funding method for Send Money. Stripe business payouts and App User receive routes are configured in their own sections.")
+                Text("Choose how you want to pay when you Send Money. Business payouts and receive accounts are set up in their own sections.")
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = onCardSelected, modifier = Modifier.fillMaxWidth()) { Text("LINK CARD") }
-                Button(onClick = onBankSelected, modifier = Modifier.fillMaxWidth()) { Text("LINK BANK") }
-                Button(onClick = onMobileMoneySelected, modifier = Modifier.fillMaxWidth()) { Text("LINK MOBILE MONEY") }
+                Button(onClick = onCardSelected, modifier = Modifier.fillMaxWidth()) { Text("Add card") }
+                Button(onClick = onBankSelected, modifier = Modifier.fillMaxWidth()) { Text("Add US bank") }
+                Button(onClick = onMobileMoneySelected, modifier = Modifier.fillMaxWidth()) { Text("Add mobile money") }
             }
         },
         confirmButton = { },
@@ -1237,7 +1276,7 @@ fun AddCardDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
     val scrollState = rememberScrollState()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add New Card") },
+        title = { Text("Add card") },
         text = {
             Column(
                 modifier = Modifier
@@ -1247,12 +1286,17 @@ fun AddCardDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                     .imePadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Text(
+                    "Cards are saved securely and can be used to fund Send Money.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WalletTextSecondary
+                )
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Name on Card") },
+                    label = { Text("Name on card") },
                     singleLine = true,
-                    supportingText = { Text("Enter the name as printed on the card.") },
+                    supportingText = { Text("Use the name printed on the card.") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1289,11 +1333,12 @@ fun AddCardDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                 }
 
                 val last4 = params.number?.takeLast(4) ?: ""
+                val masked = maskedLast4(last4) ?: "Card"
                 val methodData = mapOf(
                     "type" to "CARD",
-                    "label" to if (last4.isNotBlank()) "Card ending in $last4" else "Card",
+                    "label" to masked,
                     "cardHolderName" to name,
-                    "cardNumber" to if (last4.isNotBlank()) "**** **** **** $last4" else "****",
+                    "cardNumber" to masked,
                     "expiryDate" to "${params.expMonth}/${params.expYear}",
                     "brand" to "CARD",
                     "last4" to last4,
@@ -1367,7 +1412,7 @@ fun AddCardDialog(viewModel: PaymentsViewModel, onDismiss: () -> Unit, onSaved: 
                         color = Color.White
                     )
                 } else {
-                    Text("Save")
+                    Text("Save card")
                 }
             }
         },

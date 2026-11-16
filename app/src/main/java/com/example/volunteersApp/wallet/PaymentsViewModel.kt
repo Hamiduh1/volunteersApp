@@ -1022,11 +1022,12 @@ class PaymentsViewModel : ViewModel() {
 
         // In a real app, you would get a token from Stripe here first.
         val lastFour = if (sanitizedNumber.length >= 4) sanitizedNumber.takeLast(4) else sanitizedNumber
+        val masked = if (lastFour.length == 4) "•••• $lastFour" else "Card"
         val newCard = hashMapOf(
             "type" to "CARD",
-            "label" to "Card ending in $lastFour",
+            "label" to masked,
             "cardHolderName" to name,
-            "cardNumber" to "**** **** **** $lastFour", // Mask for display
+            "cardNumber" to masked, // Mask for display
             "expiryDate" to expiry,
             "brand" to "VISA", // Placeholder
             "last4" to lastFour,
