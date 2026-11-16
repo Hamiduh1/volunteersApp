@@ -172,6 +172,7 @@ object CallableFunction {
     const val REQUEST_MOBILE_MONEY_CASH_OUT = "requestMobileMoneyCashOut"
     const val REQUEST_MOBILE_MONEY_PHONE_OTP = "requestMobileMoneyPhoneOtp"
     const val VERIFY_MOBILE_MONEY_PHONE_OTP = "verifyMobileMoneyPhoneOtp"
+    const val UPDATE_ACCOUNT_PHONE_NUMBER = "updateAccountPhoneNumber"
     const val POST_SPONSORED_AD = "postSponsoredAd"
     const val DELETE_PAYMENT_METHOD = "deletePaymentMethod"
     const val SET_DEFAULT_PAYMENT_METHOD = "setDefaultPaymentMethod"

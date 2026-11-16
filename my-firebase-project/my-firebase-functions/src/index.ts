@@ -30169,24 +30169,87 @@ export const verifyMobileMoneyPhoneOtp = functions.runWith({enforceAppCheck: tru
       lastProviderStatus: verificationResult.status,
       updatedAt: now,
     }, {merge: true});
-    await db.collection("users").doc(uid).set({
+
+    // Only unlock account-level phoneVerified when the OTP phone matches the
+    // saved profile phone. Funding/recipient MM numbers may verify ownership
+    // without unlocking login.
+    const userSnap = await db.collection("users").doc(uid).get();
+    const userData = (userSnap.data() || {}) as Record<string, unknown>;
+    const profilePhoneDigits = normalizeDigits(
+      userData.phoneNumber || userData.phone || userData.mobile || ""
+    );
+    const matchesProfilePhone =
+      profilePhoneDigits.length >= 8 && profilePhoneDigits === phoneDigits;
+    const userUpdate: Record<string, unknown> = {
       mobileMoneyPhoneOtpVerifiedAt: now,
-      phoneVerified: true,
-      phoneVerifiedAt: now,
       updatedAt: now,
-    }, {merge: true});
-    await setUserPrivateProfileFields(uid, {
+    };
+    if (matchesProfilePhone) {
+      userUpdate.phoneVerified = true;
+      userUpdate.phoneVerifiedAt = now;
+      userUpdate.phoneVerificationMethod = "TWILIO_VERIFY_SMS";
+    }
+    await db.collection("users").doc(uid).set(userUpdate, {merge: true});
+    const privateUpdate: Record<string, unknown> = {
       mobileMoneyPhoneOtpVerifiedPhone: phoneE164,
       mobileMoneyPhoneOtpVerifiedPhoneDigits: phoneDigits,
-      phoneVerifiedNumber: phoneE164,
-      phoneVerifiedDigits: phoneDigits,
-      phoneVerificationMethod: "TWILIO_VERIFY_SMS",
-    });
+    };
+    if (matchesProfilePhone) {
+      privateUpdate.phoneVerifiedNumber = phoneE164;
+      privateUpdate.phoneVerifiedDigits = phoneDigits;
+      privateUpdate.phoneVerificationMethod = "TWILIO_VERIFY_SMS";
+    }
+    await setUserPrivateProfileFields(uid, privateUpdate);
 
     return {
       success: true,
       alreadyVerified: false,
+      accountPhoneVerified: matchesProfilePhone,
       maskedPhone: maskPhoneNumberForOtp(phoneE164),
+    };
+  });
+
+/**
+ * Updates the signed-in user's profile phone and clears account phone
+ * verification so the new number must be confirmed again.
+ */
+export const updateAccountPhoneNumber = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+    const uid = context.auth.uid;
+    const payload = (data || {}) as {phoneNumber?: unknown; dialCode?: unknown};
+    const phoneE164 = normalizeMobileMoneyPhoneE164(payload.phoneNumber, payload.dialCode);
+    const phoneDigits = normalizeDigits(phoneE164);
+    if (phoneDigits.length < 8 || phoneDigits.length > 15) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Provide a valid phone number in international format."
+      );
+    }
+    const now = admin.firestore.Timestamp.now();
+    await db.collection("users").doc(uid).set({
+      phone: phoneE164,
+      phoneNumber: phoneE164,
+      phoneVerified: false,
+      phoneVerifiedAt: admin.firestore.FieldValue.delete(),
+      phoneVerificationMethod: null,
+      mobileMoneyPhoneOtpVerifiedAt: admin.firestore.FieldValue.delete(),
+      updatedAt: now,
+    }, {merge: true});
+    await setUserPrivateProfileFields(uid, {
+      phoneVerifiedNumber: admin.firestore.FieldValue.delete(),
+      phoneVerifiedDigits: admin.firestore.FieldValue.delete(),
+      phoneVerificationMethod: admin.firestore.FieldValue.delete(),
+      mobileMoneyPhoneOtpVerifiedPhone: admin.firestore.FieldValue.delete(),
+      mobileMoneyPhoneOtpVerifiedPhoneDigits: admin.firestore.FieldValue.delete(),
+    });
+    return {
+      success: true,
+      phoneNumber: phoneE164,
+      maskedPhone: maskPhoneNumberForOtp(phoneE164),
+      phoneVerified: false,
     };
   });
 

@@ -3,18 +3,16 @@ package com.example.volunteersApp.ui.profile
 import android.text.TextUtils
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.volunteersApp.firebase.CallableFunction
+import com.example.volunteersApp.firebase.FunctionsClient
 import com.example.volunteersApp.ui.profile.UpdateState
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import com.example.volunteersApp.firebase.FirestoreCollection
 
 class ChangePhoneNumberViewModel : ViewModel() {
 
-    private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
 
     private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -33,7 +31,7 @@ class ChangePhoneNumberViewModel : ViewModel() {
             return
         }
 
-        val currentUser = auth.currentUser ?: run {
+        auth.currentUser ?: run {
             _updateState.value = UpdateState.Error("No user is logged in.")
             return
         }
@@ -41,13 +39,11 @@ class ChangePhoneNumberViewModel : ViewModel() {
         viewModelScope.launch {
             _updateState.value = UpdateState.Loading
             try {
-                val userDocRef = db.collection(FirestoreCollection.USERS).document(currentUser.uid)
-                userDocRef.update(
-                    mapOf(
-                        "phone" to normalizedNewPhone,
-                        "phoneNumber" to normalizedNewPhone
-                    )
-                ).await()
+                // Server clears phoneVerified so the new number must be confirmed again.
+                FunctionsClient.callMap(
+                    CallableFunction.UPDATE_ACCOUNT_PHONE_NUMBER,
+                    mapOf("phoneNumber" to normalizedNewPhone)
+                )
                 _updateState.value = UpdateState.Success
             } catch (e: Exception) {
                 _updateState.value = UpdateState.Error(e.localizedMessage ?: "An error occurred.")

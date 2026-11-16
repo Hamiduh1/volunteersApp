@@ -825,18 +825,9 @@ class LoginViewModel : ViewModel() {
     }
 
     private fun syncEmailVerifiedAsync(userId: String, source: String) {
-        viewModelScope.launch {
-            runCatching {
-                withStepTimeout("syncing email verification") {
-                    db.collection(FirestoreCollection.USERS).document(userId).set(
-                        mapOf("emailVerified" to true),
-                        SetOptions.merge()
-                    ).await()
-                }
-            }.onFailure { error ->
-                Log.w(TAG, "Failed to sync verified email flag during $source for $userId", error)
-            }
-        }
+        // emailVerified on users/{uid} is server-owned (verifyEmailVerificationCode).
+        // Keep this no-op so login never attempts a client privilege write.
+        Log.d(TAG, "Skipping client emailVerified sync during $source for $userId")
     }
 
     private suspend fun <T> withStepTimeout(

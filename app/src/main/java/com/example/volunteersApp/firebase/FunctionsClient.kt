@@ -26,6 +26,9 @@ object FunctionsClient {
         // Phone OTP functions enforce App Check at runtime.
         CallableFunction.REQUEST_MOBILE_MONEY_PHONE_OTP,
         CallableFunction.VERIFY_MOBILE_MONEY_PHONE_OTP,
+        CallableFunction.UPDATE_ACCOUNT_PHONE_NUMBER,
+        CallableFunction.REQUEST_EMAIL_VERIFICATION_CODE,
+        CallableFunction.VERIFY_EMAIL_VERIFICATION_CODE,
         CallableFunction.AGENT_LOOKUP_CUSTOMER_BY_PHONE,
         CallableFunction.AGENT_START_CUSTOMER_WITHDRAWAL,
         CallableFunction.AGENT_VERIFY_CUSTOMER_WITHDRAWAL_OTP,

@@ -137,8 +137,9 @@ class ResetPasswordViewModel : ViewModel() {
             }
             return
         }
-        if (newPassword.length < 6) {
-            _uiState.update { it.copy(error = "New password must be at least 6 characters.") }
+        val passwordError = passwordValidationError(newPassword)
+        if (passwordError != null) {
+            _uiState.update { it.copy(error = passwordError) }
             return
         }
         if (newPassword != confirmPassword) {
@@ -201,6 +202,21 @@ class ResetPasswordViewModel : ViewModel() {
             if (parsed != null) return parsed
         }
         return null
+    }
+
+    private fun passwordValidationError(password: String): String? {
+        if (password.length < 8) return "Use at least 8 characters for your password."
+        val categories = listOf(
+            password.any { it.isLowerCase() },
+            password.any { it.isUpperCase() },
+            password.any { it.isDigit() },
+            password.any { !it.isLetterOrDigit() }
+        ).count { it }
+        return if (categories < 3) {
+            "Use a stronger password with at least three of: uppercase, lowercase, number, and symbol."
+        } else {
+            null
+        }
     }
 
     private fun mapResetError(error: Exception): String {
