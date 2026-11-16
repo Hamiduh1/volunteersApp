@@ -163,6 +163,8 @@ class SignUpViewModel : ViewModel() {
                     "userType" to normalizedUserType,
                     "userRole" to normalizedUserType,
                     "role" to normalizedUserType,
+                    // Rules require this zeroed bootstrap map; balances stay server-owned after create.
+                    "wallet" to mapOf("balance" to 0),
                     "createdAt" to FieldValue.serverTimestamp(),
                     "profileStatus" to "active",
                     "emailVerified" to false,
