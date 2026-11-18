@@ -3259,7 +3259,8 @@ const getStripe = (): Stripe => {
       );
     }
     stripeInstance = new Stripe(apiKeys.stripe, {
-      apiVersion: "2026-01-28.clover",
+      // Preview API string; Stripe's published TS LatestApiVersion lags dashboard versions.
+      apiVersion: "2026-01-28.clover" as Stripe.LatestApiVersion,
     });
   }
   return stripeInstance;
@@ -6412,12 +6413,24 @@ export const ownerSaveFeeSettings = functions.runWith({enforceAppCheck: true})
     const payload = (data || {}) as Record<string, unknown>;
     const moneyFields = new Set([
       "blindDateFeeUsd", "agentAuthorizationFeeUsd", "adPostFeeUsd", "defaultTransferOwnerFeeUsd",
+      "remittanceDefaultBankFeeUsd", "remittanceDefaultMobileMoneyFeeUsd", "remittanceDefaultSwiftProviderFeeUsd",
+      "remittanceDefaultBankTopUpUsd", "remittanceDefaultMobileMoneyTopUpUsd", "remittanceDefaultSwiftTopUpUsd",
     ]);
     const rateFields = new Set([
-      "forexProfitMargin", "stripeForexDepositProfitMargin", "mobileMoneyHiddenFeeRate",
-      "eventTicketOwnerFeeRate", "marketplacePlatinumFeeRate", "garageSaleFeeRate",
+      "forexProfitMargin", "stripeForexDepositProfitMargin", "stripeTransactionOwnerFeeRate",
+      "mobileMoneyHiddenFeeRate", "eventTicketOwnerFeeRate", "marketplacePlatinumFeeRate", "garageSaleFeeRate",
+      "remittanceSwiftProviderFeeRate", "remittanceSwiftTopUpRate", "remittanceSwiftFxMargin",
+      "agentCashoutAgentShareRate", "agentCashoutOwnerShareRate", "walletExternalCurrencyChangeFeeRate",
     ]);
-    const allowedFields = new Set([...moneyFields, ...rateFields, "transferCorridorFees", "countryPaymentOverrides"]);
+    const countryMoneyMapFields = new Set([
+      "remittanceBankFeesByCountry", "remittanceMobileMoneyFeesByCountry",
+      "remittanceBankTopUpByCountry", "remittanceMobileMoneyTopUpByCountry",
+      "remittanceBankFxMarginsByCountry", "remittanceMobileMoneyFxMarginsByCountry",
+    ]);
+    const allowedFields = new Set([
+      ...moneyFields, ...rateFields, ...countryMoneyMapFields,
+      "transferCorridorFees", "countryPaymentOverrides",
+    ]);
     for (const key of Object.keys(payload)) {
       if (!allowedFields.has(key)) {
         throw new functions.https.HttpsError("invalid-argument", `Unsupported fee setting: ${key}.`);
@@ -6440,6 +6453,23 @@ export const ownerSaveFeeSettings = functions.runWith({enforceAppCheck: true})
         throw new functions.https.HttpsError("invalid-argument", `${key} must be a decimal rate from 0 to 1.`);
       }
       update[key] = value;
+    }
+    for (const key of countryMoneyMapFields) {
+      if (!(key in payload)) continue;
+      const rawMap = payload[key];
+      if (!rawMap || typeof rawMap !== "object" || Array.isArray(rawMap)) {
+        throw new functions.https.HttpsError("invalid-argument", `${key} must be a country→amount map.`);
+      }
+      const normalized: Record<string, number> = {};
+      for (const [countryKey, rawValue] of Object.entries(rawMap as Record<string, unknown>)) {
+        const country = countryKey.trim().slice(0, 80);
+        const value = parseOptionalNumber(rawValue);
+        if (!country || value === undefined || value < 0 || value > 100_000) {
+          throw new functions.https.HttpsError("invalid-argument", `${key} has an invalid country fee entry.`);
+        }
+        normalized[country] = roundMoney(value);
+      }
+      update[key] = normalized;
     }
     if ("countryPaymentOverrides" in payload) {
       update.countryPaymentOverrides = parseCountryPaymentOverrides(payload.countryPaymentOverrides);
@@ -23433,13 +23463,37 @@ interface CreateUsBankAccountSetupIntentRequest {
   email?: string;
 }
 
+/** Bump when off-session card consent copy changes; clients must send the current version. */
+const CARD_OFF_SESSION_CONSENT_VERSION = "2026-11-17.v1";
+
 type CardFundingSetupIntentRequest = Record<string, unknown>;
 
 interface SaveCardFundingMethodRequest {
   setupIntentId?: unknown;
   isDefault?: unknown;
   replacingPaymentMethodId?: unknown;
+  offSessionConsentAccepted?: unknown;
+  offSessionConsentVersion?: unknown;
 }
+
+const assertCardOffSessionConsent = (request: {
+  offSessionConsentAccepted?: unknown;
+  offSessionConsentVersion?: unknown;
+}): void => {
+  if (request.offSessionConsentAccepted !== true) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Confirm that this card may be saved for future transfers before continuing."
+    );
+  }
+  const version = asNonEmptyString(request.offSessionConsentVersion);
+  if (version !== CARD_OFF_SESSION_CONSENT_VERSION) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Card save consent is out of date. Refresh Payment Methods and try again."
+    );
+  }
+};
 
 interface UpdateBankPaymentMethodRequest {
   paymentMethodId?: unknown;
@@ -23507,11 +23561,13 @@ const ensureStripeCustomerForUser = async (
 };
 
 export const createCardFundingSetupIntent = functions.runWith({enforceAppCheck: true})
-  .https.onCall(async (_data: CardFundingSetupIntentRequest, context) => {
+  .https.onCall(async (data: CardFundingSetupIntentRequest, context) => {
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
     const userId = await assertAccountVerified(context);
+    const request = (data || {}) as SaveCardFundingMethodRequest;
+    assertCardOffSessionConsent(request);
     const userRef = db.collection("users").doc(userId);
     const userSnap = await userRef.get();
     if (!userSnap.exists) {
@@ -23527,13 +23583,19 @@ export const createCardFundingSetupIntent = functions.runWith({enforceAppCheck: 
         metadata: {
           userId,
           flow: "wallet_card_funding",
+          offSessionConsentVersion: CARD_OFF_SESSION_CONSENT_VERSION,
         },
       });
       if (!setupIntent.client_secret) {
         throw new functions.https.HttpsError("internal", "Stripe card setup did not return a client secret.");
       }
-      return {setupIntentId: setupIntent.id, clientSecret: setupIntent.client_secret};
+      return {
+        setupIntentId: setupIntent.id,
+        clientSecret: setupIntent.client_secret,
+        offSessionConsentVersion: CARD_OFF_SESSION_CONSENT_VERSION,
+      };
     } catch (error) {
+      if (error instanceof functions.https.HttpsError) throw error;
       const stripeError = error as Stripe.errors.StripeError | undefined;
       functions.logger.error("Failed to create card funding setup intent", {userId, error});
       throw new functions.https.HttpsError(
@@ -23549,8 +23611,12 @@ export const saveCardFundingMethod = functions.runWith({enforceAppCheck: true})
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
 
-    const userId = context.auth.uid;
+    const userId = await assertAccountVerified(
+      context,
+      "Verify your email or phone before saving a card."
+    );
     const request = (data || {}) as SaveCardFundingMethodRequest;
+    assertCardOffSessionConsent(request);
     const setupIntentId = asNonEmptyString(request.setupIntentId);
     const replacingPaymentMethodId = asNonEmptyString(request.replacingPaymentMethodId);
     if (!setupIntentId || !setupIntentId.startsWith("seti_")) {
@@ -23644,6 +23710,9 @@ export const saveCardFundingMethod = functions.runWith({enforceAppCheck: true})
         chargeSetupCheckedAt: now,
         fundingMethodOnly: true,
         stripeConnectExternalAccountManaged: false,
+        offSessionConsentAccepted: true,
+        offSessionConsentVersion: CARD_OFF_SESSION_CONSENT_VERSION,
+        offSessionConsentAcceptedAt: now,
         ...(replacingPaymentMethodId ? {} : {createdAt: now}),
         updatedAt: now,
       };

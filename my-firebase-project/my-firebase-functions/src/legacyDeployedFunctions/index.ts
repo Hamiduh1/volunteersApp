@@ -15254,6 +15254,8 @@ export const initializeProviderHostedWallet = functions.runWith({enforceAppCheck
     if (!context.auth?.uid) {
       throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
     }
+    // Transaction-only release: do not provision provider-hosted wallet mirrors.
+    assertTransactionOnlyStoredBalanceDisabled();
 
     const uid = context.auth.uid;
     const payload = (data || {}) as Record<string, unknown>;
