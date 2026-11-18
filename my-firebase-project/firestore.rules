@@ -514,18 +514,17 @@ service cloud.firestore {
       );
     }
 
-    // Status, match, hold and payment fields are server-only; clients edit presentation fields.
+    // Status, match, hold, payment, and media fields are server-only.
+    // Clients may only edit text preference fields; media goes through joinBlindDate.
     function isSafeBlindDateProfileClientPatch() {
       let next = request.resource.data;
       return next.diff(resource.data).affectedKeys()
-          .hasOnly(['bio', 'gender', 'lookingFor', 'media', 'profilePictureUrl', 'name', 'updatedAt'])
+          .hasOnly(['bio', 'gender', 'lookingFor', 'name', 'updatedAt'])
         && (!next.diff(resource.data).affectedKeys().hasAny(['lookingFor'])
           || next.lookingFor in ['MEN', 'WOMEN', 'EVERYONE'])
         && (!('bio' in next) || (next.bio is string && next.bio.size() <= 1000))
         && (!('name' in next) || (next.name is string && next.name.size() <= 80))
-        && (!('gender' in next) || (next.gender is string && next.gender.size() <= 40))
-        && (!('media' in next) || (next.media is list && next.media.size() <= 12))
-        && (!('profilePictureUrl' in next) || (next.profilePictureUrl is string && next.profilePictureUrl.size() <= 2048));
+        && (!('gender' in next) || (next.gender is string && next.gender.size() <= 40));
     }
 
     // 18 x 365 days: never rejects a real 18-year-old over leap days; ensureDatingEligibility
@@ -559,6 +558,26 @@ service cloud.firestore {
       return preference == 'EVERYONE'
         || (preference == 'MEN' && gender == 'MALE')
         || (preference == 'WOMEN' && gender == 'FEMALE');
+    }
+
+    // Blind Date preference compatibility (gender / lookingFor), same shape as Dating Loop.
+    function hasCompatibleBlindDateProfiles(senderUid, recipientUid) {
+      let senderPath = /databases/$(database)/documents/blindDateProfiles/$(senderUid);
+      let recipientPath = /databases/$(database)/documents/blindDateProfiles/$(recipientUid);
+      let senderProfile = exists(senderPath) ? get(senderPath).data : {};
+      let recipientProfile = exists(recipientPath) ? get(recipientPath).data : {};
+      let senderGender = senderProfile.get('gender', 'OTHER');
+      let recipientGender = recipientProfile.get('gender', 'OTHER');
+      let senderPreference = senderProfile.get('lookingFor', 'EVERYONE');
+      let recipientPreference = recipientProfile.get('lookingFor', 'EVERYONE');
+      return blindDateProfileIsActive(senderUid)
+        && blindDateProfileIsActive(recipientUid)
+        && senderGender is string
+        && recipientGender is string
+        && senderPreference is string
+        && recipientPreference is string
+        && datingPreferenceAcceptsGender(senderPreference, recipientGender)
+        && datingPreferenceAcceptsGender(recipientPreference, senderGender);
     }
 
     function hasCompatibleDatingLoopProfiles(senderUid, recipientUid) {
@@ -824,10 +843,8 @@ service cloud.firestore {
         && (!('timestamp' in request.resource.data) || request.resource.data.timestamp is timestamp)
         && (!('context' in request.resource.data) || request.resource.data.context is string)
         && (userCanAccessDating(request.auth.uid) || chatInvitationSkipsDatingGate())
-        && (
-          !(isDatingLoopLikeInvitation(request.resource.data) || isDatingLoopInvitationContext()) ||
-          hasCompatibleDatingLoopProfiles(senderUid, recipientUid)
-        )
+        // Dating Loop likes/Super Likes must go through sendDatingLike (rate limits).
+        && !(isDatingLoopLikeInvitation(request.resource.data) || isDatingLoopInvitationContext())
         && !hasAnyUserBlock(recipientUid, senderUid)
         && !hasAnyUserBlock(senderUid, recipientUid);
     }
@@ -1714,6 +1731,7 @@ service cloud.firestore {
           && blindDateProfileIsActive(request.auth.uid)
           && blindDateProfileIsActive(userId)
           && blindDateSenderCanInvite(request.auth.uid)
+          && hasCompatibleBlindDateProfiles(request.auth.uid, userId)
           && blindDateInvitePeopleMatchProfiles(request.auth.uid, userId)
           && !hasAnyUserBlock(userId, invitationId)
           && !hasAnyUserBlock(invitationId, userId);
@@ -1736,6 +1754,7 @@ service cloud.firestore {
           && blindDateProfileIsActive(request.auth.uid)
           && blindDateProfileIsActive(recipientId)
           && blindDateSenderCanInvite(request.auth.uid)
+          && hasCompatibleBlindDateProfiles(request.auth.uid, recipientId)
           && !hasAnyUserBlock(recipientId, request.auth.uid)
           && !hasAnyUserBlock(request.auth.uid, recipientId);
         // Mirrors the incoming invite: the sender may re-send only after a decline.
@@ -2062,11 +2081,20 @@ service cloud.firestore {
       }
     }
 
+
     // --- BLIND DATE RULES ---
     match /blindDateProfiles/{userId} {
-      allow read: if isSignedIn() && userCanAccessDating(request.auth.uid);
+      // Owner may read own payment/match state. Discovery only sees active profiles
+      // (hides awaiting_payment / matched / left and their order IDs from peers).
+      allow read: if isSignedIn()
+        && userCanAccessDating(request.auth.uid)
+        && (
+          isOwner(userId) ||
+          resource.data.status in ['active', 'ACTIVE']
+        );
       allow create: if false;
-      // Do not allow client-side status or match-state writes (would bypass paid rejoin and hold flow).
+      // Do not allow client-side status, match-state, or media writes (media ownership
+      // is validated in joinBlindDate / leaveBlindDate callables).
       allow update: if isOwner(userId) && isSafeBlindDateProfileClientPatch();
     }
 

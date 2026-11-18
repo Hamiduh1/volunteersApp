@@ -8327,6 +8327,302 @@ const finalizeBlindDateRejoin = (
   }
 };
 
+const datingPreferenceAcceptsGender = (preference: string, gender: string): boolean => {
+  const pref = preference.trim().toUpperCase();
+  const g = gender.trim().toUpperCase();
+  return pref === "EVERYONE" ||
+    (pref === "MEN" && g === "MALE") ||
+    (pref === "WOMEN" && g === "FEMALE");
+};
+
+const assertCompletedDatingLoopProfile = async (userId: string): Promise<Record<string, unknown>> => {
+  const datingProfileSnap = await db.collection("dating_profiles").doc(userId).get();
+  if (!datingProfileSnap.exists) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Create a completed Dating Loop profile before joining Blind Date."
+    );
+  }
+  const data = (datingProfileSnap.data() || {}) as Record<string, unknown>;
+  const name = asNonEmptyString(data.name);
+  const bio = asNonEmptyString(data.bio);
+  const gender = asNonEmptyString(data.gender);
+  const lookingFor = asNonEmptyString(data.lookingFor);
+  const media = Array.isArray(data.imageUrls) ? data.imageUrls :
+    Array.isArray(data.mediaUrls) ? data.mediaUrls :
+      Array.isArray(data.media) ? data.media : [];
+  const ownedMedia = media.filter((entry) => isUserOwnedDatingMediaUrl(userId, entry));
+  if (!name || !bio || !gender || !lookingFor || ownedMedia.length === 0) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Finish your Dating Loop profile (name, bio, preferences, and a photo) before joining Blind Date."
+    );
+  }
+  return data;
+};
+
+const deactivateBlindDateProfileForLeave = async (
+  userId: string,
+  reason: "LEFT" | "DATING_PROFILE_DELETED"
+): Promise<void> => {
+  const profileRef = db.collection("blindDateProfiles").doc(userId);
+  await db.runTransaction(async (transaction) => {
+    const profileDoc = await transaction.get(profileRef);
+    if (!profileDoc.exists) return;
+    const status = normalizeProfileStatus(profileDoc.data()?.status);
+    if (status === "left" || status === "inactive") return;
+    if (isBlindDateRejoinableStatus(status)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "You're matched right now. End or finish the match before leaving Blind Date."
+      );
+    }
+    const now = admin.firestore.Timestamp.now();
+    transaction.set(profileRef, {
+      status: "left",
+      leftAt: now,
+      leaveReason: reason,
+      matchedPartnerId: admin.firestore.FieldValue.delete(),
+      paymentStatus: admin.firestore.FieldValue.delete(),
+      paymentCollectionStatus: admin.firestore.FieldValue.delete(),
+      paymentDetail: admin.firestore.FieldValue.delete(),
+      stripeCommerceOrderId: admin.firestore.FieldValue.delete(),
+      mobileMoneyFeeCollectionOrderId: admin.firestore.FieldValue.delete(),
+      updatedAt: now,
+    }, {merge: true});
+  });
+};
+
+/** Removes the member from Blind Date discovery while keeping their Dating Loop profile. */
+export const leaveBlindDate = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (_data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in to leave Blind Date.");
+    }
+    await assertBlindDateEnabled();
+    await deactivateBlindDateProfileForLeave(context.auth.uid, "LEFT");
+    return {
+      success: true,
+      message: "You left Blind Date. Your profile is hidden from discovery.",
+      status: "left",
+    };
+  });
+
+/** Updates Blind Date presentation fields with owned-media validation. */
+export const updateBlindDateProfile = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in to update Blind Date.");
+    }
+    const userId = context.auth.uid;
+    await assertBlindDateEnabled();
+    await assertCompletedDatingLoopProfile(userId);
+    const request = (data || {}) as {
+      bio?: unknown;
+      gender?: unknown;
+      lookingFor?: unknown;
+      name?: unknown;
+      mediaUrls?: unknown;
+    };
+    const profileRef = db.collection("blindDateProfiles").doc(userId);
+    const profileSnap = await profileRef.get();
+    if (!profileSnap.exists) {
+      throw new functions.https.HttpsError("failed-precondition", "Join Blind Date before editing your profile.");
+    }
+    const status = normalizeProfileStatus(profileSnap.data()?.status);
+    if (status !== "active" && !isBlindDateRejoinableStatus(status)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Your Blind Date profile is not editable in its current state."
+      );
+    }
+    const bio = asNonEmptyString(request.bio);
+    if (!bio || bio.length > BLIND_DATE_MAX_BIO_LENGTH) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        `Add a short bio (max ${BLIND_DATE_MAX_BIO_LENGTH} characters).`
+      );
+    }
+    const gender = normalizeBlindDateGender(request.gender);
+    const lookingFor = normalizeBlindDatePreference(request.lookingFor);
+    const name = asNonEmptyString(request.name) ||
+      asNonEmptyString(profileSnap.get("name")) ||
+      "Anonymous User";
+    const mediaUrls = request.mediaUrls === undefined ?
+      null :
+      normalizeOwnedBlindDateMediaUrls(userId, request.mediaUrls);
+    const now = admin.firestore.Timestamp.now();
+    const patch: Record<string, unknown> = {
+      bio,
+      gender,
+      lookingFor,
+      name: name.slice(0, 80),
+      updatedAt: now,
+    };
+    if (mediaUrls) {
+      patch.media = mediaUrls;
+      patch.mediaUrls = mediaUrls;
+      patch.profilePictureUrl = mediaUrls[0] || "";
+    }
+    await profileRef.set(patch, {merge: true});
+    return {success: true, message: "Blind Date profile updated.", status};
+  });
+
+export const onDatingProfileDeleteLeaveBlindDate = functions.firestore
+  .document("dating_profiles/{userId}")
+  .onDelete(async (_snap, context) => {
+    const userId = String(context.params.userId || "").trim();
+    if (!userId) return null;
+    try {
+      await deactivateBlindDateProfileForLeave(userId, "DATING_PROFILE_DELETED");
+    } catch (error) {
+      // Matched members keep Blind Date until they resolve the match; log and continue.
+      functions.logger.warn("Could not auto-leave Blind Date after Dating Loop delete.", {userId, error});
+    }
+    return null;
+  });
+
+const DATING_LOOP_SUPER_LIKES_PER_DAY = 1;
+const DATING_LOOP_LIKES_PER_DAY = 100;
+
+/** Server-owned Dating Loop like / Super Like with daily rate limits. */
+export const sendDatingLike = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in to like someone.");
+    }
+    const senderId = context.auth.uid;
+    const recipientId = asNonEmptyString((data as {recipientId?: unknown})?.recipientId);
+    const superLike = (data as {superLike?: unknown})?.superLike === true;
+    if (!recipientId || recipientId === senderId) {
+      throw new functions.https.HttpsError("invalid-argument", "Choose a valid Dating Loop profile to like.");
+    }
+
+    const [senderUserSnap, recipientUserSnap, senderProfileSnap, recipientProfileSnap] = await Promise.all([
+      db.collection("users").doc(senderId).get(),
+      db.collection("users").doc(recipientId).get(),
+      db.collection("dating_profiles").doc(senderId).get(),
+      db.collection("dating_profiles").doc(recipientId).get(),
+    ]);
+    if (!senderUserSnap.exists || !recipientUserSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "Account profile not found.");
+    }
+    assertDatingEligibleAccount((senderUserSnap.data() || {}) as Record<string, unknown>);
+    assertDatingEligibleAccount(
+      (recipientUserSnap.data() || {}) as Record<string, unknown>,
+      "That member is not available in Dating Loop."
+    );
+    if (!senderProfileSnap.exists || !recipientProfileSnap.exists) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Both members need a Dating Loop profile before liking."
+      );
+    }
+    const senderProfile = (senderProfileSnap.data() || {}) as Record<string, unknown>;
+    const recipientProfile = (recipientProfileSnap.data() || {}) as Record<string, unknown>;
+    const senderGender = String(senderProfile.gender || "OTHER").toUpperCase();
+    const recipientGender = String(recipientProfile.gender || "OTHER").toUpperCase();
+    const senderPreference = String(senderProfile.lookingFor || "EVERYONE").toUpperCase();
+    const recipientPreference = String(recipientProfile.lookingFor || "EVERYONE").toUpperCase();
+    if (
+      !datingPreferenceAcceptsGender(senderPreference, recipientGender) ||
+      !datingPreferenceAcceptsGender(recipientPreference, senderGender)
+    ) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "You and this member are not preference-compatible."
+      );
+    }
+
+    const blocked = await Promise.all([
+      db.collection("users").doc(senderId).collection("blocked_users").doc(recipientId).get(),
+      db.collection("users").doc(senderId).collection("blockedUsers").doc(recipientId).get(),
+      db.collection("users").doc(recipientId).collection("blocked_users").doc(senderId).get(),
+      db.collection("users").doc(recipientId).collection("blockedUsers").doc(senderId).get(),
+    ]);
+    if (blocked.some((doc) => doc.exists)) {
+      throw new functions.https.HttpsError("failed-precondition", "You cannot like this member.");
+    }
+
+    const dayKey = new Date().toISOString().slice(0, 10);
+    const quotaRef = db.collection("users").doc(senderId)
+      .collection("dating_private").doc("like_quota");
+    const inviteRef = db.collection("users").doc(recipientId)
+      .collection("invitations").doc(senderId);
+    const senderName = asNonEmptyString(
+      senderUserSnap.get("name"),
+      senderUserSnap.get("username"),
+      senderProfile.name
+    ) || "A User";
+    const senderPic = asNonEmptyString(
+      senderUserSnap.get("profileImageUrl"),
+      senderProfile.profilePictureUrl,
+      senderProfile.imageUrl
+    ) || "";
+    const contextLabel = superLike ? "Dating Loop Super Like" : "Dating Loop Profile";
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [inviteSnap, quotaSnap] = await Promise.all([
+        transaction.get(inviteRef),
+        transaction.get(quotaRef),
+      ]);
+      if (inviteSnap.exists) {
+        const status = String(inviteSnap.get("status") || "").trim().toLowerCase();
+        return {
+          alreadyExists: true,
+          status: status || "pending",
+          superLike: String(inviteSnap.get("context") || "").toLowerCase().includes("super like"),
+        };
+      }
+      const quota = (quotaSnap.data() || {}) as Record<string, unknown>;
+      const likesDay = String(quota.likesDayKey || "");
+      const superDay = String(quota.superLikesDayKey || "");
+      let likesUsed = likesDay === dayKey ? Number(quota.likesUsed || 0) : 0;
+      let superUsed = superDay === dayKey ? Number(quota.superLikesUsed || 0) : 0;
+      if (!Number.isFinite(likesUsed) || likesUsed < 0) likesUsed = 0;
+      if (!Number.isFinite(superUsed) || superUsed < 0) superUsed = 0;
+      if (superLike && superUsed >= DATING_LOOP_SUPER_LIKES_PER_DAY) {
+        throw new functions.https.HttpsError(
+          "resource-exhausted",
+          "You already used today's Super Like. Come back tomorrow or send a regular like."
+        );
+      }
+      if (likesUsed >= DATING_LOOP_LIKES_PER_DAY) {
+        throw new functions.https.HttpsError(
+          "resource-exhausted",
+          "Daily like limit reached. Try again tomorrow."
+        );
+      }
+      const now = admin.firestore.Timestamp.now();
+      transaction.set(inviteRef, {
+        senderId,
+        senderName,
+        senderProfilePicUrl: senderPic,
+        status: "pending",
+        timestamp: now,
+        context: contextLabel,
+      }, {merge: true});
+      transaction.set(quotaRef, {
+        likesDayKey: dayKey,
+        likesUsed: likesUsed + 1,
+        superLikesDayKey: dayKey,
+        superLikesUsed: superLike ? superUsed + 1 : superUsed,
+        updatedAt: now,
+      }, {merge: true});
+      return {alreadyExists: false, status: "pending", superLike};
+    });
+
+    return {
+      success: true,
+      alreadyExists: result.alreadyExists === true,
+      status: result.status,
+      superLike: result.superLike === true,
+      message: result.alreadyExists ?
+        "You already liked this member." :
+        (superLike ? "Super Like sent." : "Like sent."),
+    };
+  });
+
 export const joinBlindDate = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
@@ -8335,6 +8631,7 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
     const userId = context.auth.uid;
     const requestData = data as JoinBlindDateRequest;
     await assertBlindDateEnabled();
+    const datingProfile = await assertCompletedDatingLoopProfile(userId);
     const mediaUrls = normalizeOwnedBlindDateMediaUrls(userId, requestData.mediaUrls);
     const bio = typeof requestData.bio === "string" ? requestData.bio.trim() : "";
     if (!bio || !requestData.gender) {
@@ -8353,10 +8650,9 @@ export const joinBlindDate = functions.runWith({enforceAppCheck: true})
     const userRef = db.collection("users").doc(userId);
     const blindDateProfileRef = db.collection("blindDateProfiles").doc(userId);
     const userRecord = await admin.auth().getUser(userId);
-    const datingProfileSnap = await db.collection("dating_profiles").doc(userId).get();
     const datingName =
-      typeof datingProfileSnap.data()?.name === "string" ?
-        String(datingProfileSnap.data()?.name).trim() :
+      typeof datingProfile.name === "string" ?
+        String(datingProfile.name).trim() :
         "";
     const displayNameForBlind =
       datingName ||
@@ -8849,6 +9145,7 @@ export const rejoinBlindDate = functions.runWith({enforceAppCheck: true})
     if (!context.auth?.uid) throw new functions.https.HttpsError("unauthenticated", "You must be logged in to rejoin.");
     const userId = context.auth.uid;
     await assertBlindDateEnabled();
+    await assertCompletedDatingLoopProfile(userId);
     const feeSettings = await getRuntimeFeeSettings();
     const blindDateFee = feeSettings.blindDateFeeUsd;
     const userRef = db.collection("users").doc(userId);
