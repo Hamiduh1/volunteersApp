@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
@@ -83,6 +84,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -91,11 +94,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -122,6 +127,8 @@ import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private const val CHAT_BOTTOM_SENTINEL_KEY = "chat-bottom-sentinel"
 
 @Composable
 fun ChatScreen(
@@ -289,11 +296,54 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(uiState.messages.lastOrNull()?.id, uiState.messages.size) {
-        if (uiState.messages.isNotEmpty()) {
-            delay(80)
-            listState.animateScrollToItem(uiState.messages.lastIndex)
+    // True while the transcript is at the latest message; only updated when a scroll settles so viewport
+    // resizes (keyboard) don't flip it. Own sends / composer focus force it back on.
+    var pinnedToBottom by remember { mutableStateOf(true) }
+    var composerFocused by remember { mutableStateOf(false) }
+    val imeBottomPx = WindowInsets.ime.getBottom(LocalDensity.current)
+
+    // The bottom sentinel is the item right after the last message.
+    suspend fun pinToBottom() {
+        if (uiState.messages.isEmpty()) return
+        withFrameNanos { } // let newly appended rows be measured before scrolling
+        listState.scrollToItem(uiState.messages.size)
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { scrolling ->
+                if (!scrolling) {
+                    val info = listState.layoutInfo
+                    val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@collect
+                    pinnedToBottom = lastVisible >= info.totalItemsCount - 2
+                }
+            }
+    }
+
+    // On appear and whenever the last message changes (incl. optimistic -> confirmed id swap).
+    LaunchedEffect(uiState.messages.lastOrNull()?.id) {
+        pinToBottom()
+    }
+
+    // After own send.
+    LaunchedEffect(uiState.scrollToBottomToken) {
+        if (uiState.scrollToBottomToken > 0) {
+            pinnedToBottom = true
+            pinToBottom()
         }
+    }
+
+    // Composer gained focus.
+    LaunchedEffect(composerFocused) {
+        if (composerFocused) {
+            pinnedToBottom = true
+            pinToBottom()
+        }
+    }
+
+    // Keyboard opening/animating: keep the latest message visible if the user was already at the bottom.
+    LaunchedEffect(imeBottomPx) {
+        if (imeBottomPx > 0 && pinnedToBottom) pinToBottom()
     }
 
     var previousMessagesSnapshot by remember(chatId) { mutableStateOf<List<ChatMessage>?>(null) }
@@ -484,8 +534,11 @@ fun ChatScreen(
                     ) {
                         itemsIndexed(
                             items = uiState.messages,
-                            key = { index, message ->
-                                message.id.ifBlank { "${index}_${message.timestamp?.time ?: 0L}" }
+                            // Stable identity: doc id, `local-{uuid}` for optimistic rows, never the list index.
+                            key = { _, message ->
+                                message.id.ifBlank {
+                                    "${message.senderId}_${message.clientSentAtMs}_${message.messageText.take(16)}"
+                                }
                             }
                         ) { index, message ->
                             val dayLabel = message.timestamp?.let { formatMessageDay(it) }
@@ -500,8 +553,12 @@ fun ChatScreen(
                                 currentUserId = currentUserId,
                                 maxWidth = maxBubbleWidth,
                                 onOpenMedia = { previewTarget = message },
-                                onLongPress = { menuTarget = message }
+                                onLongPress = { if (!message.isLocalPending()) menuTarget = message }
                             )
+                        }
+                        // Stable bottom sentinel: scrolling to it pins the transcript to the latest bubble.
+                        item(key = CHAT_BOTTOM_SENTINEL_KEY) {
+                            Spacer(Modifier.height(1.dp))
                         }
                     }
                 }
@@ -533,17 +590,27 @@ fun ChatScreen(
                     onPickVideo = { videoPicker.launch("video/*") },
                     onClearAttachment = { pendingAttachment = null },
                     onClearReply = { replyTarget = null },
+                    onComposerFocusChanged = { composerFocused = it },
                     onSend = {
+                        val sentText = messageText
+                        val sentAttachment = pendingAttachment
+                        val sentReply = replyTarget
+                        // Optimistic: the VM appends the local bubble right away, so clear the composer now.
+                        messageText = ""
+                        pendingAttachment = null
+                        replyTarget = null
                         viewModel.sendMessage(
                             context = context,
-                            messageText = messageText,
-                            attachment = pendingAttachment,
-                            replyTo = replyTarget
+                            messageText = sentText,
+                            attachment = sentAttachment,
+                            replyTo = sentReply
                         ) { success ->
-                            if (success) {
-                                messageText = ""
-                                pendingAttachment = null
-                                replyTarget = null
+                            if (!success) {
+                                // The VM already removed the local row; restore what the user typed.
+                                if (messageText.isBlank()) messageText = sentText
+                                if (pendingAttachment == null) pendingAttachment = sentAttachment
+                                if (replyTarget == null) replyTarget = sentReply
+                                Toast.makeText(context, "Message not sent. Please try again.", Toast.LENGTH_SHORT).show()
                             }
                         }
                     },
@@ -942,6 +1009,7 @@ private fun ConversationComposer(
     onClearAttachment: () -> Unit,
     onClearReply: () -> Unit,
     onSend: () -> Unit,
+    onComposerFocusChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val sendEnabled = !isSending && (value.isNotBlank() || pendingAttachment != null)
@@ -1050,7 +1118,8 @@ private fun ConversationComposer(
                     modifier = Modifier
                         .weight(1f)
                         .defaultMinSize(minHeight = 48.dp)
-                        .heightIn(max = 140.dp),
+                        .heightIn(max = 140.dp)
+                        .onFocusChanged { onComposerFocusChanged(it.isFocused) },
                     placeholder = {
                         Text("Message", style = MaterialTheme.typography.bodyLarge, color = WaMeta)
                     },

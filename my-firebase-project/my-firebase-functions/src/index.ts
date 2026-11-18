@@ -2288,6 +2288,9 @@ const stripeAccountController = (account: Stripe.Account): StripeAccountControll
  * Platforms with Managed Risk (Stripe as losses collector) reject legacy
  * `type: "express"` creation. New accounts use controller properties that match
  * Managed Risk Standard behavior; existing Express accounts remain usable.
+ * @param {Stripe.Account} account Stripe Connect account to evaluate.
+ * @param {boolean} expectedLiveMode Whether the platform is using live Stripe keys.
+ * @return {boolean} True when the account can receive destination charges/transfers.
  */
 const isUsableStripeConnectDestinationAccount = (
   account: Stripe.Account,
@@ -2317,7 +2320,11 @@ const isUsableStripeConnectDestinationAccount = (
   return isManagedRiskStandard || isLegacyExpress;
 };
 
-/** AccountCreateParams for Managed Risk seller destinations (no legacy `type`). */
+/**
+ * AccountCreateParams for Managed Risk seller destinations (no legacy `type`).
+ * @param {object} params Country, optional email/businessType, and Stripe metadata.
+ * @return {Stripe.AccountCreateParams} Stripe account create params using controller properties.
+ */
 const stripeConnectDestinationAccountCreateParams = (params: {
   country: string;
   email?: string;
@@ -6135,6 +6142,9 @@ export const cashOutOwnerRevenue = functions.runWith({enforceAppCheck: true})
 /**
  * Wallet and funding callables require a verified account: Firebase Auth
  * emailVerified, or server-set users/{uid}.phoneVerified from profile-phone OTP.
+ * @param {functions.https.CallableContext} context Callable auth context.
+ * @param {string} message Failed-precondition message when the account is unverified.
+ * @return {Promise<string>} Authenticated uid when verification passes.
  */
 const assertAccountVerified = async (
   context: functions.https.CallableContext,
@@ -27780,7 +27790,7 @@ const MARKETPLACE_REFUNDABLE_ORDER_STATUSES = ["PAID", "DELIVERED", "HELP_REQUES
  * caller can retry.
  * @param {string} orderId stripe_commerce_orders / marketplace_orders document id.
  * @param {string} reason Human-readable refund reason stored on the records and in Stripe metadata.
- * @return {Promise<{stripeRefundId: string | null; alreadyRefunded: boolean}>} Refund outcome.
+ * @return {Promise<object>} Refund outcome with stripeRefundId and alreadyRefunded.
  */
 const refundPaidMarketplaceCommerceOrder = async (
   orderId: string,

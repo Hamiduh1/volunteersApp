@@ -130,6 +130,10 @@ fun MarketplaceListingEditorScreen(
         )
     }
     var sellerPhone by rememberSaveable(itemKey) { mutableStateOf(editingItem?.sellerPhone.orEmpty()) }
+    // New listings start private; a phone already on the listing was opted in earlier.
+    var shareSellerPhone by rememberSaveable(itemKey) {
+        mutableStateOf(editingItem?.sellerPhone?.isNotBlank() == true)
+    }
     var category by rememberSaveable(itemKey) {
         mutableStateOf(editingItem?.category?.takeIf { it.isNotBlank() } ?: "Other")
     }
@@ -352,6 +356,7 @@ fun MarketplaceListingEditorScreen(
                                 category = category.trim().ifBlank { "Other" },
                                 condition = condition,
                                 sellerPhone = sellerPhone.trim(),
+                                shareSellerPhone = shareSellerPhone && sellerPhone.isNotBlank(),
                                 locationName = locationName.trim(),
                                 latitude = if (showDistance) latitude else null,
                                 longitude = if (showDistance) longitude else null,
@@ -399,7 +404,8 @@ fun MarketplaceListingEditorScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             if (!isEditing) {
-                sellerReadiness.publishBlockReason?.let { reason ->
+                // Cap reason is a hard stop; the Seller earnings reminder is informational only (Connect isn't required to post).
+                listOfNotNull(sellerReadiness.publishBlockReason, sellerReadiness.sellerEarningsReminder).forEach { reason ->
                     item {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
@@ -568,9 +574,14 @@ fun MarketplaceListingEditorScreen(
                         onValueChange = { sellerPhone = it.take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH) },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Seller Phone (optional)") },
-                        supportingText = { Text("Shown to all members. Leave blank to keep your number private.") },
+                        supportingText = { Text("Only published when the switch below is on.") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         colors = editorFieldColors()
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    MarketplaceSharePhoneToggle(
+                        checked = shareSellerPhone,
+                        onCheckedChange = { shareSellerPhone = it }
                     )
                 }
             }

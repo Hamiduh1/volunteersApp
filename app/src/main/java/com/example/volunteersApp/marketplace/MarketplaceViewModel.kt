@@ -20,6 +20,7 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.firestore
+import com.google.firebase.functions.FirebaseFunctionsException
 import com.google.firebase.storage.StorageMetadata
 import com.google.firebase.storage.StorageReference
 import com.google.firebase.storage.storage
@@ -246,36 +247,23 @@ class MarketplaceViewModel : ViewModel() {
                 val hasCoordinates = latitude != null && longitude != null
 
                 if (existingItem == null) {
-                    val userSnapshot = db.collection(FirestoreCollection.USERS).document(currentUser.uid).get().await()
-                    val sellerName = (
-                        userSnapshot.getString("name")?.takeIf { it.isNotBlank() }
-                            ?: userSnapshot.getString("username")?.takeIf { it.isNotBlank() }
-                            ?: currentUser.email
-                            ?: "Seller"
-                        ).trim().take(MARKETPLACE_SELLER_NAME_MAX_LENGTH)
-                    val payload = mutableMapOf<String, Any>(
-                        "title" to cleanTitle,
-                        "description" to cleanDescription,
-                        "price" to draft.price,
-                        "category" to cleanCategory,
-                        "sellerName" to sellerName,
-                        "sellerId" to currentUser.uid,
-                        "sellerPhone" to cleanPhone,
-                        "imageUrls" to imageUrls,
-                        "media" to mediaPayload,
-                        "locationName" to cleanLocation,
-                        "countryCode" to DEFAULT_COUNTRY_CODE,
-                        "status" to STATUS_AVAILABLE,
-                        "timestamp" to FieldValue.serverTimestamp()
+                    // Direct client creates are blocked by Firestore rules; the callable validates and writes.
+                    createListingViaCallable(
+                        title = cleanTitle,
+                        description = cleanDescription,
+                        price = draft.price,
+                        category = cleanCategory,
+                        condition = draft.condition,
+                        media = mediaPayload,
+                        imageUrls = imageUrls,
+                        locationName = cleanLocation,
+                        latitude = if (hasCoordinates) latitude else null,
+                        longitude = if (hasCoordinates) longitude else null,
+                        sellerPhone = cleanPhone,
+                        shareSellerPhone = draft.shareSellerPhone,
                     )
-                    if (hasCoordinates) {
-                        payload["latitude"] = latitude!!
-                        payload["longitude"] = longitude!!
-                    }
-                    draft.condition?.let { payload["condition"] = it.value }
-                    itemsCollection.document().set(payload).await()
                     written = true
-                    _statusMessage.value = "Item posted successfully."
+                    _statusMessage.value = postedStatusMessage()
                     refreshSellerReadiness()
                 } else {
                     val updates = mutableMapOf<String, Any>(
@@ -283,12 +271,13 @@ class MarketplaceViewModel : ViewModel() {
                         "description" to cleanDescription,
                         "category" to cleanCategory,
                         "price" to draft.price,
-                        "sellerPhone" to cleanPhone,
                         "locationName" to cleanLocation,
                         "imageUrls" to imageUrls,
                         "media" to mediaPayload,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
+                    sellerPhoneUpdate(existingItem.sellerPhone, cleanPhone, draft.shareSellerPhone)
+                        ?.let { updates["sellerPhone"] = it }
                     if (hasCoordinates) {
                         updates["latitude"] = latitude!!
                         updates["longitude"] = longitude!!
@@ -566,7 +555,10 @@ class MarketplaceViewModel : ViewModel() {
             _sellerReadiness.value = _sellerReadiness.value.copy(isLoading = true)
             runCatching {
                 val userDoc = db.collection(FirestoreCollection.USERS).document(uid).get().await()
-                val hasStripeBusinessPayouts = hasActiveStripeBusinessPayouts()
+                // Soft reminder only: if the Connect lookup fails, don't nag and never block posting.
+                val hasStripeBusinessPayouts = runCatching { hasActiveStripeBusinessPayouts() }
+                    .onFailure { Log.w(TAG, "Seller earnings status lookup failed", it) }
+                    .getOrDefault(true)
                 val role = userDoc.getString("role")?.trim()?.lowercase(Locale.US).orEmpty()
                 val isStaff = role in MARKETPLACE_STAFF_ROLES
                 val activeCount = countActiveSellerListings(uid)
@@ -614,6 +606,7 @@ class MarketplaceViewModel : ViewModel() {
         category: String,
         imageUris: List<Uri>,
         sellerPhone: String,
+        shareSellerPhone: Boolean,
         locationName: String,
         latitude: Double,
         longitude: Double,
@@ -658,42 +651,30 @@ class MarketplaceViewModel : ViewModel() {
             var listingWritten = false
             try {
                 _errorMessage.value = null
-                val userSnapshot = db.collection(FirestoreCollection.USERS).document(currentUser.uid).get().await()
-                val sellerName =
-                    userSnapshot.getString("name")?.takeIf { it.isNotBlank() }
-                        ?: userSnapshot.getString("username")?.takeIf { it.isNotBlank() }
-                        ?: currentUser.email
-                        ?: "Seller"
-                // Listings are readable by every signed-in member, so only publish a phone the seller typed.
-                val resolvedPhone = sellerPhone.trim().take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH)
                 uploadedMedia = uploadImageUris(currentUser.uid, imageUris)
                 val uploadedImageUrls = uploadedMedia.map { it.url }
                 val mediaEntries = uploadedImageUrls.map { url ->
-                    mapOf("url" to url, "type" to "image")
+                    MarketplaceMediaEntry(url = url, type = MarketplaceMediaEntry.TYPE_IMAGE).toFirestore()
                 }
+                val hasCoordinates = latitude != 0.0 || longitude != 0.0
 
-                val payload = mutableMapOf<String, Any>(
-                    "title" to cleanTitle,
-                    "description" to cleanDescription,
-                    "price" to price,
-                    "category" to cleanCategory,
-                    "sellerName" to sellerName.trim().take(MARKETPLACE_SELLER_NAME_MAX_LENGTH),
-                    "sellerId" to currentUser.uid,
-                    "sellerPhone" to resolvedPhone,
-                    "imageUrls" to uploadedImageUrls,
-                    "media" to mediaEntries,
-                    "locationName" to cleanLocation,
-                    "countryCode" to DEFAULT_COUNTRY_CODE,
-                    "latitude" to latitude,
-                    "longitude" to longitude,
-                    "status" to STATUS_AVAILABLE,
-                    "timestamp" to FieldValue.serverTimestamp()
+                // Direct client creates are blocked by Firestore rules; the callable validates and writes.
+                createListingViaCallable(
+                    title = cleanTitle,
+                    description = cleanDescription,
+                    price = price,
+                    category = cleanCategory,
+                    condition = condition,
+                    media = mediaEntries,
+                    imageUrls = uploadedImageUrls,
+                    locationName = cleanLocation,
+                    latitude = if (hasCoordinates) roundMarketplaceCoordinate(latitude) else null,
+                    longitude = if (hasCoordinates) roundMarketplaceCoordinate(longitude) else null,
+                    sellerPhone = sellerPhone.trim().take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH),
+                    shareSellerPhone = shareSellerPhone,
                 )
-
-                condition?.let { payload["condition"] = it.value }
-                itemsCollection.document().set(payload).await()
                 listingWritten = true
-                _statusMessage.value = "Item posted successfully."
+                _statusMessage.value = postedStatusMessage()
                 refreshSellerReadiness()
                 onResult(true, null)
             } catch (e: Exception) {
@@ -705,6 +686,223 @@ class MarketplaceViewModel : ViewModel() {
             }
         }
     }
+
+    /**
+     * Publishes through `createMarketplaceListing` (Firestore rules deny client creates). Media must already be in
+     * `marketplace_images/{uid}/`. The phone is only sent when the seller opted in and typed one.
+     */
+    private suspend fun createListingViaCallable(
+        title: String,
+        description: String,
+        price: Double,
+        category: String,
+        condition: MarketplaceCondition?,
+        media: List<Map<String, Any>>,
+        imageUrls: List<String>,
+        locationName: String,
+        latitude: Double?,
+        longitude: Double?,
+        sellerPhone: String,
+        shareSellerPhone: Boolean,
+    ): String {
+        val phone = sellerPhone.trim().take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH)
+        val sharePhone = shareSellerPhone && phone.isNotEmpty()
+        val payload = mutableMapOf<String, Any>(
+            "title" to title,
+            "description" to description,
+            "price" to price,
+            "category" to category,
+            "media" to media,
+            "imageUrls" to imageUrls,
+            "locationName" to locationName,
+            "countryCode" to DEFAULT_COUNTRY_CODE,
+            "shareSellerPhone" to sharePhone,
+        )
+        condition?.let { payload["condition"] = it.value }
+        if (latitude != null && longitude != null) {
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+        }
+        if (sharePhone) payload["sellerPhone"] = phone
+        val result = try {
+            FunctionsClient.callMap(CallableFunction.CREATE_MARKETPLACE_LISTING, payload)
+        } catch (e: FirebaseFunctionsException) {
+            throw IllegalStateException(
+                marketplaceCallableMessage(e, "Couldn't post this listing.", pointToSellerEarnings = true),
+                e
+            )
+        }
+        val itemId = (result?.get("itemId") as? String)?.trim().orEmpty()
+        if (itemId.isBlank() && result?.get("success") != true) {
+            throw IllegalStateException("Couldn't post this listing. Try again.")
+        }
+        return itemId
+    }
+
+    /**
+     * Success banner after `createMarketplaceListing`. Best-effort Seller earnings check appends a soft reminder;
+     * any failure here is ignored so the post is never reported as failed.
+     */
+    private suspend fun postedStatusMessage(): String {
+        val base = "Item posted successfully."
+        val needsSetup = runCatching { !hasActiveStripeBusinessPayouts() }.getOrDefault(false)
+        return if (needsSetup) "$base $MARKETPLACE_SELLER_EARNINGS_REMINDER" else base
+    }
+
+    /** Value for `sellerPhone` on a Firestore update, or null to leave the stored field untouched. */
+    private fun sellerPhoneUpdate(existingPhone: String, phone: String, shareSellerPhone: Boolean): Any? = when {
+        shareSellerPhone && phone.isNotEmpty() -> phone
+        existingPhone.isNotBlank() -> FieldValue.delete()
+        else -> null
+    }
+
+    private fun marketplaceCallableMessage(
+        e: FirebaseFunctionsException,
+        fallback: String,
+        pointToSellerEarnings: Boolean = false,
+    ): String {
+        val server = e.message?.trim().orEmpty()
+        return when (e.code) {
+            FirebaseFunctionsException.Code.RESOURCE_EXHAUSTED ->
+                server.ifBlank { "You can keep up to $MARKETPLACE_MAX_ACTIVE_POSTS active Marketplace posts." }
+            FirebaseFunctionsException.Code.FAILED_PRECONDITION -> {
+                val base = server.ifBlank { fallback }
+                // Creating a listing never requires Connect. Only add a Seller earnings pointer when the server
+                // message itself is about the seller's payout/onboarding setup (a reminder, not a create blocker).
+                val mentionsPayoutSetup = PAYOUT_SETUP_HINT.containsMatchIn(base)
+                if (pointToSellerEarnings && mentionsPayoutSetup && !base.contains("earnings", ignoreCase = true)) {
+                    "$base You can finish Seller earnings in Wallet > Payment Methods."
+                } else {
+                    base
+                }
+            }
+            FirebaseFunctionsException.Code.INVALID_ARGUMENT -> server.ifBlank { fallback }
+            else -> server.ifBlank { fallback }
+        }
+    }
+
+    // region marketplace_orders (My purchases / My sales / platform review)
+
+    private val _purchases = MutableStateFlow<List<MarketplaceOrder>>(emptyList())
+    val purchases = _purchases.asStateFlow()
+    private val _sales = MutableStateFlow<List<MarketplaceOrder>>(emptyList())
+    val sales = _sales.asStateFlow()
+    private val _reviewOrders = MutableStateFlow<List<MarketplaceOrder>>(emptyList())
+    val reviewOrders = _reviewOrders.asStateFlow()
+    private val _isPlatformAdmin = MutableStateFlow(false)
+    val isPlatformAdmin = _isPlatformAdmin.asStateFlow()
+    private val _ordersLoading = MutableStateFlow(false)
+    val ordersLoading = _ordersLoading.asStateFlow()
+    private val _orderActionIds = MutableStateFlow<Set<String>>(emptySet())
+    val orderActionIds = _orderActionIds.asStateFlow()
+    private var orderListeners: List<ListenerRegistration> = emptyList()
+
+    fun attachOrders() {
+        if (orderListeners.isNotEmpty()) return
+        val uid = auth.currentUser?.uid ?: return
+        val ordersCollection = db.collection(FirestoreCollection.MARKETPLACE_ORDERS)
+        _ordersLoading.value = true
+        fun listen(query: Query, sink: MutableStateFlow<List<MarketplaceOrder>>) =
+            query.addSnapshotListener { snapshots, error ->
+                _ordersLoading.value = false
+                if (error != null) {
+                    Log.w(TAG, "Marketplace orders listen failed", error)
+                    return@addSnapshotListener
+                }
+                sink.value = snapshots?.documents
+                    ?.mapNotNull(::parseMarketplaceOrder)
+                    ?.sortedByDescending { it.createdAtMillis ?: 0L }
+                    .orEmpty()
+            }
+        orderListeners = listOf(
+            listen(ordersCollection.whereEqualTo("buyerId", uid), _purchases),
+            listen(ordersCollection.whereEqualTo("sellerId", uid), _sales),
+        )
+        // Platform owners/admins can also see disputed orders (rules allow admin reads).
+        viewModelScope.launch {
+            val role = runCatching {
+                db.collection(FirestoreCollection.USERS).document(uid).get().await()
+                    .getString("role")?.trim()?.lowercase(Locale.US).orEmpty()
+            }.getOrDefault("")
+            if (role == "owner" || role == "admin") {
+                _isPlatformAdmin.value = true
+                if (orderListeners.isNotEmpty()) {
+                    orderListeners = orderListeners + listen(
+                        ordersCollection.whereIn(
+                            "status",
+                            listOf(MarketplaceOrderStatus.HELP_REQUESTED, MarketplaceOrderStatus.HELP_DECLINED)
+                        ),
+                        _reviewOrders
+                    )
+                }
+            }
+        }
+    }
+
+    fun detachOrders() {
+        orderListeners.forEach { it.remove() }
+        orderListeners = emptyList()
+    }
+
+    fun markOrderDelivered(orderId: String) = runOrderAction(
+        orderId = orderId,
+        callable = CallableFunction.MARK_MARKETPLACE_ORDER_DELIVERED,
+        data = mapOf("orderId" to orderId),
+        successMessage = "Order marked as delivered.",
+    )
+
+    fun requestOrderHelp(orderId: String, reason: MarketplaceOrderHelpReason, message: String) = runOrderAction(
+        orderId = orderId,
+        callable = CallableFunction.REQUEST_MARKETPLACE_ORDER_HELP,
+        data = buildMap {
+            put("orderId", orderId)
+            put("reason", reason.value)
+            message.trim().take(MARKETPLACE_ORDER_HELP_MESSAGE_MAX_LENGTH).takeIf { it.isNotEmpty() }
+                ?.let { put("message", it) }
+        },
+        successMessage = "Help request sent.",
+    )
+
+    fun respondToOrderHelp(orderId: String, approveRefund: Boolean) = runOrderAction(
+        orderId = orderId,
+        callable = CallableFunction.RESPOND_MARKETPLACE_ORDER_HELP,
+        data = mapOf("orderId" to orderId, "action" to if (approveRefund) "APPROVE_REFUND" else "DECLINE"),
+        successMessage = if (approveRefund) "Refund approved." else "Request declined.",
+    )
+
+    /** Platform owner/admin only; the server rejects everyone else. */
+    fun resolveOrder(orderId: String, refund: Boolean) = runOrderAction(
+        orderId = orderId,
+        callable = CallableFunction.RESOLVE_MARKETPLACE_ORDER,
+        data = mapOf("orderId" to orderId, "action" to if (refund) "REFUND" else "CLOSE"),
+        successMessage = if (refund) "Order refunded." else "Order closed.",
+    )
+
+    private fun runOrderAction(
+        orderId: String,
+        callable: String,
+        data: Map<String, Any>,
+        successMessage: String,
+    ) {
+        if (orderId.isBlank() || orderId in _orderActionIds.value) return
+        _orderActionIds.update { it + orderId }
+        viewModelScope.launch {
+            try {
+                FunctionsClient.callMap(callable, data)
+                _statusMessage.value = successMessage
+            } catch (e: Exception) {
+                Log.w(TAG, "Marketplace order action failed: $callable", e)
+                _errorMessage.value = (e as? FirebaseFunctionsException)
+                    ?.let { marketplaceCallableMessage(it, "Couldn't update this order. Try again.") }
+                    ?: e.localizedMessage
+                    ?: "Couldn't update this order. Try again."
+            } finally {
+                _orderActionIds.update { it - orderId }
+            }
+        }
+    }
+
+    // endregion
 
     fun purchaseItem(item: MarketplaceItem, onComplete: (Boolean, String, String?) -> Unit) {
         val buyerId = auth.currentUser?.uid ?: run {
@@ -782,10 +980,13 @@ class MarketplaceViewModel : ViewModel() {
                 onComplete(true, message, result?.get("checkoutUrl") as? String)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to submit purchase request", e)
-                val isBlockedPair = e is com.google.firebase.functions.FirebaseFunctionsException &&
-                    e.code == com.google.firebase.functions.FirebaseFunctionsException.Code.PERMISSION_DENIED
-                val message = if (isBlockedPair) {
+                val functionsCode = (e as? FirebaseFunctionsException)?.code
+                val message = if (functionsCode == FirebaseFunctionsException.Code.PERMISSION_DENIED) {
                     e.message?.takeIf { it.isNotBlank() } ?: "This listing isn't available to you."
+                } else if (functionsCode == FirebaseFunctionsException.Code.FAILED_PRECONDITION) {
+                    // e.g. "This seller hasn't finished payout setup yet…" — show the server text as-is; the buyer
+                    // has nothing to finish, so don't point them at Seller earnings.
+                    e.message?.takeIf { it.isNotBlank() } ?: "This listing can't be purchased right now."
                 } else {
                     e.localizedMessage ?: "Could not start the purchase process."
                 }
@@ -857,6 +1058,7 @@ class MarketplaceViewModel : ViewModel() {
         category: String,
         price: Double,
         sellerPhone: String,
+        shareSellerPhone: Boolean,
         locationName: String,
         latitude: Double,
         longitude: Double,
@@ -937,20 +1139,27 @@ class MarketplaceViewModel : ViewModel() {
                     currentItem.condition != null -> FieldValue.delete()
                     else -> null
                 }
+                val phoneUpdate = sellerPhoneUpdate(
+                    existingPhone = currentItem.sellerPhone,
+                    phone = sellerPhone.trim().take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH),
+                    shareSellerPhone = shareSellerPhone,
+                )
                 itemsCollection.document(itemId).update(
                     mutableMapOf<String, Any>(
                         "title" to cleanTitle,
                         "description" to cleanDescription,
                         "category" to cleanCategory,
                         "price" to price,
-                        "sellerPhone" to sellerPhone.trim().take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH),
                         "locationName" to cleanLocation,
                         "latitude" to latitude,
                         "longitude" to longitude,
                         "imageUrls" to uploadedUrls,
                         "media" to mediaEntries,
                         "updatedAt" to FieldValue.serverTimestamp(),
-                    ).apply { conditionUpdate?.let { put("condition", it) } }
+                    ).apply {
+                        conditionUpdate?.let { put("condition", it) }
+                        phoneUpdate?.let { put("sellerPhone", it) }
+                    }
                 ).await()
                 listingUpdated = true
 
@@ -1248,9 +1457,13 @@ class MarketplaceViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Pre-publish check: only the open-listing cap applies. Stripe Connect is intentionally not queried here, so a
+     * Connect lookup failure or an unfinished Seller earnings setup can never block a post.
+     */
     private suspend fun resolveSellerReadinessForPublish(uid: String): MarketplaceSellerReadiness {
         val userDoc = db.collection(FirestoreCollection.USERS).document(uid).get().await()
-        val hasStripeBusinessPayouts = hasActiveStripeBusinessPayouts()
+        val hasStripeBusinessPayouts = _sellerReadiness.value.hasStripeBusinessPayouts
         val role = userDoc.getString("role")?.trim()?.lowercase(Locale.US).orEmpty()
         val isStaff = role in MARKETPLACE_STAFF_ROLES
         val activeCount = countActiveSellerListings(uid)
@@ -1263,10 +1476,22 @@ class MarketplaceViewModel : ViewModel() {
     }
 
     private suspend fun hasActiveStripeBusinessPayouts(): Boolean {
+        // Used only for a soft "finish Seller earnings" reminder; never gates posting. Buyers get the server's
+        // failed-precondition at checkout if the seller hasn't finished payout setup.
+        // Afriex MM/bank receive routes are for Send Money only and don't pay Marketplace earnings.
         val raw = FunctionsClient.callMap(CallableFunction.GET_CONNECT_ACCOUNT_STATUS)
-        if (raw?.get("payoutsEnabled") == true) return true
+        fun Map<*, *>.sellerReady(): Boolean {
+            val hasAccount = this["hasAccount"] == true ||
+                this["hasStripeAccount"] == true ||
+                this["accountExists"] == true
+            val detailsSubmitted = this["detailsSubmitted"] == true || this["isDetailsSubmitted"] == true
+            val chargesEnabled = this["chargesEnabled"] == true || this["isChargesEnabled"] == true
+            val payoutsEnabled = this["payoutsEnabled"] == true || this["isPayoutsEnabled"] == true
+            return hasAccount && detailsSubmitted && chargesEnabled && payoutsEnabled
+        }
+        if (raw != null && raw.sellerReady()) return true
         val nested = raw?.get("data") as? Map<*, *>
-        return nested?.get("payoutsEnabled") == true
+        return nested?.sellerReady() == true
     }
 
     private suspend fun uploadImageUris(ownerUid: String, imageUris: List<Uri>): List<MarketplaceUpload> {
@@ -1402,6 +1627,7 @@ class MarketplaceViewModel : ViewModel() {
 
     override fun onCleared() {
         detachMarketplaceFeed()
+        detachOrders()
         super.onCleared()
     }
 
@@ -1412,9 +1638,11 @@ class MarketplaceViewModel : ViewModel() {
         private const val DEFAULT_LOCATION_NAME = "Global"
         private const val DEFAULT_CATEGORY = "All"
         private const val FALLBACK_CATEGORY = "Other"
+        private val PAYOUT_SETUP_HINT = Regex("payout|onboard|stripe|connect", RegexOption.IGNORE_CASE)
         private const val STATUS_AVAILABLE = "AVAILABLE"
         private const val PURCHASE_STATUS_PENDING = "pending"
-        private val ACTIVE_SELLER_STATUSES = setOf("AVAILABLE", "ACTIVE", "OPEN", "RESERVED")
+        // Matches the server's open-listing cap: AVAILABLE / ACTIVE / OPEN, not deleted.
+        private val ACTIVE_SELLER_STATUSES = setOf("AVAILABLE", "ACTIVE", "OPEN")
         /** Same stored labels and order as iOS; older category values still show under "All". */
         val MARKETPLACE_CATEGORIES = listOf(
             DEFAULT_CATEGORY,

@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Map
@@ -143,6 +144,7 @@ fun MarketplaceScreen(
     var browseLayout by remember { mutableStateOf(MarketplaceBrowseLayout.Discover) }
     var sellerProfile by remember { mutableStateOf<SellerCollection?>(null) }
     var detailItemId by remember { mutableStateOf<String?>(null) }
+    var showOrders by remember { mutableStateOf(false) }
 
     val uiState by viewModel.uiState.collectAsState()
     val publicFees by viewModel.publicFees.collectAsState()
@@ -366,6 +368,17 @@ fun MarketplaceScreen(
                             )
                         }
                     },
+                    actions = {
+                        if (buyerActionsEnabled) {
+                            IconButton(onClick = { showOrders = true }) {
+                                Icon(
+                                    Icons.Default.Receipt,
+                                    contentDescription = "My purchases and sales",
+                                    tint = MarketplaceA11yPalette.textPrimary
+                                )
+                            }
+                        }
+                    },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                         containerColor = Color.Transparent,
                         titleContentColor = MarketplaceA11yPalette.textPrimary
@@ -383,7 +396,7 @@ fun MarketplaceScreen(
                             android.widget.Toast.makeText(
                                 context,
                                 sellerReadiness.publishBlockReason
-                                    ?: "Complete seller requirements before publishing.",
+                                    ?: "You've reached the active listing limit.",
                                 android.widget.Toast.LENGTH_LONG
                             ).show()
                         }
@@ -513,7 +526,7 @@ fun MarketplaceScreen(
                                                     android.widget.Toast.makeText(
                                                         context,
                                                         sellerReadiness.publishBlockReason
-                                                            ?: "Complete seller requirements before publishing.",
+                                                            ?: "You've reached the active listing limit.",
                                                         android.widget.Toast.LENGTH_LONG
                                                     ).show()
                                                 }
@@ -532,7 +545,7 @@ fun MarketplaceScreen(
                                                     android.widget.Toast.makeText(
                                                         context,
                                                         sellerReadiness.publishBlockReason
-                                                            ?: "Complete seller requirements before publishing.",
+                                                            ?: "You've reached the active listing limit.",
                                                         android.widget.Toast.LENGTH_LONG
                                                     ).show()
                                                 }
@@ -610,13 +623,17 @@ fun MarketplaceScreen(
             }
         )
     }
+    if (showOrders) {
+        MarketplaceOrdersSheet(viewModel = viewModel, onDismiss = { showOrders = false })
+    }
+
     editingItem?.let { item ->
         val isSaving = successState?.updatingItemIds?.contains(item.id) == true
         MarketplaceEditDialog(
             item = item,
             isSaving = isSaving,
             onDismiss = { editingItem = null },
-            onConfirm = { title, description, category, price, sellerPhone, locationName, latitude, longitude, newImageUris, existingImageUrls, condition, onResult ->
+            onConfirm = { title, description, category, price, sellerPhone, shareSellerPhone, locationName, latitude, longitude, newImageUris, existingImageUrls, condition, onResult ->
                 viewModel.updateItem(
                     itemId = item.id,
                     title = title,
@@ -624,6 +641,7 @@ fun MarketplaceScreen(
                     category = category,
                     price = price,
                     sellerPhone = sellerPhone,
+                    shareSellerPhone = shareSellerPhone,
                     locationName = locationName,
                     latitude = latitude,
                     longitude = longitude,
@@ -2008,6 +2026,7 @@ private fun MarketplaceEditDialog(
         category: String,
         price: Double,
         sellerPhone: String,
+        shareSellerPhone: Boolean,
         locationName: String,
         latitude: Double,
         longitude: Double,
@@ -2024,6 +2043,8 @@ private fun MarketplaceEditDialog(
     var categoryExpanded by remember(item.id) { mutableStateOf(false) }
     var price by remember(item.id) { mutableStateOf(if (item.price > 0) item.price.toString() else "") }
     var sellerPhone by remember(item.id) { mutableStateOf(item.sellerPhone) }
+    // A phone already on the listing was opted in earlier; otherwise sharing starts off.
+    var shareSellerPhone by remember(item.id) { mutableStateOf(item.sellerPhone.isNotBlank()) }
     var locationName by remember(item.id) { mutableStateOf(item.locationName) }
     var latitudeText by remember(item.id) { mutableStateOf(item.latitude.takeIf { it != 0.0 }?.toString().orEmpty()) }
     var longitudeText by remember(item.id) { mutableStateOf(item.longitude.takeIf { it != 0.0 }?.toString().orEmpty()) }
@@ -2173,6 +2194,11 @@ private fun MarketplaceEditDialog(
                             label = { Text("Seller Phone (optional)") },
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Phone)
                         )
+                        Spacer(Modifier.height(6.dp))
+                        MarketplaceSharePhoneToggle(
+                            checked = shareSellerPhone,
+                            onCheckedChange = { shareSellerPhone = it }
+                        )
                     }
                 }
 
@@ -2310,6 +2336,7 @@ private fun MarketplaceEditDialog(
                                     category.trim().ifBlank { "Other" },
                                     price.toDoubleOrNull() ?: 0.0,
                                     sellerPhone.trim(),
+                                    shareSellerPhone && sellerPhone.isNotBlank(),
                                     locationName.trim(),
                                     latitudeText.toDoubleOrNull() ?: 0.0,
                                     longitudeText.toDoubleOrNull() ?: 0.0,

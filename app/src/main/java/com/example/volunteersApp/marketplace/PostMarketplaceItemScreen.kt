@@ -87,6 +87,7 @@ typealias OnPostItemCallback = (
     category: String,
     imageUris: List<Uri>,
     sellerPhone: String,
+    shareSellerPhone: Boolean,
     locationName: String,
     latitude: Double,
     longitude: Double,
@@ -105,6 +106,7 @@ fun PostMarketplaceItemScreen(
     var description by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
     var sellerPhone by remember { mutableStateOf("") }
+    var shareSellerPhone by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf("Other") }
     var categoryExpanded by remember { mutableStateOf(false) }
     var condition by remember { mutableStateOf<MarketplaceCondition?>(null) }
@@ -249,6 +251,7 @@ fun PostMarketplaceItemScreen(
                                 category.trim().ifBlank { "Other" },
                                 selectedImageUris,
                                 sellerPhone.trim(),
+                                shareSellerPhone && sellerPhone.isNotBlank(),
                                 locationName.trim().ifBlank { "Global" },
                                 latitudeText.toDoubleOrNull() ?: 0.0,
                                 longitudeText.toDoubleOrNull() ?: 0.0,
@@ -302,7 +305,8 @@ fun PostMarketplaceItemScreen(
             contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            sellerReadiness.publishBlockReason?.let { reason ->
+            // Cap reason is a hard stop; the Seller earnings reminder is informational only (Connect isn't required to post).
+            listOfNotNull(sellerReadiness.publishBlockReason, sellerReadiness.sellerEarningsReminder).forEach { reason ->
                 item {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -406,9 +410,14 @@ fun PostMarketplaceItemScreen(
                         onValueChange = { sellerPhone = it.take(MARKETPLACE_SELLER_PHONE_MAX_LENGTH) },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Seller Phone (optional)") },
-                        supportingText = { Text("Shown to all members. Leave blank to keep your number private.") },
+                        supportingText = { Text("Only published when the switch below is on.") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         colors = marketplaceFieldColors()
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    MarketplaceSharePhoneToggle(
+                        checked = shareSellerPhone,
+                        onCheckedChange = { shareSellerPhone = it }
                     )
                 }
             }

@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.io.ByteArrayOutputStream
+import java.util.UUID
 
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -43,6 +44,8 @@ data class ChatUiState(
     val canPlaceCall: Boolean = true,
     val callBlockReason: String? = null,
     val callPushWarning: String? = null,
+    /** Bumped when an optimistic row is appended so the UI re-pins the transcript to the bottom. */
+    val scrollToBottomToken: Int = 0,
 )
 
 private data class UploadedChatMedia(
@@ -58,6 +61,10 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
     private var callSessionsForChatListener: ListenerRegistration? = null
     private var currentUserDisplayName: String? = null
     private var markSeenJob: Job? = null
+    // Latest confirmed (listener) messages, and local rows shown before the Firestore write is confirmed.
+    // Both are only touched on the main thread (snapshot listener + viewModelScope).
+    private var serverMessages: List<ChatMessage> = emptyList()
+    private val optimisticMessages = mutableListOf<ChatMessage>()
     // A rejected receipt reverts locally and re-fires the listener; without this the batch retries
     // every snapshot and keeps resetting the Firestore write stream for the whole app.
     private val receiptDeniedMessageIds = mutableSetOf<String>()
@@ -176,21 +183,9 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
                     return@addSnapshotListener
                 }
 
-                val messages = snapshots?.documents.orEmpty()
-                    .map { it.toChatMessage() }
-                    .sortedWith(
-                        compareBy<ChatMessage> { msg ->
-                            msg.timestamp?.time ?: msg.clientSentAtMs
-                        }.thenBy { it.id }
-                    )
-
-                _uiState.update {
-                    it.copy(
-                        messages = messages,
-                        isLoading = false,
-                        error = null
-                    )
-                }
+                val messages = sortChatMessages(snapshots?.documents.orEmpty().map { it.toChatMessage() })
+                serverMessages = messages
+                publishMessages(isLoading = false, clearError = true)
 
                 markSeenJob?.cancel()
                 markSeenJob = viewModelScope.launch {
@@ -198,6 +193,64 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
                     markMessagesSeen(messages)
                 }
             }
+    }
+
+    private fun sortChatMessages(messages: List<ChatMessage>): List<ChatMessage> =
+        messages.sortedWith(
+            compareBy<ChatMessage> { msg ->
+                msg.timestamp?.time ?: msg.clientSentAtMs
+            }.thenBy { it.id }
+        )
+
+    /**
+     * Merges confirmed messages with still-unconfirmed optimistic rows. An optimistic row is dropped once a
+     * server message matches (same sender, body/media type, clientSentAtMs within ±15s); each server
+     * message can confirm only one optimistic row.
+     */
+    private fun publishMessages(
+        isLoading: Boolean? = null,
+        clearError: Boolean = false,
+        bumpScrollToken: Boolean = false,
+    ) {
+        if (optimisticMessages.isNotEmpty()) {
+            val unmatchedServer = serverMessages.toMutableList()
+            val stillPending = optimisticMessages.filter { local ->
+                val match = unmatchedServer.firstOrNull { it.confirms(local) }
+                if (match != null) unmatchedServer.remove(match)
+                match == null
+            }
+            optimisticMessages.clear()
+            optimisticMessages.addAll(stillPending)
+        }
+        val merged = if (optimisticMessages.isEmpty()) {
+            serverMessages
+        } else {
+            sortChatMessages(serverMessages + optimisticMessages)
+        }
+        _uiState.update {
+            it.copy(
+                messages = merged,
+                isLoading = isLoading ?: it.isLoading,
+                error = if (clearError) null else it.error,
+                scrollToBottomToken = if (bumpScrollToken) it.scrollToBottomToken + 1 else it.scrollToBottomToken,
+            )
+        }
+    }
+
+    private fun ChatMessage.confirms(local: ChatMessage): Boolean {
+        if (senderId != local.senderId) return false
+        if (kotlin.math.abs(clientSentAtMs - local.clientSentAtMs) > OPTIMISTIC_MATCH_WINDOW_MS) return false
+        return if (local.messageType == CHAT_MESSAGE_TYPE_TEXT) {
+            messageType == CHAT_MESSAGE_TYPE_TEXT && messageText == local.messageText
+        } else {
+            messageType == local.messageType
+        }
+    }
+
+    private fun removeOptimistic(localId: String) {
+        if (optimisticMessages.removeAll { it.id == localId }) {
+            publishMessages()
+        }
     }
 
     fun sendMessage(
@@ -214,9 +267,33 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
             return
         }
 
+        // Optimistic bubble: show immediately, before any Firestore/Storage work.
+        val sentAtMs = System.currentTimeMillis()
+        val localId = "$LOCAL_CHAT_MESSAGE_ID_PREFIX${UUID.randomUUID()}"
+        val replyRef = replyTo?.takeIf { it.id.isNotBlank() }
+        optimisticMessages += ChatMessage(
+            id = localId,
+            messageText = trimmedText,
+            senderId = sender.uid,
+            senderDisplayName = currentUserDisplayName.orEmpty(),
+            messageType = attachment?.type ?: CHAT_MESSAGE_TYPE_TEXT,
+            mediaUrl = attachment?.uri?.toString(),
+            replyToMessageId = replyRef?.id,
+            replyToText = replyRef?.let { resolveChatMessagePreview(it) },
+            replyToSenderName = replyRef?.let {
+                it.senderDisplayName.ifBlank { if (it.senderId == sender.uid) "You" else "Reply" }
+            },
+            replyToSenderId = replyRef?.senderId,
+            deliveredTo = listOf(sender.uid),
+            readBy = listOf(sender.uid),
+            clientSentAtMs = sentAtMs,
+        )
+        publishMessages(bumpScrollToken = true)
+
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, error = null) }
             var sendStage = "initialize"
+            var sendSucceeded = false
             var chatExists = false
             var senderIsParticipant = false
             var chatParticipants: List<String> = emptyList()
@@ -284,7 +361,7 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
                     "readBy" to listOf(sender.uid),
                     "isRead" to true,
                     "timestamp" to FieldValue.serverTimestamp(),
-                    "clientSentAtMs" to System.currentTimeMillis(),
+                    "clientSentAtMs" to sentAtMs,
                     "isDeleted" to false
                 )
 
@@ -321,6 +398,7 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
                 }.await()
 
                 sendStage = "completed"
+                sendSucceeded = true
                 onComplete(true)
             } catch (error: SecurityException) {
                 Log.w(
@@ -367,6 +445,8 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
                 }
                 onComplete(false)
             } finally {
+                // Roll back the optimistic row on any failure; on success the listener snapshot replaces it.
+                if (!sendSucceeded) removeOptimistic(localId)
                 _uiState.update { it.copy(isSending = false) }
             }
         }
@@ -377,7 +457,9 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
         onComplete: (Boolean, String) -> Unit = { _, _ -> }
     ) {
         val sender = currentUser
-        if (sender == null || message.id.isBlank() || message.senderId != sender.uid || message.isDeleted) {
+        if (sender == null || message.id.isBlank() || message.isLocalPending() ||
+            message.senderId != sender.uid || message.isDeleted
+        ) {
             onComplete(false, "Only your active messages can be deleted.")
             return
         }
@@ -652,6 +734,7 @@ class ChatViewModel(private val chatId: String) : ViewModel() {
         private const val RINGING_CALL_MAX_AGE_MS = 5 * 60 * 1000L
         private const val ACTIVE_CALL_MAX_AGE_MS = 30 * 60 * 1000L
         private const val MESSAGE_LIST_LIMIT = 150L
+        private const val OPTIMISTIC_MATCH_WINDOW_MS = 15_000L
         private const val MAX_IMAGE_SIZE_BYTES = 8L * 1024L * 1024L
         private const val MAX_VIDEO_SIZE_BYTES = 20L * 1024L * 1024L
 

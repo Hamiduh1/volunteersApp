@@ -36,3 +36,9 @@ data class ChatMessage(
     /** Client clock when sent; used to sort until server [timestamp] exists (orderBy issues). */
     val clientSentAtMs: Long = 0L
 )
+
+/** Id prefix for optimistic rows appended before the Firestore write is confirmed. */
+const val LOCAL_CHAT_MESSAGE_ID_PREFIX = "local-"
+
+/** True for optimistic local rows (`local-{uuid}`) that have no Firestore document yet. */
+fun ChatMessage.isLocalPending(): Boolean = id.startsWith(LOCAL_CHAT_MESSAGE_ID_PREFIX)

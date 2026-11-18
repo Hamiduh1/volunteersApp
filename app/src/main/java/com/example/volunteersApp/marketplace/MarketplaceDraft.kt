@@ -42,6 +42,8 @@ data class MarketplaceListingDraft(
     val category: String,
     val condition: MarketplaceCondition?,
     val sellerPhone: String,
+    /** Explicit opt-in; [sellerPhone] is only published when this is true and the phone is non-empty. */
+    val shareSellerPhone: Boolean,
     val locationName: String,
     /** Null when the seller turned off "Show distance to buyers". */
     val latitude: Double?,

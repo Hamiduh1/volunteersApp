@@ -24,8 +24,8 @@ const val MARKETPLACE_MAX_ACTIVE_POSTS = 3
 const val MARKETPLACE_MAX_PRICE_USD = 50_000.0
 const val MARKETPLACE_MIN_PRICE_USD = 0.01
 const val MARKETPLACE_MAX_MEDIA_ATTACHMENTS = 20
-const val MARKETPLACE_TITLE_MAX_LENGTH = 120
-const val MARKETPLACE_DESCRIPTION_MAX_LENGTH = 2_000
+const val MARKETPLACE_TITLE_MAX_LENGTH = 200
+const val MARKETPLACE_DESCRIPTION_MAX_LENGTH = 8_000
 const val MARKETPLACE_SELLER_PHONE_MAX_LENGTH = 40
 const val MARKETPLACE_SELLER_NAME_MAX_LENGTH = 120
 
@@ -61,20 +61,31 @@ data class MarketplaceSellerReadiness(
     val isStaffFeeExempt: Boolean = false,
     val isLoading: Boolean = true,
 ) {
+    /**
+     * Stripe Connect / Seller earnings is NOT required to post (see docs/ANDROID_MARKETPLACE_HANDOFF.md).
+     * Only the open-listing cap gates publishing; the server enforces it too (`resource-exhausted`).
+     */
     val canPublishNewListing: Boolean
-        get() = hasStripeBusinessPayouts &&
-            (isStaffFeeExempt || activeListingCount < MARKETPLACE_MAX_ACTIVE_POSTS)
+        get() = isStaffFeeExempt || activeListingCount < MARKETPLACE_MAX_ACTIVE_POSTS
 
     val publishBlockReason: String?
         get() = when {
-            isLoading -> "Checking seller requirements…"
-            !hasStripeBusinessPayouts ->
-                "Finish Stripe Connect Business Payouts setup in Payment Methods before publishing."
             !isStaffFeeExempt && activeListingCount >= MARKETPLACE_MAX_ACTIVE_POSTS ->
                 "You can keep up to $MARKETPLACE_MAX_ACTIVE_POSTS active Marketplace posts. Use Sponsored Garage Shop for unlimited listings."
             else -> null
         }
+
+    /** True once we know the seller has not finished Seller earnings; drives a soft reminder, never a block. */
+    val needsSellerEarningsReminder: Boolean
+        get() = !isLoading && !hasStripeBusinessPayouts
+
+    /** Non-blocking hint shown on post/editor screens and after a successful post. */
+    val sellerEarningsReminder: String?
+        get() = if (needsSellerEarningsReminder) MARKETPLACE_SELLER_EARNINGS_REMINDER else null
 }
+
+const val MARKETPLACE_SELLER_EARNINGS_REMINDER =
+    "Finish Seller earnings in Wallet > Payment Methods so buyers can check out. You can still post now."
 
 data class MarketplacePublicFees(
     val platinumFeeRate: Double?,
