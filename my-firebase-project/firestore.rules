@@ -123,8 +123,26 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/organizers/$(request.auth.uid));
     }
 
+    // Auth emailVerified OR profile phoneVerified (mirrors assertAccountVerified).
+    function isAccountVerified() {
+      return isSignedIn() && (
+        request.auth.token.email_verified == true ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('phoneVerified', false) == true ||
+            ('phoneVerifiedAt' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+          )
+        )
+      );
+    }
+
+    // Employer privileges require a verified account, users.role=employer, and
+    // employers/{uid} created only via enrollAsEmployer (client create denied).
     function isEmployer() {
-      return exists(/databases/$(database)/documents/employers/$(request.auth.uid));
+      return isAccountVerified()
+        && exists(/databases/$(database)/documents/employers/$(request.auth.uid))
+        && signedInUserHasAnyRole(['employer']);
     }
 
     function signedInUserHasAnyRole(roles) {
@@ -2138,13 +2156,10 @@ service cloud.firestore {
     // --- EMPLOYERS ---
     match /employers/{employerId} {
       allow read: if isSignedIn();
-      allow create: if isOwner(employerId)
-        && request.resource.data.keys().hasOnly([
-          'uid', 'organizationName', 'contactEmail', 'description', 'profileCompleted',
-          'profileUrl', 'createdAt', 'updatedAt', 'lastUpdatedAt'
-        ])
-        && (!('uid' in request.resource.data) || request.resource.data.uid == employerId);
+      // Create only via enrollAsEmployer (Admin SDK). Stops unverified self-grant.
+      allow create: if false;
       allow update: if isOwner(employerId)
+        && isAccountVerified()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'uid', 'organizationName', 'contactEmail', 'description', 'profileCompleted',
           'profileUrl', 'updatedAt', 'lastUpdatedAt'
@@ -3574,37 +3589,37 @@ service cloud.firestore {
       allow delete: if isOwner(userId) && userCanAccessDating(userId);
     }
 
-    // --- APPLICATIONS IN SUBCOLLECTIONS (e.g. events/{eventId}/applications/{appId}) ---
-    // Job applications under jobs/{jobId}/applications are governed by the explicit jobs/* match above.
+    // --- APPLICATIONS IN SUBCOLLECTIONS (e.g. users/{uid}/applications/{appId}) ---
+    // Top-level applications/{id} and jobs|events/.../applications use the explicit
+    // matches above. Empty `path` must not OR those stricter rules open.
     match /{path=**}/applications/{appId} {
       allow read: if isSignedIn() &&
+        path.size() > 0 &&
+        !path.matches('^jobs(/|$)') &&
+        !path.matches('^events(/|$)') &&
         (
           isApplicationOwnerFromData(resource.data) ||
           isApplicationManagerFromData(resource.data) ||
           appId == request.auth.uid
         );
-      // Event applications are created only by the `applyForEvent` Cloud Function (Admin SDK).
-      allow create: if isSignedIn() && isApplicationOwnerFromData(request.resource.data)
-        && !path.matches('^jobs/.+')
-        && !path.matches('^events/.+');
-      // Event applications are provider-managed. Keep this legacy catch-all from
-      // overriding the stricter /events/{eventId}/applications rule above.
+      allow create: if isSignedIn()
+        && path.size() > 0
+        && !path.matches('^jobs(/|$)')
+        && !path.matches('^events(/|$)')
+        && isApplicationOwnerFromData(request.resource.data);
       allow update: if isSignedIn()
-        && !path.matches('^events/.+')
-        && !path.matches('^jobs/.+')
+        && path.size() > 0
+        && !path.matches('^events(/|$)')
+        && !path.matches('^jobs(/|$)')
         && (
-        isApplicationManagerFromData(resource.data) ||
-        (
-          appId == request.auth.uid &&
-          path.matches('^jobs/.+') &&
-          isVolunteerJobResumeFieldPatch()
-        )
-      );
+          isApplicationManagerFromData(resource.data) ||
+          (appId == request.auth.uid && isVolunteerJobResumeFieldPatch())
+        );
       allow delete: if isSignedIn()
-        && !path.matches('^events/.+')
-        && !path.matches('^jobs/.+')
-        &&
-        (isApplicationOwnerFromData(resource.data) || isApplicationManagerFromData(resource.data));
+        && path.size() > 0
+        && !path.matches('^events(/|$)')
+        && !path.matches('^jobs(/|$)')
+        && (isApplicationOwnerFromData(resource.data) || isApplicationManagerFromData(resource.data));
     }
   }
 }

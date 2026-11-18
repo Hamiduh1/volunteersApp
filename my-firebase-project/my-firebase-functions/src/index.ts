@@ -30496,6 +30496,88 @@ export const updateAccountPhoneNumber = functions.runWith({enforceAppCheck: true
   });
 
 /**
+ * Atomically enrolls the signed-in member as an employer: sets users.role and
+ * creates employers/{uid}. Client Firestore create of employers/ is denied.
+ */
+export const enrollAsEmployer = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    const uid = await assertAccountVerified(
+      context,
+      "Verify your email or phone before becoming an employer."
+    );
+    const payload = (data || {}) as {
+      organizationName?: unknown;
+      companyName?: unknown;
+      name?: unknown;
+      email?: unknown;
+      description?: unknown;
+    };
+    const organizationName = asNonEmptyString(
+      payload.organizationName,
+      payload.companyName,
+      payload.name
+    )?.trim();
+    if (!organizationName || organizationName.length < 2 || organizationName.length > 120) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Enter your organization or company name (2–120 characters)."
+      );
+    }
+    const email = asNonEmptyString(payload.email) ||
+      asNonEmptyString(context.auth?.token?.email) ||
+      "";
+    const description = (asNonEmptyString(payload.description) || "").trim().slice(0, 2000);
+    const userRef = db.collection("users").doc(uid);
+    const employerRef = db.collection("employers").doc(uid);
+    const [userSnap, employerSnap] = await Promise.all([userRef.get(), employerRef.get()]);
+    if (!userSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "User profile not found.");
+    }
+    const userData = (userSnap.data() || {}) as Record<string, unknown>;
+    const currentRole = asNonEmptyString(
+      userData.role,
+      userData.userRole,
+      userData.userType
+    )?.toLowerCase() || "";
+    if (currentRole === "owner" || currentRole === "admin" || currentRole === "support") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Staff accounts cannot enroll as employers from the app."
+      );
+    }
+    const now = admin.firestore.Timestamp.now();
+    const displayName = asNonEmptyString(userData.name, context.auth?.token?.name) || organizationName;
+    const alreadyEmployer = currentRole === "employer" && employerSnap.exists;
+    const batch = db.batch();
+    batch.set(userRef, {
+      role: "employer",
+      userRole: "employer",
+      userType: "employer",
+      organizationName,
+      companyName: organizationName,
+      updatedAt: now,
+    }, {merge: true});
+    batch.set(employerRef, {
+      uid,
+      organizationName,
+      contactEmail: email || null,
+      description: description || null,
+      profileCompleted: false,
+      createdAt: employerSnap.exists ? (employerSnap.get("createdAt") || now) : now,
+      updatedAt: now,
+      lastUpdatedAt: now,
+    }, {merge: true});
+    await batch.commit();
+    return {
+      success: true,
+      alreadyEnrolled: alreadyEmployer,
+      role: "employer",
+      organizationName,
+      displayName,
+    };
+  });
+
+/**
  * Atomically enrolls the signed-in member as an organizer: sets users.role and
  * creates organizers/{uid}. Client Firestore role elevation is blocked by rules.
  */
