@@ -19,6 +19,11 @@ import {
   registerCurrentProviderRailResultHandler,
   sendSwiftTransferInvoiceEmailOnce,
 } from "./legacyDeployedFunctions/index.js";
+import {
+  hasPendingMobileMoneyRoute,
+  mobileMoneyRecipientVerificationFields,
+  shouldRejectMobileMoneyTransferOnResolveOutage,
+} from "./transferRecipientSafety.js";
 // These names preserve deployed v1 function identities recovered after the
 // accidental source deletion. Keep the exports explicit so retired functions
 // are not recreated by a future deployment.
@@ -10245,11 +10250,12 @@ const runBeneficiaryVerificationDecision = async (params: {
         provider.providerAccountName = null;
         provider.nameMatchScore = null;
         provider.rawStatus = AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS;
-        // NG/GH support account-name enquiry. A resolve outage there is not the
-        // documented "name lookup unavailable" 400 — do not send until resolve works
-        // (unless the caller is explicitly collecting/confirming the name).
-        if (afriexMobileMoneySupportsNameEnquiry(countryCode) &&
-          params.allowProviderNameOverride !== true) {
+        // Transfer/send must fail closed on resolve outage for every corridor.
+        // Recipient registration may continue and persist a pending draft only.
+        if (shouldRejectMobileMoneyTransferOnResolveOutage({
+          accountRouteVerified: false,
+          isRecipientRegistration: params.allowProviderNameOverride === true,
+        })) {
           return {
             status: "REJECTED",
             canProceed: false,
@@ -10261,23 +10267,7 @@ const runBeneficiaryVerificationDecision = async (params: {
             aml,
           };
         }
-        if (params.allowProviderNameOverride === true) {
-          functions.logger.warn("Afriex resolver unavailable; registering catalog-confirmed mobile money route", {
-            country: params.prepared.countryCanonical,
-            institutionCode: resolved.institutionCode,
-          });
-          return {
-            status: "APPROVED",
-            canProceed: true,
-            matchLevel: "PHONE_ONLY",
-            reasonCode: "VERIFIED_CATALOG_ROUTE_PROVIDER_RESOLVE_UNAVAILABLE",
-            reasonMessage: "The recipient's name can't be looked up for this country, but the country and provider are supported. " +
-              "Confirm the recipient's name with them before saving. The number is checked again when money is sent.",
-            provider,
-            aml,
-          };
-        }
-        functions.logger.warn("Afriex name lookup unavailable; approving catalog-confirmed mobile money transfer route", {
+        functions.logger.warn("Afriex resolver unavailable; registering pending mobile money recipient", {
           country: params.prepared.countryCanonical,
           institutionCode: resolved.institutionCode,
         });
@@ -10285,9 +10275,9 @@ const runBeneficiaryVerificationDecision = async (params: {
           status: "APPROVED",
           canProceed: true,
           matchLevel: "PHONE_ONLY",
-          reasonCode: "VERIFIED_CATALOG_ROUTE_PROVIDER_RESOLVE_UNAVAILABLE",
-          reasonMessage: "The country and mobile money provider are supported. " +
-            "The recipient's number is checked when the payout is created.",
+          reasonCode: "PENDING_CATALOG_ROUTE_PROVIDER_RESOLVE_UNAVAILABLE",
+          reasonMessage: "The country and provider look supported, but Afriex could not confirm the number right now. " +
+            "The recipient will be saved as pending until provider route resolution succeeds.",
           provider,
           aml,
         };
@@ -13946,30 +13936,10 @@ const hasServerIssuedBeneficiaryProof = (stored: Record<string, unknown>): boole
   // when a recipient predates the newer client-side confirmation audit fields.
   const hasCanonicalServerIdentityProof =
     isServerMarkedVerified && verifiedStatus && hasServerRouteIdentity;
-  // Resolver outages can leave an older customer-confirmed draft. It must not
-  // be reused for a funded payout until a current provider check succeeds.
-  // Countries without mobile money name enquiry never return a resolved route;
-  // their number is validated when the payout is created.
-  if (
-    type === "MOBILE_MONEY" &&
-    String(stored.providerRouteValidation || "").trim().toUpperCase() ===
-      "PENDING_AFRIEX_PAYOUT_VALIDATION"
-  ) {
-    const pendingRouteCountry = (() => {
-      try {
-        return resolveTransferCountry(asNonEmptyString(
-          stored.country,
-          stored.destinationCountry,
-          stored.recipientCountry,
-          stored.countryCode
-        )).iso2;
-      } catch {
-        return null;
-      }
-    })();
-    if (!pendingRouteCountry || afriexMobileMoneySupportsNameEnquiry(pendingRouteCountry)) {
-      return false;
-    }
+  // Resolver outages leave pending drafts. Never reuse them for quote/send
+  // until a current provider resolve succeeds for every MM corridor.
+  if (hasPendingMobileMoneyRoute(stored)) {
+    return false;
   }
   if (hasCanonicalServerIdentityProof) return true;
   // Owners can edit route fields on their saved recipients. A stored identity
@@ -14230,6 +14200,12 @@ const verifyBeneficiaryForServerSave = async (
     }
     const confirmationSource = resolved.accountNameVerified ?
       "AFRIEX_NAME_ENQUIRY" : "CUSTOMER_CONFIRMED_NAME";
+    const nowMs = Date.now();
+    const verificationFields = mobileMoneyRecipientVerificationFields({
+      accountRouteVerified: resolved.accountRouteVerified,
+      accountNameVerified: resolved.accountNameVerified,
+      nowMs,
+    });
     stored = {
       name: storedRecipientName,
       phone: resolvedRecipientPhone,
@@ -14237,8 +14213,7 @@ const verifyBeneficiaryForServerSave = async (
       country: countryInput,
       accountLast4: resolvedRecipientPhone.slice(-4),
       type: "MOBILE_MONEY",
-      verificationStatus: resolved.accountNameVerified ?
-        "VERIFIED_AFRIEX_NAME_CONFIRMED" : "VERIFIED_AFRIEX_ROUTE_CUSTOMER_CONFIRMED",
+      verificationStatus: verificationFields.verificationStatus,
       isAppUser: false,
       mobileNumber: resolvedRecipientPhone,
       accountNumber: resolvedRecipientPhone,
@@ -14252,14 +14227,13 @@ const verifyBeneficiaryForServerSave = async (
       invoiceReference: null,
       providerResolvedName: resolved.accountNameVerified ? resolved.recipientName : null,
       accountNameVerified: resolved.accountNameVerified,
-      accountRouteVerified: resolved.accountRouteVerified,
-      providerRouteValidation: resolved.accountRouteVerified ?
-        "AFRIEX_RESOLVED" : "PENDING_AFRIEX_PAYOUT_VALIDATION",
+      accountRouteVerified: verificationFields.accountRouteVerified,
+      providerRouteValidation: verificationFields.providerRouteValidation,
       recipientDetailsConfirmed: true,
-      isVerified: true,
+      isVerified: verificationFields.isVerified,
       recipientNameConfirmationSource: confirmationSource,
-      recipientNameConfirmedAtMs: Date.now(),
-      providerVerifiedAtMs: Date.now(),
+      recipientNameConfirmedAtMs: nowMs,
+      providerVerifiedAtMs: verificationFields.providerVerifiedAtMs,
     };
   } else if (type === "BANK_ACCOUNT") {
     const country = assertTransferDestinationCorridor("BANK", countryInput);
@@ -14843,6 +14817,11 @@ export const refreshSavedBeneficiaryVerification = functions.runWith({enforceApp
             "Afriex returned a different recipient name. Add the recipient again and confirm the current details."
           );
         }
+        const verificationFields = mobileMoneyRecipientVerificationFields({
+          accountRouteVerified: resolved.accountRouteVerified,
+          accountNameVerified: resolved.accountNameVerified,
+          nowMs,
+        });
         refreshed = {
           name: resolved.accountNameVerified ? resolved.recipientName : storedName,
           phone: recipientPhone,
@@ -14850,8 +14829,7 @@ export const refreshSavedBeneficiaryVerification = functions.runWith({enforceApp
           country: countryInput,
           accountLast4: recipientPhone.slice(-4),
           type: "MOBILE_MONEY",
-          verificationStatus: resolved.accountNameVerified ?
-            "VERIFIED_AFRIEX_NAME_CONFIRMED" : "VERIFIED_AFRIEX_ROUTE_CUSTOMER_CONFIRMED",
+          verificationStatus: verificationFields.verificationStatus,
           isAppUser: false,
           mobileNumber: recipientPhone,
           accountNumber: recipientPhone,
@@ -14865,15 +14843,14 @@ export const refreshSavedBeneficiaryVerification = functions.runWith({enforceApp
           invoiceReference: null,
           providerResolvedName: resolved.accountNameVerified ? resolved.recipientName : null,
           accountNameVerified: resolved.accountNameVerified,
-          accountRouteVerified: resolved.accountRouteVerified,
-          providerRouteValidation: resolved.accountRouteVerified ?
-            "AFRIEX_RESOLVED" : "PENDING_AFRIEX_PAYOUT_VALIDATION",
+          accountRouteVerified: verificationFields.accountRouteVerified,
+          providerRouteValidation: verificationFields.providerRouteValidation,
           recipientDetailsConfirmed: true,
-          isVerified: true,
+          isVerified: verificationFields.isVerified,
           recipientNameConfirmationSource: resolved.accountNameVerified ?
             "AFRIEX_NAME_ENQUIRY" : "CUSTOMER_CONFIRMED_NAME",
           recipientNameConfirmedAtMs: nowMs,
-          providerVerifiedAtMs: nowMs,
+          providerVerifiedAtMs: verificationFields.providerVerifiedAtMs,
         };
       } else if (type === "BANK_ACCOUNT") {
         const country = assertTransferDestinationCorridor("BANK", countryInput);
@@ -18301,6 +18278,11 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
       const accountNameVerified = !!providerResolvedName;
       const providerRouteResolvePending =
         provider.rawStatus === AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS;
+      const verificationFields = mobileMoneyRecipientVerificationFields({
+        accountRouteVerified: !providerRouteResolvePending,
+        accountNameVerified,
+        nowMs,
+      });
       const recipient: Record<string, unknown> = {
         name: recipientName,
         phone,
@@ -18309,8 +18291,7 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
         currency: resolveQuoteRecipientCurrency("MOBILE_MONEY", route.country),
         accountLast4: phone.slice(-4),
         type: "MOBILE_MONEY",
-        verificationStatus: accountNameVerified ?
-          "VERIFIED_AFRIEX_NAME_CONFIRMED" : "VERIFIED_AFRIEX_ROUTE_CUSTOMER_CONFIRMED",
+        verificationStatus: verificationFields.verificationStatus,
         isAppUser: false,
         mobileNumber: phone,
         accountNumber: phone,
@@ -18324,15 +18305,14 @@ export const applyApprovedBeneficiaryVerification = functions.runWith({enforceAp
         invoiceReference: null,
         providerResolvedName: providerResolvedName || null,
         accountNameVerified,
-        accountRouteVerified: !providerRouteResolvePending,
-        providerRouteValidation: providerRouteResolvePending ?
-          "PENDING_AFRIEX_PAYOUT_VALIDATION" : "AFRIEX_RESOLVED",
+        accountRouteVerified: verificationFields.accountRouteVerified,
+        providerRouteValidation: verificationFields.providerRouteValidation,
         recipientDetailsConfirmed: true,
-        isVerified: true,
+        isVerified: verificationFields.isVerified,
         recipientNameConfirmationSource: accountNameVerified ?
           "AFRIEX_NAME_ENQUIRY" : "CUSTOMER_CONFIRMED_NAME",
         recipientNameConfirmedAtMs: nowMs,
-        providerVerifiedAtMs: nowMs,
+        providerVerifiedAtMs: verificationFields.providerVerifiedAtMs,
         registrationVerificationId: verificationId,
         createdAt: beneficiarySnap.exists ? beneficiarySnap.get("createdAt") || now : now,
         updatedAt: now,
