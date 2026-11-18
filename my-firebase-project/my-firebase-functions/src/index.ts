@@ -6738,16 +6738,15 @@ interface DeleteOrganizerEventRequest {
 // while an unused event can be removed with its organizer dashboard mirror.
 export const deleteOrganizerEvent = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
-    if (!context.auth?.uid) {
-      throw new functions.https.HttpsError("unauthenticated", "You must be logged in to manage this event.");
-    }
+    const organizerId = await assertAccountVerified(
+      context,
+      "Verify your email or phone before managing events."
+    );
 
     const eventId = asNonEmptyString((data as DeleteOrganizerEventRequest | undefined)?.eventId);
     if (!eventId) {
       throw new functions.https.HttpsError("invalid-argument", "Missing required field: eventId.");
     }
-
-    const organizerId = context.auth.uid;
     const eventRef = db.collection("events").doc(eventId);
     const applicationsRef = eventRef.collection("applications");
     const [eventSnapshot, applicationSnapshot, linkedSessions, sourceSessions] = await Promise.all([
@@ -7054,11 +7053,10 @@ const takeEventSeatUpdate = (
 
 export const applyForEvent = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
-    if (!context.auth?.uid) {
-      throw new functions.https.HttpsError("unauthenticated", "You must be logged in to apply.");
-    }
-
-    const userId = context.auth.uid;
+    const userId = await assertAccountVerified(
+      context,
+      "Verify your email or phone before applying to an event."
+    );
     const request = data as ApplyForEventRequest;
     const eventId = String(request?.eventId || "").trim();
     if (!eventId) {

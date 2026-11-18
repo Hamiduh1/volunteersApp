@@ -119,10 +119,6 @@ service cloud.firestore {
         && request.resource.data.savedAt == request.time;
     }
 
-    function isOrganizer() {
-      return exists(/databases/$(database)/documents/organizers/$(request.auth.uid));
-    }
-
     // Auth emailVerified OR profile phoneVerified (mirrors assertAccountVerified).
     function isAccountVerified() {
       return isSignedIn() && (
@@ -135,6 +131,14 @@ service cloud.firestore {
           )
         )
       );
+    }
+
+    // Organizer privileges require a verified account, users.role=organizer, and
+    // organizers/{uid} created only via enrollAsOrganizer (client create denied).
+    function isOrganizer() {
+      return isAccountVerified()
+        && exists(/databases/$(database)/documents/organizers/$(request.auth.uid))
+        && signedInUserHasAnyRole(['organizer']);
     }
 
     // Employer privileges require a verified account, users.role=employer, and
@@ -2145,11 +2149,14 @@ service cloud.firestore {
     // --- ORGANIZERS ---
     match /organizers/{organizerId} {
       allow read: if isSignedIn();
-      // walletTransfers are server-authoritative (Cloud Function createOrganizerWalletTransfer + Admin SDK).
-      allow create: if isOwner(organizerId) &&
-        !request.resource.data.keys().hasAny(['walletTransfers', 'organizerWalletTransfers', 'walletUpdatedAt']);
-      allow update: if isOwner(organizerId) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['walletTransfers', 'organizerWalletTransfers', 'walletUpdatedAt']);
+      // Create only via enrollAsOrganizer (Admin SDK). Stops unverified self-grant.
+      // walletTransfers remain server-authoritative (createOrganizerWalletTransfer).
+      allow create: if false;
+      allow update: if isOwner(organizerId)
+        && isAccountVerified()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'walletTransfers', 'organizerWalletTransfers', 'walletUpdatedAt'
+        ]);
       allow delete: if false;
     }
 
