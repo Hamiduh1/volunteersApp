@@ -3413,26 +3413,9 @@ service cloud.firestore {
 
     match /marketplace_items/{itemId} {
       allow read: if isSignedIn();
-      // Commerce fields (buyerId, sold*, stripe*) and sort keys stay server-owned, so creates use an allowlist.
-      allow create: if isSignedIn()
-        && request.resource.data.keys().hasOnly([
-          'title', 'description', 'price', 'category', 'condition', 'sellerName', 'sellerId', 'sellerPhone',
-          'imageUrls', 'media', 'locationName', 'countryCode', 'latitude', 'longitude', 'status', 'timestamp'
-        ])
-        && request.resource.data.sellerId == request.auth.uid
-        && request.resource.data.price is number
-        && request.resource.data.price > 0
-        && request.resource.data.price <= 50000
-        && request.resource.data.status == 'AVAILABLE'
-        && request.resource.data.timestamp == request.time
-        && request.resource.data.get('sellerName', '') is string
-        && request.resource.data.get('sellerName', '').size() <= 120
-        && request.resource.data.get('countryCode', '') is string
-        && request.resource.data.get('countryCode', '').size() <= 8
-        && marketplaceListingTextValid(request.resource.data)
-        && marketplaceConditionValid(request.resource.data)
-        && marketplaceListingCreateMediaValid(request.resource.data, request.auth.uid)
-        && marketplaceMediaListValid(request.resource.data.media, request.auth.uid);
+      // Listings are created only by the createMarketplaceListing callable (seller cap, Stripe Connect
+      // readiness, location rounding and phone consent are enforced server-side).
+      allow create: if false;
       // Sellers may edit listing copy/media only while the listing is still open.
       // Commerce fields (status, sold*, reserved*) are server-owned via Cloud Functions.
       allow update: if isSignedIn()
@@ -3440,6 +3423,17 @@ service cloud.firestore {
         && request.resource.data.sellerId == resource.data.sellerId
         && (isSafeMarketplaceItemPatch() || isSafeMarketplaceItemSoftDelete());
       allow delete: if false;
+    }
+
+    // Private buyer/seller order projection written by Cloud Functions (finalizeStripeCommerceOrder and the
+    // marketplace order workflow callables). Listings never carry the buyer.
+    match /marketplace_orders/{orderId} {
+      allow read: if isSignedIn() && (
+        resource.data.buyerId == request.auth.uid ||
+        resource.data.sellerId == request.auth.uid ||
+        isPlatformAdmin()
+      );
+      allow create, update, delete: if false;
     }
 
     // --- GALLERY UPLOADS ---

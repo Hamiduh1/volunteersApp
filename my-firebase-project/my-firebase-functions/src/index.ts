@@ -3573,6 +3573,379 @@ export const requestMarketplacePurchase = functions.runWith({enforceAppCheck: tr
     });
   });
 
+// =============================================================================
+// MARKETPLACE LISTINGS + POST-PAYMENT ORDER WORKFLOW
+// =============================================================================
+
+/** Private buyer/seller order projection. Listings are public to every member, so buyers only live here. */
+const marketplaceOrders = db.collection("marketplace_orders");
+
+const MARKETPLACE_MAX_OPEN_LISTINGS = 3;
+const MARKETPLACE_OPEN_LISTING_STATUSES = ["AVAILABLE", "ACTIVE", "OPEN"];
+const MARKETPLACE_CONDITIONS = ["NEW", "LIKE_NEW", "GOOD", "FAIR"];
+const MARKETPLACE_MAX_MEDIA = 20;
+const MARKETPLACE_HELP_REASONS = ["NOT_RECEIVED", "CANCEL", "OTHER"];
+
+const marketplaceOrderStatus = (order: Record<string, unknown>): string =>
+  String(order.status || "").trim().toUpperCase();
+
+/**
+ * @param {Record<string, unknown>} item marketplace_items document data.
+ * @return {string} First listing image URL, or an empty string when there is none.
+ */
+const marketplaceFirstImageUrl = (item: Record<string, unknown>): string => {
+  if (Array.isArray(item.imageUrls)) {
+    const first = item.imageUrls.find((url) => typeof url === "string" && url.trim().length > 0);
+    if (typeof first === "string") return first.trim();
+  }
+  if (Array.isArray(item.media)) {
+    for (const entry of item.media) {
+      const row = (entry || {}) as Record<string, unknown>;
+      const type = String(row.type || "image").toLowerCase();
+      const url = asNonEmptyString(row.url);
+      if (url && type === "image") return url;
+    }
+  }
+  return "";
+};
+
+/**
+ * Creates a marketplace listing. Clients can no longer write marketplace_items directly, so the server owns
+ * the seller cap, Stripe Connect readiness, media ownership, location rounding and phone consent.
+ */
+export const createMarketplaceListing = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in to post a listing.");
+    }
+    const sellerId = context.auth.uid;
+    const input = (data || {}) as Record<string, unknown>;
+
+    const title = asNonEmptyString(input.title);
+    if (!title || title.length > 200) {
+      throw new functions.https.HttpsError("invalid-argument", "A title up to 200 characters is required.");
+    }
+    const description = asNonEmptyString(input.description);
+    if (!description || description.length > 8000) {
+      throw new functions.https.HttpsError("invalid-argument", "A description up to 8000 characters is required.");
+    }
+    const rawPrice = Number(input.price);
+    if (!Number.isFinite(rawPrice) || rawPrice <= 0) {
+      throw new functions.https.HttpsError("invalid-argument", "Price must be greater than zero.");
+    }
+    if (rawPrice > 50000) {
+      throw new functions.https.HttpsError("invalid-argument", "Price exceeds the maximum allowed ($50,000).");
+    }
+    const price = roundMoney(rawPrice);
+    if (price <= 0) {
+      throw new functions.https.HttpsError("invalid-argument", "Price must be greater than zero.");
+    }
+    const category = asNonEmptyString(input.category) || "Other";
+    if (category.length > 60) {
+      throw new functions.https.HttpsError("invalid-argument", "Category is too long.");
+    }
+    let condition: string | null = null;
+    const rawCondition = asNonEmptyString(input.condition);
+    if (rawCondition) {
+      condition = rawCondition.toUpperCase().replace(/[\s-]+/g, "_");
+      if (!MARKETPLACE_CONDITIONS.includes(condition)) {
+        throw new functions.https.HttpsError("invalid-argument", "Condition must be NEW, LIKE_NEW, GOOD or FAIR.");
+      }
+    }
+
+    // Media: every URL must be an object this seller uploaded into marketplace_images/{uid}/.
+    const rawMedia = Array.isArray(input.media) ? input.media as unknown[] : [];
+    const rawImageUrls = Array.isArray(input.imageUrls) ? input.imageUrls as unknown[] : [];
+    if (rawMedia.length > MARKETPLACE_MAX_MEDIA || rawImageUrls.length > MARKETPLACE_MAX_MEDIA) {
+      throw new functions.https.HttpsError("invalid-argument", `Listings can include up to ${MARKETPLACE_MAX_MEDIA} photos or videos.`);
+    }
+    const media: Array<{url: string; type: string; name?: string}> = [];
+    for (const entry of rawMedia) {
+      const row = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
+      const url = asNonEmptyString(row.url);
+      const type = String(row.type || "image").trim().toLowerCase();
+      if (!url || !ownedStorageObjectPath("marketplace_images", sellerId, url) || !["image", "video"].includes(type)) {
+        throw new functions.https.HttpsError("invalid-argument", "Listing media must be uploaded to your marketplace gallery.");
+      }
+      const name = asNonEmptyString(row.name);
+      media.push({url, type, ...(name ? {name: name.slice(0, 200)} : {})});
+    }
+    const imageUrls: string[] = [];
+    for (const raw of rawImageUrls) {
+      const url = asNonEmptyString(raw);
+      if (!url || !ownedStorageObjectPath("marketplace_images", sellerId, url)) {
+        throw new functions.https.HttpsError("invalid-argument", "Listing media must be uploaded to your marketplace gallery.");
+      }
+      imageUrls.push(url);
+    }
+    if (imageUrls.length === 0) {
+      media.filter((row) => row.type === "image").forEach((row) => imageUrls.push(row.url));
+    }
+    if (media.length === 0 && imageUrls.length > 0) {
+      imageUrls.forEach((url) => media.push({url, type: "image"}));
+    }
+    if (media.length === 0 || imageUrls.length === 0) {
+      throw new functions.https.HttpsError("invalid-argument", "Add at least one photo before posting.");
+    }
+
+    // Round BEFORE the write so an exact address is never stored (the onWrite trigger is only a safety net).
+    const rawLat = Number(input.latitude ?? 0);
+    const rawLng = Number(input.longitude ?? 0);
+    if (
+      !Number.isFinite(rawLat) || !Number.isFinite(rawLng) ||
+      Math.abs(rawLat) > 90 || Math.abs(rawLng) > 180
+    ) {
+      throw new functions.https.HttpsError("invalid-argument", "Location coordinates are invalid.");
+    }
+    const coordinates: Record<string, number> = {latitude: rawLat, longitude: rawLng};
+    Object.assign(coordinates, marketplaceLocationRoundingPatch(coordinates));
+    const locationName = (asNonEmptyString(input.locationName) || "Global").slice(0, 200);
+    const countryCode = (asNonEmptyString(input.countryCode) || "INT").slice(0, 8);
+
+    // The listing is readable by every member, so a phone is published only with explicit consent.
+    const phone = (asNonEmptyString(input.sellerPhone) || "").slice(0, 40);
+    const sharePhone = input.shareSellerPhone === true && phone.length > 0;
+
+    // Sellers must be able to get paid before a listing goes live.
+    await resolveVerifiedStripeConnectDestination(sellerId, "Seller", "MARKETPLACE");
+
+    const sellerDoc = await db.collection("users").doc(sellerId).get();
+    const sellerData = (sellerDoc.data() || {}) as Record<string, unknown>;
+    const sellerName = (
+      asNonEmptyString(sellerData.name, sellerData.username, context.auth.token?.email) || "Seller"
+    ).slice(0, 120);
+
+    const itemRef = db.collection("marketplace_items").doc();
+    await db.runTransaction(async (transaction) => {
+      const openSnap = await transaction.get(
+        db.collection("marketplace_items")
+          .where("sellerId", "==", sellerId)
+          .where("status", "in", MARKETPLACE_OPEN_LISTING_STATUSES)
+      );
+      const openCount = openSnap.docs.filter((doc) => doc.data()?.isDeleted !== true).length;
+      if (openCount >= MARKETPLACE_MAX_OPEN_LISTINGS) {
+        throw new functions.https.HttpsError(
+          "resource-exhausted",
+          `You can have up to ${MARKETPLACE_MAX_OPEN_LISTINGS} active listings. Remove or sell one before posting another.`
+        );
+      }
+      transaction.create(itemRef, {
+        title,
+        description,
+        price,
+        category,
+        ...(condition ? {condition} : {}),
+        sellerName,
+        sellerId,
+        ...(sharePhone ? {sellerPhone: phone} : {}),
+        imageUrls,
+        media,
+        locationName,
+        countryCode,
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        status: "AVAILABLE",
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+    return {itemId: itemRef.id, success: true};
+  });
+
+/**
+ * Reads a marketplace order and checks the caller's role on it.
+ * @param {string} orderId marketplace_orders document id.
+ * @param {string} uid Caller uid.
+ * @param {"buyer" | "seller"} role Required role on the order.
+ * @return {Promise<Record<string, unknown>>} Order data.
+ */
+const loadMarketplaceOrderForParty = async (
+  orderId: string,
+  uid: string,
+  role: "buyer" | "seller"
+): Promise<Record<string, unknown>> => {
+  const snap = await marketplaceOrders.doc(orderId).get();
+  if (!snap.exists) throw new functions.https.HttpsError("not-found", "Marketplace order not found.");
+  const order = (snap.data() || {}) as Record<string, unknown>;
+  const owner = role === "buyer" ? asNonEmptyString(order.buyerId) : asNonEmptyString(order.sellerId);
+  if (owner !== uid) {
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      role === "buyer" ? "Only the buyer can do this." : "Only the seller can do this."
+    );
+  }
+  return order;
+};
+
+const marketplaceOrderIdFromData = (data: unknown): string => {
+  const orderId = asNonEmptyString((data as {orderId?: unknown} | undefined)?.orderId);
+  if (!orderId) throw new functions.https.HttpsError("invalid-argument", "An order id is required.");
+  return orderId;
+};
+
+/** Seller confirms the item was handed over: PAID -> DELIVERED. */
+export const markMarketplaceOrderDelivered = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+    const uid = context.auth.uid;
+    const orderId = marketplaceOrderIdFromData(data);
+    await loadMarketplaceOrderForParty(orderId, uid, "seller");
+    const orderRef = marketplaceOrders.doc(orderId);
+    await db.runTransaction(async (transaction) => {
+      const order = ((await transaction.get(orderRef)).data() || {}) as Record<string, unknown>;
+      if (asNonEmptyString(order.sellerId) !== uid) {
+        throw new functions.https.HttpsError("permission-denied", "Only the seller can do this.");
+      }
+      const status = marketplaceOrderStatus(order);
+      if (status === "DELIVERED") return;
+      if (status !== "PAID") {
+        throw new functions.https.HttpsError("failed-precondition", `This order can't be marked delivered (${status || "unknown"}).`);
+      }
+      const now = admin.firestore.Timestamp.now();
+      transaction.set(orderRef, {
+        status: "DELIVERED",
+        fulfillmentStatus: "DELIVERED",
+        deliveredAt: now,
+        updatedAt: now,
+      }, {merge: true});
+    });
+    return {success: true, orderId, status: "DELIVERED"};
+  });
+
+/** Buyer reports a problem (not received / wants to cancel / other): PAID|DELIVERED -> HELP_REQUESTED. */
+export const requestMarketplaceOrderHelp = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+    const uid = context.auth.uid;
+    const orderId = marketplaceOrderIdFromData(data);
+    const input = (data || {}) as Record<string, unknown>;
+    const reason = String(input.reason || "").trim().toUpperCase();
+    if (!MARKETPLACE_HELP_REASONS.includes(reason)) {
+      throw new functions.https.HttpsError("invalid-argument", "Reason must be NOT_RECEIVED, CANCEL or OTHER.");
+    }
+    const message = (asNonEmptyString(input.message) || "").slice(0, 1000);
+    await loadMarketplaceOrderForParty(orderId, uid, "buyer");
+    const orderRef = marketplaceOrders.doc(orderId);
+    await db.runTransaction(async (transaction) => {
+      const order = ((await transaction.get(orderRef)).data() || {}) as Record<string, unknown>;
+      if (asNonEmptyString(order.buyerId) !== uid) {
+        throw new functions.https.HttpsError("permission-denied", "Only the buyer can do this.");
+      }
+      const status = marketplaceOrderStatus(order);
+      if (status === "HELP_REQUESTED") return;
+      if (status !== "PAID" && status !== "DELIVERED") {
+        throw new functions.https.HttpsError("failed-precondition", `Help can't be requested for this order (${status || "unknown"}).`);
+      }
+      const now = admin.firestore.Timestamp.now();
+      transaction.set(orderRef, {
+        status: "HELP_REQUESTED",
+        fulfillmentStatus: "HELP_REQUESTED",
+        previousStatus: status,
+        helpReason: reason,
+        helpMessage: message,
+        helpRequestedAt: now,
+        updatedAt: now,
+      }, {merge: true});
+    });
+    return {success: true, orderId, status: "HELP_REQUESTED"};
+  });
+
+/** Seller answers a help request: APPROVE_REFUND (Stripe refund) or DECLINE (escalates to platform review). */
+export const respondMarketplaceOrderHelp = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+      throw new functions.https.HttpsError("unauthenticated", "You must be logged in.");
+    }
+    const uid = context.auth.uid;
+    const orderId = marketplaceOrderIdFromData(data);
+    const input = (data || {}) as Record<string, unknown>;
+    const action = String(input.action || "").trim().toUpperCase();
+    if (action !== "APPROVE_REFUND" && action !== "DECLINE") {
+      throw new functions.https.HttpsError("invalid-argument", "Action must be APPROVE_REFUND or DECLINE.");
+    }
+    const note = (asNonEmptyString(input.note) || "").slice(0, 1000);
+    const order = await loadMarketplaceOrderForParty(orderId, uid, "seller");
+    const status = marketplaceOrderStatus(order);
+    if (status === "REFUNDED" && action === "APPROVE_REFUND") {
+      return {success: true, orderId, status: "REFUNDED"};
+    }
+    if (status !== "HELP_REQUESTED") {
+      throw new functions.https.HttpsError("failed-precondition", `There is no open help request on this order (${status || "unknown"}).`);
+    }
+    const orderRef = marketplaceOrders.doc(orderId);
+    const now = admin.firestore.Timestamp.now();
+    if (action === "DECLINE") {
+      await orderRef.set({
+        status: "HELP_DECLINED",
+        fulfillmentStatus: "HELP_DECLINED",
+        helpResponse: "DECLINE",
+        helpResponseNote: note,
+        helpRespondedAt: now,
+        helpRespondedBy: uid,
+        updatedAt: now,
+      }, {merge: true});
+      return {success: true, orderId, status: "HELP_DECLINED"};
+    }
+    await orderRef.set({
+      helpResponse: "APPROVE_REFUND",
+      helpResponseNote: note,
+      helpRespondedAt: now,
+      helpRespondedBy: uid,
+      updatedAt: now,
+    }, {merge: true});
+    const result = await refundPaidMarketplaceCommerceOrder(orderId, "Seller approved a refund request.");
+    return {success: true, orderId, status: "REFUNDED", stripeRefundId: result.stripeRefundId};
+  });
+
+/** Platform owner/admin settles a disputed order: REFUND (same Stripe refund as the seller path) or CLOSE. */
+export const resolveMarketplaceOrder = functions.runWith({enforceAppCheck: true})
+  .https.onCall(async (data, context) => {
+    const adminId = await assertAdminCallableAccess(context);
+    const orderId = marketplaceOrderIdFromData(data);
+    const input = (data || {}) as Record<string, unknown>;
+    const action = String(input.action || "").trim().toUpperCase();
+    if (action !== "REFUND" && action !== "CLOSE") {
+      throw new functions.https.HttpsError("invalid-argument", "Action must be REFUND or CLOSE.");
+    }
+    const note = (asNonEmptyString(input.note) || "").slice(0, 1000);
+    const orderRef = marketplaceOrders.doc(orderId);
+    const snap = await orderRef.get();
+    if (!snap.exists) throw new functions.https.HttpsError("not-found", "Marketplace order not found.");
+    const status = marketplaceOrderStatus((snap.data() || {}) as Record<string, unknown>);
+    const now = admin.firestore.Timestamp.now();
+    if (action === "REFUND") {
+      if (status === "REFUNDED") return {success: true, orderId, status: "REFUNDED"};
+      await orderRef.set({
+        resolution: "REFUND",
+        resolutionNote: note,
+        resolvedBy: adminId,
+        resolvedAt: now,
+        updatedAt: now,
+      }, {merge: true});
+      const result = await refundPaidMarketplaceCommerceOrder(orderId, note || "Platform support approved a refund.");
+      return {success: true, orderId, status: "REFUNDED", stripeRefundId: result.stripeRefundId};
+    }
+    if (status === "CLOSED") return {success: true, orderId, status: "CLOSED"};
+    if (status === "REFUNDED") {
+      throw new functions.https.HttpsError("failed-precondition", "This order was already refunded.");
+    }
+    await orderRef.set({
+      status: "CLOSED",
+      fulfillmentStatus: "CLOSED",
+      resolution: "CLOSE",
+      resolutionNote: note,
+      resolvedBy: adminId,
+      resolvedAt: now,
+      closedAt: now,
+      updatedAt: now,
+    }, {merge: true});
+    return {success: true, orderId, status: "CLOSED"};
+  });
+
 export const processPurchaseRequest = functions.firestore
   .document("purchase_requests/{requestId}")
   .onCreate(async (snap, context) => {
@@ -27046,9 +27419,18 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
         paymentFailureReason: reason,
       }, {merge: true});
     };
-    const recordBuyerReceipt = (title: string) => {
+    // Optional `docId` makes the receipt deterministic so later workflow steps (refunds) can update it;
+    // `itemId`/`resourceId` link the receipt back to the listing, garage sale or event.
+    type CommerceReceiptExtras = {docId?: string; itemId?: string; resourceId?: string};
+    const receiptLinkFields = (extras?: CommerceReceiptExtras): Record<string, string> => ({
+      kind,
+      ...(extras?.itemId ? {itemId: extras.itemId} : {}),
+      ...(extras?.resourceId ? {resourceId: extras.resourceId} : {}),
+    });
+    const recordBuyerReceipt = (title: string, extras?: CommerceReceiptExtras) => {
       if (!buyerId) return;
-      transaction.set(db.collection("users").doc(buyerId).collection("transactions").doc(), {
+      const transactions = db.collection("users").doc(buyerId).collection("transactions");
+      transaction.set(extras?.docId ? transactions.doc(extras.docId) : transactions.doc(), {
         title,
         amount: -amountUsd,
         type: "INFO",
@@ -27056,19 +27438,23 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
         timestamp: now,
         source: "STRIPE_COMMERCE_CHECKOUT",
         note: "Paid securely through Stripe. This is not an app wallet debit.",
+        ...receiptLinkFields(extras),
         ...receipt,
       });
     };
-    const recordSellerReceipt = (title: string) => {
+    const recordSellerReceipt = (title: string, extras?: CommerceReceiptExtras) => {
       if (!sellerId) return;
-      transaction.set(db.collection("users").doc(sellerId).collection("transactions").doc(), {
+      const transactions = db.collection("users").doc(sellerId).collection("transactions");
+      transaction.set(extras?.docId ? transactions.doc(extras.docId) : transactions.doc(), {
         title,
         amount: roundMoney(amountUsd - platformFeeUsd),
         type: "INFO",
-        status: "PENDING_STRIPE_PAYOUT",
+        status: "STRIPE_SETTLEMENT_PENDING",
         timestamp: now,
         source: "STRIPE_COMMERCE_DESTINATION_CHARGE",
-        note: "Settlement is managed by Stripe Connect, not an app wallet.",
+        note: "Funds go to the seller's Stripe Connect balance; Stripe pays out on the seller's schedule. " +
+          "This is not an in-app wallet payout.",
+        ...receiptLinkFields(extras),
         ...receipt,
       });
     };
@@ -27091,9 +27477,40 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
         return refundUnfulfillable("Marketplace seller changed before fulfillment.");
       }
       // Listings are readable by every member; the buyer stays on the private order doc only.
-      transaction.update(itemRef, {status: "SOLD", soldAt: now, updatedAt: now});
-      recordBuyerReceipt(`Marketplace purchase: ${asNonEmptyString(itemData.title, itemData.name) || "Item"}`);
-      recordSellerReceipt(`Marketplace sale: ${asNonEmptyString(itemData.title, itemData.name) || "Item"}`);
+      // The seller's phone is scrubbed on sale so a sold listing no longer exposes contact details to members.
+      transaction.update(itemRef, {
+        status: "SOLD",
+        soldAt: now,
+        updatedAt: now,
+        sellerPhone: admin.firestore.FieldValue.delete(),
+      });
+      const marketplaceTitle = asNonEmptyString(itemData.title, itemData.name) || "Item";
+      transaction.set(marketplaceOrders.doc(orderId), {
+        orderId,
+        itemId,
+        buyerId,
+        sellerId,
+        title: marketplaceTitle,
+        amountUsd,
+        platformFeeUsd,
+        sellerNetUsd: roundMoney(amountUsd - platformFeeUsd),
+        imageUrl: marketplaceFirstImageUrl(itemData),
+        status: "PAID",
+        fulfillmentStatus: "AWAITING_HANDOFF",
+        soldAt: now,
+        createdAt: now,
+        updatedAt: now,
+        stripeCommerceOrderId: orderId,
+        stripeCheckoutSessionId: session.id,
+        stripePaymentIntentId: stripeSessionPaymentIntentId(session),
+        paymentProvider: "STRIPE",
+      }, {merge: true});
+      recordBuyerReceipt(`Marketplace purchase: ${marketplaceTitle}`, {
+        docId: `marketplace-purchase-${orderId}`, itemId, resourceId: itemId,
+      });
+      recordSellerReceipt(`Marketplace sale: ${marketplaceTitle}`, {
+        docId: `marketplace-sale-${orderId}`, itemId, resourceId: itemId,
+      });
       if (platformFeeUsd > 0) {
         recordPlatformRevenue(transaction, {
           source: "marketplacePlatinumFee", amount: platformFeeUsd, relatedUserId: sellerId,
@@ -27119,8 +27536,8 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
         ...receipt, createdAt: now,
       }, {merge: true});
       transaction.set(saleRef, {lastStripeCheckoutAt: now, lastStripeCommerceOrderId: orderId, updatedAt: now}, {merge: true});
-      recordBuyerReceipt(`Garage sale purchase: ${asNonEmptyString(saleData.title) || "Garage sale"}`);
-      recordSellerReceipt(`Garage sale checkout: ${asNonEmptyString(saleData.title) || "Garage sale"}`);
+      recordBuyerReceipt(`Garage sale purchase: ${asNonEmptyString(saleData.title) || "Garage sale"}`, {resourceId: garageSaleId});
+      recordSellerReceipt(`Garage sale checkout: ${asNonEmptyString(saleData.title) || "Garage sale"}`, {resourceId: garageSaleId});
       if (platformFeeUsd > 0) {
         recordPlatformRevenue(transaction, {
           source: "garageSaleFee", amount: platformFeeUsd, relatedUserId: sellerId,
@@ -27256,8 +27673,8 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
         organizerNetAmount: roundMoney(amountUsd - platformFeeUsd),
       }, {merge: true});
       transaction.update(eventRef, takeEventSeatUpdate(seats, now));
-      recordBuyerReceipt(`Event registration: ${asNonEmptyString(eventDoc.data()?.title) || "Event"}`);
-      recordSellerReceipt(`Event registration: ${asNonEmptyString(eventDoc.data()?.title) || "Event"}`);
+      recordBuyerReceipt(`Event registration: ${asNonEmptyString(eventDoc.data()?.title) || "Event"}`, {resourceId: eventId});
+      recordSellerReceipt(`Event registration: ${asNonEmptyString(eventDoc.data()?.title) || "Event"}`, {resourceId: eventId});
       if (platformFeeUsd > 0) {
         recordPlatformRevenue(transaction, {
           source: "eventTicketOwnerFee", amount: platformFeeUsd, relatedUserId: organizerId,
@@ -27277,6 +27694,172 @@ const finalizeStripeCommerceOrder = async (session: Stripe.Checkout.Session): Pr
   }
 };
 
+const MARKETPLACE_REFUNDABLE_ORDER_STATUSES = ["PAID", "DELIVERED", "HELP_REQUESTED", "HELP_DECLINED"];
+
+/**
+ * Refunds a PAID marketplace order to the buyer's original payment method (seller-approved help request or
+ * platform resolution). Like destination-charge checkouts everywhere else, the transfer to the seller and the
+ * platform application fee are reversed so neither side keeps the money. On success the order mirrors,
+ * receipts and listing are updated; on failure nothing is marked refunded and an error is thrown so the
+ * caller can retry.
+ * @param {string} orderId stripe_commerce_orders / marketplace_orders document id.
+ * @param {string} reason Human-readable refund reason stored on the records and in Stripe metadata.
+ * @return {Promise<{stripeRefundId: string | null; alreadyRefunded: boolean}>} Refund outcome.
+ */
+const refundPaidMarketplaceCommerceOrder = async (
+  orderId: string,
+  reason: string
+): Promise<{stripeRefundId: string | null; alreadyRefunded: boolean}> => {
+  const commerceRef = stripeCommerceOrders.doc(orderId);
+  const marketRef = marketplaceOrders.doc(orderId);
+  const [commerceSnap, marketSnap] = await Promise.all([commerceRef.get(), marketRef.get()]);
+  const commerceOrder = (commerceSnap.data() || {}) as Record<string, unknown>;
+  const marketOrder = (marketSnap.data() || {}) as Record<string, unknown>;
+  if (!commerceSnap.exists || !marketSnap.exists || String(commerceOrder.kind || "").toUpperCase() !== "MARKETPLACE") {
+    throw new functions.https.HttpsError("not-found", "Marketplace order not found.");
+  }
+  const marketStatus = marketplaceOrderStatus(marketOrder);
+  const commerceStatus = String(commerceOrder.status || "").trim().toUpperCase();
+  if (marketStatus === "REFUNDED" && commerceStatus === "REFUNDED") {
+    return {stripeRefundId: asNonEmptyString(marketOrder.stripeRefundId) || null, alreadyRefunded: true};
+  }
+  if (!MARKETPLACE_REFUNDABLE_ORDER_STATUSES.includes(marketStatus)) {
+    throw new functions.https.HttpsError("failed-precondition", `This order can't be refunded (${marketStatus || "unknown"}).`);
+  }
+  if (commerceStatus !== "PAID" && commerceStatus !== "FULFILLED") {
+    throw new functions.https.HttpsError("failed-precondition", "This order's payment is not in a refundable state.");
+  }
+  const paymentIntentId = asNonEmptyString(marketOrder.stripePaymentIntentId, commerceOrder.stripePaymentIntentId);
+  if (!paymentIntentId) {
+    throw new functions.https.HttpsError("failed-precondition", "This order has no Stripe payment to refund.");
+  }
+  const sessionId = asNonEmptyString(commerceOrder.stripeCheckoutSessionId, marketOrder.stripeCheckoutSessionId) || orderId;
+  const buyerId = asNonEmptyString(marketOrder.buyerId, commerceOrder.buyerId);
+  const sellerId = asNonEmptyString(marketOrder.sellerId, commerceOrder.sellerId);
+  const itemId = asNonEmptyString(marketOrder.itemId);
+  const amountUsd = roundMoney(Number(marketOrder.amountUsd ?? commerceOrder.amountUsd ?? 0));
+  const title = asNonEmptyString(marketOrder.title, commerceOrder.title) || "Marketplace purchase";
+  const refundRef = stripeCommerceRefunds.doc(sessionId);
+  const now = admin.firestore.Timestamp.now();
+  const refundBase = {
+    orderId,
+    kind: "MARKETPLACE",
+    buyerId: buyerId || null,
+    stripeCheckoutSessionId: sessionId,
+    stripePaymentIntentId: paymentIntentId,
+    amountCents: Number(commerceOrder.amountCents || 0) || null,
+    reason,
+    updatedAt: now,
+  };
+
+  let refund: Stripe.Refund;
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const refundParams: Stripe.RefundCreateParams = {
+      payment_intent: paymentIntentId,
+      metadata: {stripeCommerceOrderId: orderId, reason: reason.slice(0, 450)},
+    };
+    if (intent.transfer_data?.destination) refundParams.reverse_transfer = true;
+    if ((intent.application_fee_amount || 0) > 0) refundParams.refund_application_fee = true;
+    refund = await stripe.refunds.create(refundParams, {idempotencyKey: `marketplace-order-refund-${orderId}`});
+    if (refund.status === "failed" || refund.status === "canceled") {
+      throw new Error(`Stripe refund ${refund.status}.`);
+    }
+  } catch (error) {
+    const failureReason = parseProviderErrorMessage(error);
+    functions.logger.error("Marketplace order refund failed.", {orderId, error});
+    await refundRef.set({
+      ...refundBase, status: "RECONCILIATION_REQUIRED", failureReason, createdAt: now,
+    }, {merge: true});
+    await marketRef.set({refundError: failureReason, updatedAt: admin.firestore.Timestamp.now()}, {merge: true});
+    throw new functions.https.HttpsError("failed-precondition", `The refund could not be completed: ${failureReason}`);
+  }
+
+  await refundRef.set({
+    ...refundBase,
+    status: refund.status || "pending",
+    stripeRefundId: refund.id,
+    failureReason: admin.firestore.FieldValue.delete(),
+    createdAt: now,
+  }, {merge: true});
+
+  const buyerTxRef = buyerId ? db.collection("users").doc(buyerId).collection("transactions") : null;
+  const sellerTxRef = sellerId ? db.collection("users").doc(sellerId).collection("transactions") : null;
+  await db.runTransaction(async (transaction) => {
+    const itemRef = itemId ? db.collection("marketplace_items").doc(itemId) : null;
+    const buyerReceiptRef = buyerTxRef ? buyerTxRef.doc(`marketplace-purchase-${orderId}`) : null;
+    const sellerReceiptRef = sellerTxRef ? sellerTxRef.doc(`marketplace-sale-${orderId}`) : null;
+    const [itemSnap, buyerReceiptSnap, sellerReceiptSnap] = await Promise.all([
+      itemRef ? transaction.get(itemRef) : Promise.resolve(null),
+      buyerReceiptRef ? transaction.get(buyerReceiptRef) : Promise.resolve(null),
+      sellerReceiptRef ? transaction.get(sellerReceiptRef) : Promise.resolve(null),
+    ]);
+    const stamp = admin.firestore.Timestamp.now();
+    transaction.set(commerceRef, {
+      status: "REFUNDED", stripeRefundId: refund.id, refundedAt: stamp, refundReason: reason, updatedAt: stamp,
+    }, {merge: true});
+    transaction.set(marketRef, {
+      status: "REFUNDED",
+      fulfillmentStatus: "REFUNDED",
+      stripeRefundId: refund.id,
+      refundedAt: stamp,
+      refundReason: reason,
+      refundError: admin.firestore.FieldValue.delete(),
+      updatedAt: stamp,
+    }, {merge: true});
+
+    // Reopen the listing only when it is still SOLD by this very sale (not relisted or sold again since).
+    if (itemRef && itemSnap?.exists) {
+      const item = (itemSnap.data() || {}) as Record<string, unknown>;
+      const soldAt = item.soldAt as admin.firestore.Timestamp | undefined;
+      const orderSoldAt = marketOrder.soldAt as admin.firestore.Timestamp | undefined;
+      const sameSale = !!soldAt && !!orderSoldAt && typeof soldAt.toMillis === "function" &&
+        typeof orderSoldAt.toMillis === "function" && soldAt.toMillis() === orderSoldAt.toMillis();
+      if (String(item.status || "").toUpperCase() === "SOLD" && item.isDeleted !== true && sameSale) {
+        transaction.update(itemRef, {
+          status: "AVAILABLE",
+          soldAt: admin.firestore.FieldValue.delete(),
+          updatedAt: stamp,
+        });
+      }
+    }
+
+    if (buyerTxRef && buyerReceiptRef) {
+      if (buyerReceiptSnap?.exists) {
+        transaction.set(buyerReceiptRef, {
+          status: "REFUNDED",
+          note: "Refunded to your original payment method.",
+          stripeRefundId: refund.id,
+          updatedAt: stamp,
+        }, {merge: true});
+      }
+      transaction.set(buyerTxRef.doc(`marketplace-refund-${orderId}`), {
+        title: `Refund: ${title}`,
+        amount: amountUsd,
+        type: "INFO",
+        status: "REFUNDED",
+        timestamp: stamp,
+        source: "STRIPE_COMMERCE_REFUND",
+        kind: "MARKETPLACE",
+        note: "Your payment is going back to your original payment method.",
+        ...(itemId ? {itemId, resourceId: itemId} : {}),
+        stripeCommerceOrderId: orderId,
+        stripeRefundId: refund.id,
+      }, {merge: true});
+    }
+    if (sellerReceiptRef && sellerReceiptSnap?.exists) {
+      transaction.set(sellerReceiptRef, {
+        status: "REFUNDED",
+        note: "This sale was refunded; the transfer to your Stripe Connect balance was reversed.",
+        stripeRefundId: refund.id,
+        updatedAt: stamp,
+      }, {merge: true});
+    }
+  });
+  return {stripeRefundId: refund.id, alreadyRefunded: false};
+};
+
 /**
  * Refunds a marketplace buyer whose payment arrived after the item sold or closed. Destination-charge
  * funds and the platform fee are pulled back so neither the seller nor the platform keeps the money.
@@ -27288,11 +27871,19 @@ const refundUnfulfillableMarketplaceOrder = async (session: Stripe.Checkout.Sess
   if (!orderId) return;
   const orderRef = stripeCommerceOrders.doc(orderId);
   const order = (await orderRef.get()).data() || {};
+  // Fulfillment marks unfulfillable orders REFUND_PENDING (autoRefundStatus is only set by older flows).
+  const refundPending = order.autoRefundStatus === "PENDING" ||
+    String(order.status || "").trim().toUpperCase() === "REFUND_PENDING";
   if (
     String(order.kind || "").toUpperCase() !== "MARKETPLACE" ||
-    order.autoRefundStatus !== "PENDING" ||
+    !refundPending ||
     asNonEmptyString(order.stripeCheckoutSessionId) !== session.id
   ) return;
+  // refundStripeCommerceCheckout may already have submitted this session's refund; never refund twice.
+  const priorRefund = await stripeCommerceRefunds.doc(session.id).get();
+  if (priorRefund.exists && ["pending", "succeeded", "requires_action"].includes(String(priorRefund.data()?.status || ""))) {
+    return;
+  }
   const paymentIntentId = asNonEmptyString(order.stripePaymentIntentId) || stripeSessionPaymentIntentId(session);
   const now = admin.firestore.Timestamp.now();
   if (!paymentIntentId) {
