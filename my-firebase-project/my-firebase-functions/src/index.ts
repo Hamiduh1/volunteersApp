@@ -2272,6 +2272,75 @@ const startFirstPartyMobileMoneyFeeCollection = async (params: {
   };
 };
 
+type StripeAccountControllerView = {
+  type?: string;
+  losses?: {payments?: string};
+  requirement_collection?: string;
+  stripe_dashboard?: {type?: string};
+  fees?: {payer?: string};
+};
+
+const stripeAccountController = (account: Stripe.Account): StripeAccountControllerView =>
+  ((account as unknown as {controller?: StripeAccountControllerView}).controller || {});
+
+/**
+ * Seller commerce destinations receive platform destination charges/transfers.
+ * Platforms with Managed Risk (Stripe as losses collector) reject legacy
+ * `type: "express"` creation. New accounts use controller properties that match
+ * Managed Risk Standard behavior; existing Express accounts remain usable.
+ */
+const isUsableStripeConnectDestinationAccount = (
+  account: Stripe.Account,
+  expectedLiveMode: boolean
+): boolean => {
+  const accountLivemode = (account as unknown as {livemode?: boolean}).livemode === true;
+  if (accountLivemode !== expectedLiveMode) return false;
+
+  const accountType = String((account as unknown as {type?: unknown}).type || "").toLowerCase();
+  const controller = stripeAccountController(account);
+  const controllerType = String(controller.type || "").toLowerCase();
+  const lossesPayments = String(controller.losses?.payments || "").toLowerCase();
+  const requirementCollection = String(controller.requirement_collection || "").toLowerCase();
+  const dashboardType = String(controller.stripe_dashboard?.type || "").toLowerCase();
+
+  const isManagedRiskStandard =
+    (accountType === "standard" || accountType === "none" || accountType === "") &&
+    (!controllerType || controllerType === "application") &&
+    lossesPayments === "stripe" &&
+    requirementCollection === "stripe" &&
+    dashboardType === "full";
+
+  const isLegacyExpress =
+    (accountType === "express" || dashboardType === "express") &&
+    (!controllerType || controllerType === "application");
+
+  return isManagedRiskStandard || isLegacyExpress;
+};
+
+/** AccountCreateParams for Managed Risk seller destinations (no legacy `type`). */
+const stripeConnectDestinationAccountCreateParams = (params: {
+  country: string;
+  email?: string;
+  businessType?: string;
+  metadata: Stripe.MetadataParam;
+}): Stripe.AccountCreateParams => ({
+  country: params.country,
+  email: params.email,
+  business_type: (params.businessType || "individual") as Stripe.AccountCreateParams.BusinessType,
+  controller: {
+    losses: {payments: "stripe"},
+    fees: {payer: "account"},
+    requirement_collection: "stripe",
+    stripe_dashboard: {type: "full"},
+  },
+  // Destination charges need transfers. card_payments is not required for MoR
+  // checkout and can fail account creation on some platform configurations.
+  capabilities: {
+    transfers: {requested: true},
+  },
+  metadata: params.metadata,
+});
+
 // Business-commerce settlement only. Remittance funding and provider delivery
 // routes must never call this helper or require recipient Connect onboarding.
 const resolveVerifiedStripeConnectDestination = async (
@@ -2304,17 +2373,10 @@ const resolveVerifiedStripeConnectDestination = async (
   }
 
   const expectedLiveMode = getApiKeys().stripeEnv === "live";
-  const accountLivemode = (account as unknown as {livemode?: boolean}).livemode === true;
-  const accountType = String((account as unknown as {type?: unknown}).type || "").toLowerCase();
-  const controllerType = String(
-    (account as unknown as {controller?: {type?: unknown}}).controller?.type || ""
-  ).toLowerCase();
   const transferCapability = String(account.capabilities?.transfers || "").toLowerCase();
-  const isPlatformManaged = accountType === "express" && (!controllerType || controllerType === "application");
 
   if (
-    accountLivemode !== expectedLiveMode ||
-    !isPlatformManaged ||
+    !isUsableStripeConnectDestinationAccount(account, expectedLiveMode) ||
     account.details_submitted !== true ||
     account.payouts_enabled !== true ||
     (transferCapability && transferCapability !== "active")
@@ -3504,7 +3566,19 @@ export const requestMarketplacePurchase = functions.runWith({enforceAppCheck: tr
     if (sellerId === buyerId) {
       throw new functions.https.HttpsError("failed-precondition", "You cannot buy your own item.");
     }
-    const destinationAccountId = await resolveVerifiedStripeConnectDestination(sellerId, "The seller", "MARKETPLACE");
+    let destinationAccountId: string;
+    try {
+      destinationAccountId = await resolveVerifiedStripeConnectDestination(sellerId, "The seller", "MARKETPLACE");
+    } catch (error) {
+      if (error instanceof functions.https.HttpsError && error.code === "failed-precondition") {
+        // Buyer-facing copy: listing can exist before the seller finishes Connect.
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "This seller hasn't finished payout setup yet, so checkout isn't available. Message the seller or try again later."
+        );
+      }
+      throw error;
+    }
 
     // An open checkout link is reused as-is, so re-check it against the live listing before handing it back.
     const existingOrderRef = stripeCommerceOrders.doc(stripeCommerceOrderId("MARKETPLACE", buyerId, itemId));
@@ -3611,7 +3685,8 @@ const marketplaceFirstImageUrl = (item: Record<string, unknown>): string => {
 
 /**
  * Creates a marketplace listing. Clients can no longer write marketplace_items directly, so the server owns
- * the seller cap, Stripe Connect readiness, media ownership, location rounding and phone consent.
+ * the seller cap, media ownership, location rounding and phone consent. Stripe Connect readiness is checked
+ * at checkout (`requestMarketplacePurchase`), not here — sellers may post first and finish payout setup later.
  */
 export const createMarketplaceListing = functions.runWith({enforceAppCheck: true})
   .https.onCall(async (data, context) => {
@@ -3706,8 +3781,8 @@ export const createMarketplaceListing = functions.runWith({enforceAppCheck: true
     const phone = (asNonEmptyString(input.sellerPhone) || "").slice(0, 40);
     const sharePhone = input.shareSellerPhone === true && phone.length > 0;
 
-    // Sellers must be able to get paid before a listing goes live.
-    await resolveVerifiedStripeConnectDestination(sellerId, "Seller", "MARKETPLACE");
+    // Stripe Connect is required at checkout (requestMarketplacePurchase), not at post time—
+    // same pattern as garage sales / ads: sellers can list first and finish payout setup later.
 
     const sellerDoc = await db.collection("users").doc(sellerId).get();
     const sellerData = (sellerDoc.data() || {}) as Record<string, unknown>;
@@ -23820,16 +23895,9 @@ export const createConnectAccount = functions.runWith({enforceAppCheck: true})
       let shouldReplaceExistingAccount = false;
       try {
         let existingAccount = await getStripe().accounts.retrieve(existingAccountId) as Stripe.Account;
-        const accountLivemode = ((existingAccount as unknown as {livemode?: boolean}).livemode === true);
         const accountType = ((existingAccount as unknown as {type?: string}).type || "").toLowerCase();
-        const controllerType = ((existingAccount as unknown as {controller?: {type?: string}}).controller?.type || "").toLowerCase();
-        const controllerDashboardType = ((existingAccount as unknown as {controller?: {stripe_dashboard?: {type?: string}}}).controller?.stripe_dashboard?.type || "").toLowerCase();
-        const isExpressAccount = accountType === "express" || controllerDashboardType === "express";
-        const isPlatformManaged = controllerType ? controllerType === "application" : isExpressAccount;
-        const isUsableAccount =
-          accountLivemode === expectedLiveMode &&
-          isExpressAccount &&
-          isPlatformManaged;
+        const controller = stripeAccountController(existingAccount);
+        const isUsableAccount = isUsableStripeConnectDestinationAccount(existingAccount, expectedLiveMode);
 
         if (isUsableAccount) {
           // These accounts only receive platform destination charges/transfers;
@@ -23869,13 +23937,10 @@ export const createConnectAccount = functions.runWith({enforceAppCheck: true})
         functions.logger.warn("Existing payout account is not usable; creating replacement account.", {
           userId,
           existingAccountId,
-          existingAccountLivemode: accountLivemode,
+          existingAccountLivemode: (existingAccount as unknown as {livemode?: boolean}).livemode === true,
           expectedLiveMode,
           accountType,
-          controllerType,
-          controllerDashboardType,
-          isExpressAccount,
-          isPlatformManaged,
+          controller,
         });
       } catch (error) {
         const stripeError = error as Stripe.errors.StripeError | undefined;
@@ -23929,20 +23994,20 @@ export const createConnectAccount = functions.runWith({enforceAppCheck: true})
     const email = request?.email || userData.email || undefined;
 
     try {
-      const account = await getStripe().accounts.create({
-        type: "express",
-        country,
-        email,
-        business_type: request?.businessType || "individual",
-        capabilities: {
-          transfers: {requested: true},
-        },
-        metadata: {
-          volunteersAppPurpose: connectPurpose,
-          volunteersAppCommerceService: commerceService,
-          volunteersAppUserId: userId,
-        },
-      });
+      // Do not pass legacy `type: "express"`. Managed Risk platforms reject it
+      // ("losses collector" / Accounts v1 type field). Use controller properties.
+      const account = await getStripe().accounts.create(
+        stripeConnectDestinationAccountCreateParams({
+          country,
+          email: typeof email === "string" ? email : undefined,
+          businessType: request?.businessType,
+          metadata: {
+            volunteersAppPurpose: connectPurpose,
+            volunteersAppCommerceService: commerceService,
+            volunteersAppUserId: userId,
+          },
+        })
+      );
 
       await userRef.set({
         payoutAccountId: account.id,
@@ -23992,8 +24057,19 @@ export const createConnectAccount = functions.runWith({enforceAppCheck: true})
         );
       }
 
-      if (stripeError?.message) {
-        throw new functions.https.HttpsError("failed-precondition", stripeError.message);
+      const stripeMessage = stripeError?.message || "";
+      if (
+        stripeMessage.toLowerCase().includes("legacy") &&
+        stripeMessage.toLowerCase().includes("type")
+      ) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Seller setup needs a Managed Risk Stripe account (no legacy Express type). Update the app backend and try again."
+        );
+      }
+
+      if (stripeMessage) {
+        throw new functions.https.HttpsError("failed-precondition", stripeMessage);
       }
 
       throw new functions.https.HttpsError("internal", "Could not create payout account.");
@@ -30550,17 +30626,12 @@ export const auditUserPaymentIdentitiesJob = functions.runWith({
     const describeAccount = async (uid: string, accountId: string) => {
       try {
         const account = await stripe.accounts.retrieve(accountId) as Stripe.Account;
-        const accountType = String((account as unknown as {type?: unknown}).type || "").toLowerCase();
-        const controllerType = String(
-          (account as unknown as {controller?: {type?: unknown}}).controller?.type || ""
-        ).toLowerCase();
         const transferCapability = String(account.capabilities?.transfers || "").toLowerCase();
         const livemodeMatches = (account as unknown as {livemode?: boolean}).livemode === expectedLiveMode;
         const metadataUserId = asNonEmptyString(account.metadata?.volunteersAppUserId, account.metadata?.userId);
         return {
           accountId,
-          usable: livemodeMatches &&
-            accountType === "express" && (!controllerType || controllerType === "application") &&
+          usable: isUsableStripeConnectDestinationAccount(account, expectedLiveMode) &&
             account.details_submitted === true &&
             account.payouts_enabled === true &&
             (!transferCapability || transferCapability === "active"),

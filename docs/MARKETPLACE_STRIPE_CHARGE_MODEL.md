@@ -2,11 +2,14 @@
 
 **Decision: destination charges on the platform account are intentional** for the Marketplace, and they match paid events and Seller earnings.
 
+Seller setup creates Connected Accounts with **controller properties** (`losses.payments = stripe`, Express-style dashboard replaced by Managed Risk Standard/`full` dashboard). Do **not** pass legacy `type: "express"` — Managed Risk platforms reject that Accounts v1 field.
+
 ## How the money moves
 
-1. The app calls `requestMarketplacePurchase`. The server re-reads the listing price and seller from Firestore (never from the client),
-   verifies the seller's Stripe Connect Express account (`resolveVerifiedStripeConnectDestination(..., "MARKETPLACE")`), and computes the
-   platform fee from runtime fee settings.
+1. Sellers may **post listings without Stripe Connect**. Connect is required only when a buyer starts checkout.
+2. The app calls `requestMarketplacePurchase`. The server re-reads the listing price and seller from Firestore (never from the client),
+   verifies the seller's Stripe Connect account (`resolveVerifiedStripeConnectDestination(..., "MARKETPLACE")`), and computes the
+   platform fee from runtime fee settings. If the seller has not finished setup, checkout returns a clear buyer-facing error.
 2. The platform creates a **Stripe Checkout Session** on the platform account. The PaymentIntent is created with
    `transfer_data.destination = <seller's connected account>` and `application_fee_amount = <platform fee>` (see `startStripeCommerceCheckout`).
 3. The buyer pays the platform. Stripe moves the seller share to the connected account's Stripe balance; the platform keeps the application fee.

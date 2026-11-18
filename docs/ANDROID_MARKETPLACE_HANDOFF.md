@@ -37,9 +37,13 @@ Response: `{ itemId: string, success: true }`.
 Server-enforced errors to surface in the UI:
 
 - `resource-exhausted`: seller already has 3 open listings (status `AVAILABLE`/`ACTIVE`/`OPEN`, not deleted).
-- `failed-precondition`: seller has not finished Stripe Connect payout setup for the marketplace service
-  (`resolveVerifiedStripeConnectDestination(uid, "Seller", "MARKETPLACE")`). Send them to Seller earnings onboarding first.
 - `invalid-argument`: bad title/description/price/condition/media/coordinates.
+
+**Stripe Connect is not required to post.** Same pattern as garage sales / ads: sellers may list first and finish
+Seller earnings later. Checkout (`requestMarketplacePurchase`) still calls
+`resolveVerifiedStripeConnectDestination(sellerId, ..., "MARKETPLACE")`. If the seller has not finished setup, the buyer
+gets `failed-precondition`: "This seller hasn't finished payout setup yet…". Soft-remind sellers in the post-success UI;
+do not hard-block create.
 
 `update` (edit copy/media while open) and soft-delete on `marketplace_items` are unchanged and still go through Firestore.
 
