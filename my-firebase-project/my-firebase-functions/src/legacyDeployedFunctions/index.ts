@@ -17903,12 +17903,20 @@ const runBeneficiaryVerificationDecision = async (params: {
   } catch (error) {
     provider.httpDiagnostic = extractProviderHttpDiagnostic(error);
     provider.rawStatus = "FAILED";
+    // Never surface Afriex's generic "It's not you / INTERNAL_SERVER_ERROR"
+    // page to members adding a Payment Method.
+    const temporaryResolveOutage =
+      isAfriexMobileMoneyResolveTemporarilyUnavailableError(error);
     return {
-      status: "REJECTED",
-      canProceed: false,
-      matchLevel: "MISMATCH",
-      reasonCode: "PROVIDER_PRECHECK_FAILED",
-      reasonMessage: parseProviderErrorMessage(error),
+      status: temporaryResolveOutage ? "APPROVED" : "REJECTED",
+      canProceed: temporaryResolveOutage,
+      matchLevel: temporaryResolveOutage ? "PHONE_ONLY" : "MISMATCH",
+      reasonCode: temporaryResolveOutage ?
+        "VERIFIED_PHONE_PENDING_PROVIDER_RESOLVE" :
+        "PROVIDER_PRECHECK_FAILED",
+      reasonMessage: temporaryResolveOutage ?
+        "Phone ownership and corridor checks passed. Provider destination activation is pending before this route can receive transfers." :
+        "We could not verify this mobile money destination right now. Check the country, network, and number, then try again.",
       provider,
       aml,
     };
@@ -19990,18 +19998,23 @@ const isAfriexMobileMoneyResolveCountryUnsupportedError = (error: unknown): bool
   return providerMessage.includes("COUNTRYCODE") && providerMessage.includes("MUST BE ONE OF");
 };
 
-// Afriex can return a generic 422 while its live resolver is temporarily
-// unavailable. An OTP-confirmed number may be saved in a pending state, but it
-// is never eligible for payout until the later provider destination sync works.
+// Afriex can return a generic 422 or 5xx while its live resolver is temporarily
+// unavailable ("It's not you… reach out to support" / INTERNAL_SERVER_ERROR).
+// An OTP-confirmed number may be saved in a pending state, but it is never
+// eligible for payout until the later provider destination sync works.
 const isAfriexMobileMoneyResolveTemporarilyUnavailableError = (error: unknown): boolean => {
   const diagnostic = extractProviderHttpDiagnostic(error);
-  if (Number(diagnostic?.response.status || 0) !== 422) return false;
+  const status = Number(diagnostic?.response.status || 0);
+  if (!(status === 422 || status >= 500)) return false;
   if (diagnostic?.request.method?.toUpperCase() !== "GET") return false;
   if (!diagnostic.request.url.includes("/payment-method/resolve")) return false;
 
   const providerMessage = parseProviderErrorMessage(error).trim().toUpperCase();
+  const normalized = providerMessage.replace(/[^A-Z0-9]+/g, "");
   return providerMessage.includes("INTERNAL_SERVER_ERROR") ||
-    providerMessage.includes("INTERNAL SERVER ERROR");
+    providerMessage.includes("INTERNAL SERVER ERROR") ||
+    (normalized.includes("ITSNOTYOU") && normalized.includes("REACHOUTTOSUPPORT")) ||
+    status >= 500;
 };
 
 const recordMobileMoneyHiddenFeeRevenueIfNeeded = async (
@@ -41166,7 +41179,15 @@ const syncAfriexPayoutDestinationForSavedMethod = async (params: {
         );
       }
     } catch (error) {
-      if (!isAfriexMobileMoneyResolveCountryUnsupportedError(error)) throw error;
+      // Country-unsupported and temporary Afriex resolve outages (HTTP 500 /
+      // INTERNAL_SERVER_ERROR) must not block destination provisioning when OTP
+      // ownership and the institution catalog already passed.
+      if (
+        !isAfriexMobileMoneyResolveCountryUnsupportedError(error) &&
+        !isAfriexMobileMoneyResolveTemporarilyUnavailableError(error)
+      ) {
+        throw error;
+      }
     }
     if (!resolvedInstitutionCode) {
       throw new functions.https.HttpsError(

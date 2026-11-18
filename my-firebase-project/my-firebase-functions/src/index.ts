@@ -5956,12 +5956,24 @@ type AfriexRecipientResolutionFailure = {
   message: string;
 };
 
+const extractAfriexBusinessErrorCode = (error: unknown): string => {
+  const axiosError = error && typeof error === "object" ? error as {
+    isAxiosError?: boolean;
+    response?: {data?: unknown};
+  } : null;
+  if (!axiosError?.isAxiosError) return "";
+  const body = axiosError.response?.data;
+  const root = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  return String(root["code"] || "").trim().toUpperCase();
+};
+
 const describeAfriexRecipientResolutionFailure = (
   error: unknown,
   channel: "MOBILE_MONEY" | "BANK_ACCOUNT"
 ): AfriexRecipientResolutionFailure => {
   const status = getAfriexBusinessHttpStatus(error);
   const providerMessage = extractAfriexBusinessErrorMessage(error);
+  const providerCode = extractAfriexBusinessErrorCode(error);
   const normalizedMessage = providerMessage.toLowerCase().replace(/[^a-z0-9]+/g, "");
   const railLabel = channel === "MOBILE_MONEY" ? "mobile money" : "local bank";
   const noRecipientOrFunds = " No recipient was saved and no funds moved.";
@@ -5993,10 +6005,23 @@ const describeAfriexRecipientResolutionFailure = (
         " Confirm the recipient's name with them before saving.",
     };
   }
+  // Afriex docs: GET /payment-method/resolve 500 body is
+  // { code: INTERNAL_SERVER_ERROR, error: "It's not you, it's us, please reach out to support" }
+  // and clients should retry. Do not treat ordinary 4xx validation as this outage.
+  // https://docs.afriex.com/api-reference/endpoint/payment-methods/resolve
+  // https://docs.afriex.com/api-reference/errors
+  const isRetryableResolveStatus =
+    status === null || status === 422 || (status !== null && status >= 500);
+  // Afriex docs: branch on `code` + HTTP status; wording of `error` can change.
   const isGenericProviderFailure =
-    normalizedMessage.includes("itsnotyouitsus") &&
-    normalizedMessage.includes("reachouttosupport");
-  if (isGenericProviderFailure) {
+    providerCode === "INTERNAL_SERVER_ERROR" ||
+    providerCode === "EXTERNAL_REQUEST_ERROR" ||
+    normalizedMessage.includes("internalservererror") ||
+    (
+      (normalizedMessage.includes("itsnotyouitsus") || normalizedMessage.includes("itsnotyou")) &&
+      normalizedMessage.includes("reachouttosupport")
+    );
+  if ((status !== null && status >= 500) || (isGenericProviderFailure && isRetryableResolveStatus)) {
     return {
       code: "AFRIEX_RESOLUTION_UPSTREAM_UNAVAILABLE",
       httpStatus: status,
@@ -10192,6 +10217,22 @@ const runBeneficiaryVerificationDecision = async (params: {
         provider.providerAccountName = null;
         provider.nameMatchScore = null;
         provider.rawStatus = AFRIEX_RESOLVE_UPSTREAM_UNAVAILABLE_STATUS;
+        // NG/GH support account-name enquiry. A resolve outage there is not the
+        // documented "name lookup unavailable" 400 — do not send until resolve works
+        // (unless the caller is explicitly collecting/confirming the name).
+        if (afriexMobileMoneySupportsNameEnquiry(countryCode) &&
+          params.allowProviderNameOverride !== true) {
+          return {
+            status: "REJECTED",
+            canProceed: false,
+            matchLevel: "MISMATCH",
+            reasonCode: "PROVIDER_RESOLVE_TEMPORARILY_UNAVAILABLE",
+            reasonMessage: "We cannot confirm this mobile money account right now. " +
+              "No funds moved. Please try again shortly.",
+            provider,
+            aml,
+          };
+        }
         if (params.allowProviderNameOverride === true) {
           functions.logger.warn("Afriex resolver unavailable; registering catalog-confirmed mobile money route", {
             country: params.prepared.countryCanonical,
@@ -13208,14 +13249,15 @@ const resolveAfriexMobileMoneyAccount = async (params: {
       (error.details as Record<string, unknown>).failureCode :
       null;
     // Afriex documents a 400 "account name lookup is not available" for
-    // countries without mobile-money name lookup; before Oct 20, 2026 the same
-    // case returned the generic 500. Neither says anything about the number:
-    // the provider is catalog-confirmed, the sender supplies the name, and the
-    // destination is validated again when the payout is created.
-    const noNameLookup = failureCode === "AFRIEX_NAME_LOOKUP_UNAVAILABLE" ||
-      (failureCode === "AFRIEX_RESOLUTION_UPSTREAM_UNAVAILABLE" &&
-        !afriexMobileMoneySupportsNameEnquiry(countryCode));
-    if (params.allowUpstreamOutageFallback !== false && noNameLookup) {
+    // countries without mobile-money name lookup; the same corridor historically
+    // returned a generic 500 / "It's not you" page. Neither says anything about
+    // the number: OTP already proved ownership for Payment Methods, the sender
+    // supplies the name, and the destination is validated again at payout time.
+    const outageOrNoLookup =
+      failureCode === "AFRIEX_NAME_LOOKUP_UNAVAILABLE" ||
+      failureCode === "AFRIEX_RESOLUTION_UPSTREAM_UNAVAILABLE" ||
+      failureCode === "AFRIEX_RESOLUTION_TEMPORARILY_UNAVAILABLE";
+    if (params.allowUpstreamOutageFallback !== false && outageOrNoLookup) {
       return {
         recipientName: null,
         recipientPhone: null,
@@ -13356,13 +13398,37 @@ const resolveAfriexBankAccount = async (params: {
     };
   }
 
-  const resolved = await requestAfriexPaymentMethodResolution({
-    config: params.config,
-    channel: "BANK_ACCOUNT",
-    countryCode,
-    accountNumber,
-    institutionCode: institution.institutionCode,
-  });
+  let resolved: Record<string, unknown>;
+  try {
+    resolved = await requestAfriexPaymentMethodResolution({
+      config: params.config,
+      channel: "BANK_ACCOUNT",
+      countryCode,
+      accountNumber,
+      institutionCode: institution.institutionCode,
+    });
+  } catch (error) {
+    const failureCode = error instanceof functions.https.HttpsError &&
+      error.details && typeof error.details === "object" ?
+      (error.details as Record<string, unknown>).failureCode :
+      null;
+    // Afriex docs (Oct 20): no name lookup → 400, collect the name yourself.
+    // Do not confuse that with a retryable 500 outage (fail closed below).
+    if (failureCode === "AFRIEX_NAME_LOOKUP_UNAVAILABLE") {
+      return {
+        recipientName: null,
+        recipientPhone: null,
+        institutionCode: institution.institutionCode,
+        institutionName: institution.institutionName,
+        countryCode,
+        accountNameVerified: false,
+        accountRouteVerified: true,
+      };
+    }
+    // 500 / upstream outage on NG/GH bank name enquiry: do not mark the
+    // account verified or save as a live receive route.
+    throw error;
+  }
   const returnedRecipientName = asNonEmptyString(resolved["recipientName"], resolved["accountName"]);
   const accountNameVerified = true;
   if (accountNameVerified && !returnedRecipientName) {
@@ -13669,11 +13735,14 @@ export const resolveAfriexAccount = functions.runWith({enforceAppCheck: true})
           institutionCode: asNonEmptyString(request.institutionCode) || "",
         });
       } else if (channel === "MOBILE_MONEY") {
+        // Interactive Send Money / resolve must not treat an Afriex outage as a
+        // verified route. Payment Methods add uses allowUpstreamOutageFallback.
         resolved = await resolveAfriexMobileMoneyAccount({
           config,
           countryCode: country.iso2,
           accountNumber: asNonEmptyString(request.accountNumber) || "",
           institutionCode: asNonEmptyString(request.institutionCode) || "",
+          allowUpstreamOutageFallback: false,
         });
       } else if (channel === "BANK_ACCOUNT") {
         resolved = await resolveAfriexBankAccount({
@@ -14733,6 +14802,8 @@ export const refreshSavedBeneficiaryVerification = functions.runWith({enforceApp
           countryCode: country.iso2,
           accountNumber,
           institutionCode: institution.institutionCode,
+          // Refresh must re-confirm the route; do not accept an outage fallback.
+          allowUpstreamOutageFallback: false,
         });
         const recipientPhone = resolved.recipientPhone || accountNumber;
         if (
@@ -19241,12 +19312,22 @@ const assertReadyAppUserReceiveRoute = async (params: {
 
   const config = resolveAfriexBusinessApiConfig();
   if (route === "MOBILE_MONEY") {
+    // NG/GH support name enquiry — require a live resolve before sending to a
+    // saved App User MM route. Other corridors may use catalog proof during an
+    // Afriex resolve outage; payout creation still talks to Afriex.
     const resolved = await resolveAfriexMobileMoneyAccount({
       config,
       countryCode: country.iso2,
       accountNumber,
       institutionCode,
+      allowUpstreamOutageFallback: !afriexMobileMoneySupportsNameEnquiry(country.iso2),
     });
+    if (!resolved.accountRouteVerified) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "We cannot confirm this mobile money receive route right now. Try again shortly."
+      );
+    }
     if (
       resolved.accountNameVerified &&
       normalizeBeneficiaryName(storedName) !== normalizeBeneficiaryName(resolved.recipientName || "")
@@ -28207,6 +28288,9 @@ export const addPaymentMethod = functions.runWith({enforceAppCheck: true})
           countryCode: receiveRouteCountry.iso2,
           accountNumber: payload.phoneNumber || "",
           institutionCode: receiveInstitution.institutionCode,
+          // OTP ownership already passed. Afriex resolve outages (HTTP 500 /
+          // INTERNAL_SERVER_ERROR) must not block saving the method.
+          allowUpstreamOutageFallback: true,
         });
         const enteredName = asNonEmptyString(payload.registeredName);
         if (
@@ -28220,17 +28304,31 @@ export const addPaymentMethod = functions.runWith({enforceAppCheck: true})
             "The registered name does not match the verified mobile money account. Use the name returned by the provider."
           );
         }
+        const routeConfirmed = resolvedRoute.accountRouteVerified === true;
         payload.country = receiveRouteCountry.country;
         payload.network = resolvedRoute.institutionName;
         payload.institutionCode = resolvedRoute.institutionCode;
         payload.institutionName = resolvedRoute.institutionName;
         payload.providerResolvedName = resolvedRoute.accountNameVerified ? resolvedRoute.recipientName : enteredName;
         payload.accountNameVerified = resolvedRoute.accountNameVerified;
-        payload.accountRouteVerified = resolvedRoute.accountRouteVerified;
-        payload.appUserReceiveRouteVerified = true;
+        payload.accountRouteVerified = routeConfirmed;
+        // Only mark the App User receive route live when Afriex confirmed the
+        // number+provider. Outage fallback keeps OTP proof but stays pending
+        // until syncAfriexPayoutMethods / a later resolve succeeds.
+        payload.appUserReceiveRouteVerified = routeConfirmed;
         payload.appUserReceiveRouteLabel =
           `${resolvedRoute.institutionName} • ${(payload.phoneNumber || "").slice(-4)}`;
-        payload.appUserReceiveRouteVerifiedAt = now;
+        payload.appUserReceiveRouteVerifiedAt = routeConfirmed ? now : null;
+        if (!routeConfirmed) {
+          payload.verificationStatus = "PENDING_PROVIDER_VERIFICATION";
+          payload.verificationMethod = "OTP_PENDING_AFRIEX_DESTINATION_RESOLVE";
+          payload.verificationCompletedAt = null;
+          payload.providerDestinationVerified = false;
+          payload.providerDestinationSyncStatus = "PENDING";
+          payload.providerDestinationCheckedAt = now;
+          payload.lastVerificationError =
+            "Provider destination verification is pending. This route cannot receive transfers until activation succeeds.";
+        }
       }
 
       let paymentMethodId: string;
